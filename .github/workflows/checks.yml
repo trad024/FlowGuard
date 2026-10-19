@@ -16,3 +16,14 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kustomize and kubeconform
+        run: |
+          curl -fsSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.7.1/kustomize_v5.7.1_linux_amd64.tar.gz | tar xz
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz
+      - name: Render and validate
+        run: ./kustomize build infra | ./kubeconform -strict -summary -kubernetes-version 1.31.5 -

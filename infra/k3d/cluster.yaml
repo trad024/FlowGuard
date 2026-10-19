@@ -1,0 +1,37 @@
+# FlowGuard laptop cluster: one k3s server node, no extra agents, no load balancer.
+# Unused k3s add-ons are disabled to stay inside the RAM budget.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: flowguard
+servers: 1
+agents: 0
+image: rancher/k3s:v1.31.5-k3s1
+ports:
+  # host:nodePort -> reachable on localhost without kubectl port-forward
+  - port: 9898:30898 # podinfo staging
+    nodeFilters: [server:0]
+  - port: 9899:30899 # podinfo prod
+    nodeFilters: [server:0]
+  - port: 9090:30090 # Prometheus
+    nodeFilters: [server:0]
+  - port: 9093:30093 # Alertmanager
+    nodeFilters: [server:0]
+  - port: 3000:30300 # Grafana
+    nodeFilters: [server:0]
+options:
+  k3d:
+    wait: true
+    timeout: "180s"
+    disableLoadbalancer: true
+  k3s:
+    extraArgs:
+      - arg: --disable=traefik
+        nodeFilters: [server:0]
+      - arg: --disable=metrics-server
+        nodeFilters: [server:0]
+      - arg: --disable=servicelb
+        nodeFilters: [server:0]
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true

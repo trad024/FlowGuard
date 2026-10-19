@@ -46,7 +46,7 @@ The same checks run on every push and pull request (`.github/workflows/checks.ym
 ## Status
 
 - [x] Step 0 — repository, conventions, shared data contracts and action catalog
-- [ ] Step 1 — cluster platform
+- [x] Step 1 — cluster platform (manifests and scripts; see `infra/README.md`)
 - [ ] Step 2 — canary delivery
 - [ ] Step 3 — CI pipeline and deployer
 - [ ] Step 4 — baseline mode, scenario runner, audit log

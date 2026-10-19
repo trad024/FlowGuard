@@ -14,3 +14,6 @@ The project blueprint is the reference for every decision. Key points for quick 
 | 2026-10-19 | 0 | Workflows in `.github/workflows/`, scripts in `ci/` | GitHub only runs workflows from that folder |
 | 2026-10-19 | 0 | Environments limited to `staging` and `prod` in the contracts | Matches the two namespaces |
 | 2026-10-19 | 0 | Draft gate, audit, executor and agent stubs held back until step 5 | Not part of step 0 |
+| 2026-10-19 | 1 | Plain manifests with kustomize instead of Helm charts | One less tool on Windows, every setting visible and versioned |
+| 2026-10-19 | 1 | k3s Traefik, metrics-server and service load balancer disabled; NodePorts mapped to localhost | Saves RAM; no port-forward needed |
+| 2026-10-19 | 1 | Measured cluster RAM on the team laptop: _to fill in after `check-resources.ps1`_ | Step 1 acceptance |
