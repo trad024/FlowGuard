@@ -1,4 +1,5 @@
 # FlowGuard laptop cluster: one k3s server node, no extra agents, no load balancer.
+# Without the load balancer, ports are published directly on the server node (":direct").
 # Unused k3s add-ons are disabled to stay inside the RAM budget.
 apiVersion: k3d.io/v1alpha5
 kind: Simple
@@ -7,18 +8,24 @@ metadata:
 servers: 1
 agents: 0
 image: rancher/k3s:v1.31.5-k3s1
+# Pin the API server to localhost: on Windows, k3d otherwise writes host.docker.internal
+# into the kubeconfig, which can resolve to a LAN address that kubectl cannot reach.
+kubeAPI:
+  host: "127.0.0.1"
+  hostIP: "127.0.0.1"
+  hostPort: "6550"
 ports:
   # host:nodePort -> reachable on localhost without kubectl port-forward
   - port: 9898:30898 # podinfo staging
-    nodeFilters: [server:0]
+    nodeFilters: [server:0:direct]
   - port: 9899:30899 # podinfo prod
-    nodeFilters: [server:0]
+    nodeFilters: [server:0:direct]
   - port: 9090:30090 # Prometheus
-    nodeFilters: [server:0]
+    nodeFilters: [server:0:direct]
   - port: 9093:30093 # Alertmanager
-    nodeFilters: [server:0]
+    nodeFilters: [server:0:direct]
   - port: 3000:30300 # Grafana
-    nodeFilters: [server:0]
+    nodeFilters: [server:0:direct]
 options:
   k3d:
     wait: true

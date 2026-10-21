@@ -8,15 +8,28 @@ function Check($name, [scriptblock]$test) {
     } catch { Write-Host "FAIL  $name ($($_.Exception.Message))"; $script:failed++ }
 }
 
+# Stop early with a clear message when the cluster is not up.
+try {
+    Invoke-WebRequest "http://localhost:9898/healthz" -UseBasicParsing -TimeoutSec 5 | Out-Null
+} catch {
+    Write-Host "Cluster not reachable on localhost:9898. Run .\infra\scripts\setup.ps1 first."
+    exit 1
+}
+
 Write-Host "Sending 60 requests to each podinfo so metrics exist..."
 foreach ($port in 9898, 9899) {
     1..60 | ForEach-Object { Invoke-WebRequest "http://localhost:$port/" -UseBasicParsing | Out-Null }
 }
 Start-Sleep -Seconds 35   # two scrape intervals
 
-function PromQuery($q) {
+# Returns the first sample value as a string, or $null. Indexing with [0] works whether
+# Prometheus returns one result or several (Windows PowerShell 5.1 has no .Count on a
+# single object).
+function PromValue($q) {
     $u = "http://localhost:9090/api/v1/query?query=" + [uri]::EscapeDataString($q)
-    (Invoke-RestMethod $u).data.result
+    $r = @((Invoke-RestMethod $u).data.result)
+    if ($r.Length -eq 0) { return $null }
+    return $r[0].value[1]
 }
 
 Check "podinfo staging answers"  { (Invoke-WebRequest "http://localhost:9898/healthz" -UseBasicParsing).StatusCode -eq 200 }
@@ -25,14 +38,14 @@ Check "Prometheus ready"         { (Invoke-WebRequest "http://localhost:9090/-/r
 Check "Alertmanager ready"       { (Invoke-WebRequest "http://localhost:9093/-/ready" -UseBasicParsing).StatusCode -eq 200 }
 Check "Grafana healthy"          { (Invoke-RestMethod "http://localhost:3000/api/health").database -eq "ok" }
 Check "podinfo scraped in both namespaces" {
-    (PromQuery 'count(up{app="podinfo"} == 1)')[0].value[1] -eq "2"
+    (PromValue 'count(up{app="podinfo"} == 1)') -eq "2"
 }
 Check "podinfo request metrics present" {
-    (PromQuery 'count(sum by (namespace) (http_requests_total{app="podinfo"}))')[0].value[1] -eq "2"
+    (PromValue 'count(sum by (namespace) (http_requests_total{app="podinfo"}))') -eq "2"
 }
-Check "kube-state-metrics scraped" { (PromQuery 'up{job="kube-state-metrics"}')[0].value[1] -eq "1" }
-Check "container memory metrics present" {
-    (PromQuery 'count(container_memory_working_set_bytes{container="podinfo"})').Count -gt 0
+Check "kube-state-metrics scraped" { (PromValue 'up{job="kube-state-metrics"}') -eq "1" }
+Check "container memory metrics present in both namespaces" {
+    (PromValue 'count(sum by (namespace) (container_memory_working_set_bytes{container="podinfo"}))') -eq "2"
 }
 
 Write-Host ""
