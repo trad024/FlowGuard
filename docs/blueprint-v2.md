@@ -233,8 +233,8 @@ Each step needs explicit approval before it starts. Each step ships with tests, 
 - **Commands:** PowerShell first, bash second.
 - **Division of work:**
   - Code, tests and static checks are produced and run in the assistant's workspace.
-  - Cluster runs happen on the laptop: Mohamed runs the commands and pastes the output.
-  - Mohamed commits and pushes from his own terminal.
+  - Each team member builds with a local coding session on their own laptop: it runs the cluster, tests, commits and pushes under that member's identity.
+  - After each step, an independent review (one that did not write the code) checks the pushed `dev` against this blueprint before the next step is approved.
   - Nothing counts as verified until its output has been seen.
 
 ---
