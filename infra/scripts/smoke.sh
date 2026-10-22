@@ -21,7 +21,7 @@ check "podinfo prod answers"     'curl -fs http://localhost:9899/healthz'
 check "Prometheus ready"         'curl -fs http://localhost:9090/-/ready'
 check "Alertmanager ready"       'curl -fs http://localhost:9093/-/ready'
 check "Grafana healthy"          'curl -fs http://localhost:3000/api/health | grep -q "\"ok\""'
-check "podinfo scraped in both namespaces" '[ "$(prom "count(up{app=\"podinfo\"} == 1)")" = "2" ]'
+check "podinfo scraped in both namespaces" '[ "$(prom "count(count by (namespace) (up{app=\"podinfo\"} == 1))")" = "2" ]'
 check "podinfo request metrics present"    '[ "$(prom "count(sum by (namespace) (http_requests_total{app=\"podinfo\"}))")" = "2" ]'
 check "kube-state-metrics scraped"         '[ "$(prom "up{job=\"kube-state-metrics\"}")" = "1" ]'
 check "container memory metrics present in both namespaces" \

@@ -24,13 +24,14 @@ where = ["agents"]
 include = ["flowguard*"]
 
 [tool.pytest.ini_options]
-testpaths = ["agents/tests"]
+testpaths = ["agents/tests", "evaluation/tests"]
+pythonpath = ["agents", "evaluation"]
 addopts = "-q"
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["agents"]
+src = ["agents", "evaluation"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]

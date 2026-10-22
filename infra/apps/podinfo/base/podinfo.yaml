@@ -1,22 +1,60 @@
-# Demo service. Plain Deployment in step 1; converted to an Argo Rollout in step 2.
-apiVersion: apps/v1
-kind: Deployment
+# Demo service as an Argo Rollout. Without a traffic router the canary weight is set by replica
+# counts behind the one Service, so 10 replicas make 20% and 50% exact (2 and 5 canary pods).
+# Each analysis step runs the frozen L0 template (analysis-l0.yaml), the DSO3 baseline.
+# Metrics and liveness use podinfo's separate metrics port (9797), which has none of the fault
+# middleware: a bad version's injected errors must not hide its own metrics or restart its pods.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
 metadata:
   name: podinfo
   labels:
     app: podinfo
 spec:
-  replicas: 1
+  replicas: 10
+  revisionHistoryLimit: 2
   selector:
     matchLabels:
       app: podinfo
+  strategy:
+    canary:
+      # Up to 2 extra pods while switching, never below 10 ready pods
+      maxSurge: "20%"
+      maxUnavailable: 0
+      steps:
+        - setWeight: 20
+        - pause: {duration: 30s} # canary pods take traffic before the first measurement
+        - analysis:
+            templates:
+              - templateName: podinfo-l0
+            args:
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+              - name: namespace
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.namespace
+        - setWeight: 50
+        - pause: {duration: 30s}
+        - analysis:
+            templates:
+              - templateName: podinfo-l0
+            args:
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+              - name: namespace
+                valueFrom:
+                  fieldRef:
+                    fieldPath: metadata.namespace
+        - setWeight: 100
   template:
     metadata:
       labels:
         app: podinfo
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "9898"
+        prometheus.io/port: "9797"
         prometheus.io/path: /metrics
     spec:
       containers:
@@ -26,9 +64,12 @@ spec:
             - ./podinfo
             - --port=9898
             - --level=info
+            - --port-metrics=9797
           ports:
             - name: http
               containerPort: 9898
+            - name: metrics
+              containerPort: 9797
           readinessProbe:
             httpGet:
               path: /readyz
@@ -37,7 +78,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
-              port: http
+              port: metrics
             periodSeconds: 10
           resources:
             requests:

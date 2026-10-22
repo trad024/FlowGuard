@@ -1,4 +1,5 @@
-# Everything step 1 deploys: kubectl apply -k infra
+# Everything except the Argo Rollouts controller (applied first, server-side):
+# kubectl apply -k infra
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:

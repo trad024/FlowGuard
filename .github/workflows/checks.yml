@@ -26,4 +26,9 @@ jobs:
           curl -fsSL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.7.1/kustomize_v5.7.1_linux_amd64.tar.gz | tar xz
           curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar xz
       - name: Render and validate
-        run: ./kustomize build infra | ./kubeconform -strict -summary -kubernetes-version 1.31.5 -
+        # Rollout and AnalysisTemplate schemas come from the community CRD catalog
+        run: |
+          ./kustomize build infra | ./kubeconform -strict -summary -kubernetes-version 1.31.5 \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -
+          ./kustomize build infra/argo-rollouts | ./kubeconform -strict -summary -kubernetes-version 1.31.5 -

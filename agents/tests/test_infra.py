@@ -1,21 +1,28 @@
-"""Static checks on the step 1 manifests: they keep the cluster inside the laptop budget
-and consistent with the k3d port map. They run without a cluster."""
+"""Static checks on the infra manifests: they keep the cluster inside the laptop budget, consistent
+with the k3d port map, and keep the step 2 canary and its frozen L0 analysis as approved. They run
+without a cluster."""
 
 import json
+import math
+import re
 from pathlib import Path
 
 import yaml
 
 INFRA = Path(__file__).resolve().parents[2] / "infra"
 
-# Memory limits of every workload container, summed, must leave room for k3s itself
-# (about 0.5 GB) inside the 4 GB budget (blueprint section 10).
-WORKLOAD_LIMIT_BUDGET_MIB = 1536
+# Memory limits of every workload container, summed at peak pod count (a canary in progress),
+# must leave room for k3s, containerd and the Docker VM (about 1 GB) plus a 0.5 GB margin inside
+# the 4 GB budget (blueprint section 8). Limits are ceilings: check-resources measures real use.
+WORKLOAD_LIMIT_BUDGET_MIB = 2560
+ENVIRONMENTS = ("staging", "prod")
+ARGO_ROLLOUTS = INFRA / "argo-rollouts"
 
 
 def manifests():
     for path in INFRA.rglob("*.yaml"):
-        if path.name == "kustomization.yaml" or "k3d" in path.parts:
+        # k3d is not a Kubernetes manifest; argo-rollouts is upstream plus a partial patch
+        if path.name == "kustomization.yaml" or {"k3d", "argo-rollouts"} & set(path.parts):
             continue
         for doc in yaml.safe_load_all(path.read_text()):
             if doc:
@@ -24,7 +31,7 @@ def manifests():
 
 def containers():
     for path, doc in manifests():
-        if doc["kind"] == "Deployment":
+        if doc["kind"] in ("Deployment", "Rollout"):
             for c in doc["spec"]["template"]["spec"]["containers"]:
                 yield path, doc, c
 
@@ -49,12 +56,26 @@ def test_every_container_has_a_memory_limit():
         assert "memory" in c.get("resources", {}).get("limits", {}), f"{path}: {c['name']}"
 
 
+def peak_pods(doc) -> int:
+    """Pods a workload can run at once: replicas plus the canary surge, in every environment."""
+    replicas = doc["spec"].get("replicas", 1)
+    if doc["kind"] != "Rollout":
+        return replicas
+    surge = str(doc["spec"]["strategy"]["canary"]["maxSurge"])
+    extra = math.ceil(replicas * int(surge[:-1]) / 100) if surge.endswith("%") else int(surge)
+    return (replicas + extra) * len(ENVIRONMENTS)
+
+
+def controller_patch():
+    return yaml.safe_load((ARGO_ROLLOUTS / "controller-resources.yaml").read_text())
+
+
 def test_workload_memory_fits_the_laptop_budget():
-    # podinfo runs once per environment, so it counts twice.
-    total = 0.0
-    for _, doc, c in containers():
-        copies = 2 if doc["metadata"]["name"] == "podinfo" else 1
-        total += copies * to_mib(c["resources"]["limits"]["memory"])
+    total = sum(
+        peak_pods(doc) * to_mib(c["resources"]["limits"]["memory"]) for _, doc, c in containers()
+    )
+    controller = controller_patch()["spec"]["template"]["spec"]["containers"][0]
+    total += to_mib(controller["resources"]["limits"]["memory"])
     assert total <= WORKLOAD_LIMIT_BUDGET_MIB, f"{total:.0f} MiB of limits"
 
 
@@ -94,3 +115,65 @@ def test_dashboard_is_valid_json_with_the_six_signals():
         "Memory (working set)",
         "Container restarts",
     }
+
+
+def podinfo_rollout():
+    return next(doc for _, doc in manifests() if doc["kind"] == "Rollout")
+
+
+def test_argo_rollouts_is_pinned_and_capped():
+    kust = yaml.safe_load((ARGO_ROLLOUTS / "kustomization.yaml").read_text())
+    remote = [r for r in kust["resources"] if r.startswith("https://")]
+    assert remote == [
+        "https://github.com/argoproj/argo-rollouts/releases/download/v1.10.1/install.yaml"
+    ]
+    limits = controller_patch()["spec"]["template"]["spec"]["containers"][0]["resources"]
+    assert "memory" in limits["limits"]
+
+
+def test_podinfo_is_a_canary_rollout_20_50_100_with_l0_analysis():
+    spec = podinfo_rollout()["spec"]
+    assert spec["replicas"] == 10  # option A: 20% and 50% are whole pods
+    steps = spec["strategy"]["canary"]["steps"]
+    kinds = [next(iter(step)) for step in steps]
+    assert kinds == ["setWeight", "pause", "analysis"] * 2 + ["setWeight"]
+    assert [s["setWeight"] for s in steps if "setWeight" in s] == [20, 50, 100]
+    for step in steps:
+        if "analysis" in step:
+            assert step["analysis"]["templates"] == [{"templateName": "podinfo-l0"}]
+
+
+def test_l0_thresholds_are_frozen():
+    # Changing these values changes the DSO3 baseline: update the blueprint first.
+    template = next(doc for _, doc in manifests() if doc["kind"] == "AnalysisTemplate")
+    metrics = {m["name"]: m for m in template["spec"]["metrics"]}
+    assert metrics["error-ratio-5xx"]["successCondition"].endswith("result[0] <= 0.01")
+    assert metrics["latency-p99-seconds"]["successCondition"].endswith("result[0] <= 0.5")
+    for m in metrics.values():
+        assert (m["interval"], m["count"], m["failureLimit"]) == ("30s", 4, 1)
+        query = m["provider"]["prometheus"]["query"]
+        # Canary pods only, user traffic only
+        assert 'rollouts_pod_template_hash="{{args.canary-hash}}"' in query
+        assert 'path="root"' in query
+
+
+def test_prometheus_keeps_the_canary_hash_label():
+    config = (INFRA / "monitoring" / "prometheus" / "prometheus.yaml").read_text()
+    assert re.search(
+        r"__meta_kubernetes_pod_label_rollouts_pod_template_hash\]\s+"
+        r"target_label: rollouts_pod_template_hash",
+        config,
+    )
+
+
+def test_podinfo_metrics_and_liveness_avoid_the_fault_middleware():
+    # podinfo's fault flags act on its main port; its metrics port has none of that middleware.
+    # A bad version must neither hide its own metrics nor be restarted by its liveness probe.
+    template = podinfo_rollout()["spec"]["template"]
+    container = template["spec"]["containers"][0]
+    assert template["metadata"]["annotations"]["prometheus.io/port"] == "9797"
+    assert "--port-metrics=9797" in container["command"]
+    assert container["livenessProbe"]["httpGet"]["port"] == "metrics"
+    # deploy-version replaces the whole command, so it must keep the flag
+    for script in ("deploy-version.ps1", "deploy-version.sh"):
+        assert "--port-metrics=9797" in (INFRA / "scripts" / script).read_text()

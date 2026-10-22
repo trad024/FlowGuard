@@ -3,7 +3,7 @@
 Single source of truth for FlowGuard. Every approved decision lives here. Anything not written here is not approved.
 
 - Version: v2, 2026-10-21. Supersedes the v1 PDF blueprint where they differ; v1 stays valid for everything not changed below.
-- Status: v2 decisions D1 to D13 accepted. Build position: Step 0 done; Step 1 done and verified on a team laptop (2026-10-22, commit `db24d62`): setup from zero, 9/9 smoke checks pass, cluster about 930 to 980 MiB of the 4096 MiB budget (Docker was not yet capped at 4 GB). Step 2 is next and not started.
+- Status: v2 decisions D1 to D13 accepted. Build position: Step 0 done; Step 1 done and verified on a team laptop (2026-10-22, commit `a0abaf2`): setup from zero, 9/9 smoke checks pass, cluster about 930 to 980 MiB of the 4096 MiB budget (Docker was not yet capped at 4 GB). Step 2 implemented and verified on the same laptop (2026-10-22): `check-step2.ps1` 6/6 (good version promoted 20/50/100, bad version aborted by L0 at 20%, stable kept serving, canary and stable pods in the per-request log), cluster about 1.73 GB at the canary peak. Step 2 sign-off waits on open questions 7 and 8 (section 11).
 
 ---
 
@@ -176,6 +176,21 @@ These are plotted against the L5 gate settings.
 - **Held-out protocol (D12).** One team member who does not tune agents writes the final test scenarios and seeds. They are kept outside `dev` until Step 11. Developers tune only on the dev scenarios.
 - **Fairness (v1, kept).** L0 thresholds are set to industry-style values and frozen before any agent runs. All levels see the same data. Counts are reported, not only percentages.
 
+### L0 canary baseline (DSO3), frozen 2026-10-22
+
+Set in Step 2, before any agent runs, and never tuned afterwards (fairness rule). It lives in `infra/apps/podinfo/base/analysis-l0.yaml`; a test fails if a value changes.
+
+| Setting | Value | Justification |
+|---|---|---|
+| Canary steps | 20% → 50% → 100% of 10 replicas; at 20% and 50%, a 30 s warm-up pause, then one analysis | No traffic router: the weight is the share of pods behind one Service, so 10 replicas make 20% and 50% whole pods |
+| 5xx ratio of the canary's user traffic, 1-minute rate | ≤ 1% | The 99% request success rate used in Flagger's documentation for its built-in canary check; 99% is also the most common entry-level availability target |
+| p99 latency of the canary's user traffic, 1-minute window | ≤ 500 ms | The 500 ms p99 request duration used in Flagger's documentation for its built-in canary check; 0.5 s is also a bucket boundary of podinfo's histogram |
+| Measurements | Every 30 s, 4 per analysis step; the second failed measurement in a step aborts the rollout (`failureLimit: 1`) | One failed measurement can be noise from a 1-minute rate over a few pods; two out of four is treated as a real regression |
+| No data | Counts as a failure | A canary that cannot be measured is not promoted |
+| Scope | Canary pods only (`rollouts_pod_template_hash`), path `/` only | kubelet probes and Prometheus scrapes would dilute both metrics |
+
+Known weaknesses of L0, which Release (Step 8) must beat: fixed thresholds ignore the stable version's own error rate; 1-minute rates over 2 to 5 canary pods are noisy; repeated looks at autocorrelated samples are the reason for D4.
+
 ### Statistics
 
 - 95% Wilson intervals for every rate.
@@ -195,8 +210,8 @@ Each step needs explicit approval before it starts. Each step ships with tests, 
 | Step | Content | Done when | Status |
 |---|---|---|---|
 | 0 | Repo layout, conventions, contracts, catalog | Tests pass | Committed `0e888e8` |
-| 1 | k3d cluster, podinfo ×2, monitoring stack | `setup.ps1` from zero; `smoke.ps1` passes; RAM measured ≤ 4 GB | **Done** `db24d62`: 9/9 checks, about 930 to 980 MiB. Fixes: direct port mapping, API pinned to 127.0.0.1:6550, PowerShell 5.1-safe checks |
-| 2 | Argo Rollouts; podinfo as a Rollout (20/50/100); L0 AnalysisTemplate; load generator with per-request log tagged by pod | A good version promotes, a bad one aborts under L0; per-request log is usable for DSO3 | Next |
+| 1 | k3d cluster, podinfo ×2, monitoring stack | `setup.ps1` from zero; `smoke.ps1` passes; RAM measured ≤ 4 GB | **Done** `a0abaf2`: 9/9 checks, about 930 to 980 MiB. Fixes: direct port mapping, API pinned to 127.0.0.1:6550, PowerShell 5.1-safe checks |
+| 2 | Argo Rollouts; podinfo as a Rollout (20/50/100); L0 AnalysisTemplate; load generator with per-request log tagged by pod | A good version promotes, a bad one aborts under L0; per-request log is usable for DSO3 | **Implemented**, awaiting sign-off: 6/6 checks, about 1.73 GB at the canary peak. Open: error responses not tied to a pod (Q7), test memory ceiling (Q8) |
 | 3 | CI: build, unit, optional jobs (lint, integration, SBOM, multi-arch), scans, push, `plan` job reading a model file; laptop deployer by polling | A commit reaches a staging canary with no manual step | |
 | 4 | Failure-corpus generator; scenario runner; L0 baseline for all DSOs; audit log; held-out set frozen | Every DSO has a measured L0 number on the held-out set; final targets set | |
 | 5 | Orchestrator with ablation flags L0 to L5; shared incident record; gate with calibrated confidence; executor; approval channel; stub agents | Workflows A to D run end to end with stubs; DSO6 adversarial and conflict sets pass | |
@@ -279,3 +294,8 @@ Each step needs explicit approval before it starts. Each step ships with tests, 
 4. LLM provider: NVIDIA NIM, Groq or Gemini.
 5. Approval channel: Telegram bot or Streamlit page.
 6. Re-measure RAM with Docker capped at 4 GB before the final evaluation runs.
+
+### Open questions raised in Step 2 (proposals awaiting approval)
+
+7. **Error responses are not tied to a pod in the per-request log.** podinfo's injected errors (`--random-error`) have an empty body, so the load generator logs them with `"pod": null`; DSO3's per-request comparison of canary and stable error rates needs them attributed. Proposal: the load generator adds a request id to each URL (`/?rid=...`), podinfo runs with `--level=debug` (its request log records the URI before the error middleware), and pod logs are streamed during each run and joined on the id. Alternative: accept the gap for L0 and solve it in Step 8.
+8. **Static memory-limit check.** With option A (10 replicas per namespace) the summed container limits at peak are about 2.4 GB, above the 1536 MiB the Step 1 test allowed. Proposal (implemented, not yet approved): raise the test's ceiling to 2560 MiB (4 GB minus about 1 GB for k3s and Docker minus a 0.5 GB margin) and keep measured RAM (`check-resources`) as the real acceptance criterion.

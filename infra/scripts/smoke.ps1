@@ -38,7 +38,7 @@ Check "Prometheus ready"         { (Invoke-WebRequest "http://localhost:9090/-/r
 Check "Alertmanager ready"       { (Invoke-WebRequest "http://localhost:9093/-/ready" -UseBasicParsing).StatusCode -eq 200 }
 Check "Grafana healthy"          { (Invoke-RestMethod "http://localhost:3000/api/health").database -eq "ok" }
 Check "podinfo scraped in both namespaces" {
-    (PromValue 'count(up{app="podinfo"} == 1)') -eq "2"
+    (PromValue 'count(count by (namespace) (up{app="podinfo"} == 1))') -eq "2"
 }
 Check "podinfo request metrics present" {
     (PromValue 'count(sum by (namespace) (http_requests_total{app="podinfo"}))') -eq "2"

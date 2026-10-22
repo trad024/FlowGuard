@@ -10,3 +10,6 @@ dist/
 *.db
 mlruns/
 chroma/
+
+# Load-generator logs and other evaluation outputs
+evaluation/runs/

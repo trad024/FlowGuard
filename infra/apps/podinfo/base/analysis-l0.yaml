@@ -1,0 +1,44 @@
+# L0 canary baseline (DSO3), frozen 2026-10-22. Thresholds and their justification are in
+# docs/blueprint-v2.md section 6. Do not tune them: the agents are compared against this file.
+#
+# Both metrics look only at the canary's pods (rollouts_pod_template_hash) and only at user
+# traffic on "/" (path="root"), so kubelet probes and Prometheus scrapes do not dilute them.
+# A measurement runs every 30 s, 4 times per analysis step; the second failed measurement in a
+# step aborts the rollout. No data (no canary traffic) counts as a failure, not a pass.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: podinfo-l0
+  labels:
+    app: podinfo
+    flowguard/level: L0
+spec:
+  args:
+    - name: canary-hash
+    - name: namespace
+  metrics:
+    - name: error-ratio-5xx
+      interval: 30s
+      count: 4
+      failureLimit: 1
+      successCondition: len(result) == 1 && result[0] <= 0.01
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            (
+              sum(rate(http_request_duration_seconds_count{namespace="{{args.namespace}}",app="podinfo",path="root",rollouts_pod_template_hash="{{args.canary-hash}}",status=~"5.."}[1m]))
+              or vector(0)
+            )
+            /
+            sum(rate(http_request_duration_seconds_count{namespace="{{args.namespace}}",app="podinfo",path="root",rollouts_pod_template_hash="{{args.canary-hash}}"}[1m]))
+    - name: latency-p99-seconds
+      interval: 30s
+      count: 4
+      failureLimit: 1
+      successCondition: len(result) == 1 && result[0] <= 0.5
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{namespace="{{args.namespace}}",app="podinfo",path="root",rollouts_pod_template_hash="{{args.canary-hash}}"}[1m])))
