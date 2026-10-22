@@ -3,7 +3,8 @@
 #   1. a commit under app/ runs the app pipeline to success and its image is pushed;
 #   2. the laptop deployer picks it up and starts a staging canary with no manual step;
 #   3. the canary completes under the L0 analysis (both analyses successful, image promoted);
-#   4. a commit touching only docs/ starts no app pipeline run.
+#   4. the deployer logged the deployment, and a commit touching only docs/ starts no app
+#      pipeline run.
 # It makes and pushes two small marker commits (app/ci-trigger.txt, docs/ci-trigger.txt) to dev
 # under your git identity, in two separate pushes: GitHub applies path filters to a whole push
 # and runs the workflow once, for its last commit. It starts its own deployer unless
@@ -83,6 +84,13 @@ if [ "$PROMOTED" -ne 0 ]; then
 fi
 check "canary completed under L0 (promoted, 2 successful analyses)" \
   '[ "$PROMOTED" -eq 0 ] && [ "$(grep -o Successful <<<"$RUNS" | wc -l)" -ge 2 ]'
+
+# Let the deployer finish its own wait, log the outcome and stop its load generator
+EVENTS="$ROOT/evaluation/runs/deployer-events.jsonl"
+PATTERN="\"event\": \"deploy_finished\".*\"outcome\": \"promoted\".*\"sha\": \"$APP_SHA\""
+LOGGED=1
+wait_until 'grep -q "$PATTERN" "$EVENTS"' 120 5 && LOGGED=0
+check "deployer logged the deployment of ${APP_SHA:0:7} as promoted" '[ "$LOGGED" -eq 0 ]'
 
 # 4. Docs-only commit: no app-ci run
 check "docs-only commit ${DOCS_SHA:0:7} started no app-ci run" '[ "$(run_status "$DOCS_SHA")" = null ]'
