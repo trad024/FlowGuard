@@ -1,0 +1,34 @@
+{
+  "comment": "Optional CI jobs (D2). 'order' is the fixed baseline order; 'paths' are the baseline path filters (fnmatch, '*' also matches '/'). Build, unit tests and scans are not listed here: they always run.",
+  "order": ["lint", "integration", "sbom", "multiarch"],
+  "jobs": {
+    "lint": {
+      "description": "go vet and gofmt",
+      "paths": ["app/podinfo/*.go", "app/podinfo/go.mod"]
+    },
+    "integration": {
+      "description": "Run the built image and exercise its HTTP and metrics endpoints",
+      "paths": [
+        "app/podinfo/*.go",
+        "app/podinfo/go.mod",
+        "app/podinfo/go.sum",
+        "app/podinfo/Dockerfile",
+        "app/podinfo/ui/*",
+        "ci/integration-test.sh"
+      ]
+    },
+    "sbom": {
+      "description": "SPDX software bill of materials of the image (syft)",
+      "paths": ["app/podinfo/go.mod", "app/podinfo/go.sum", "app/podinfo/Dockerfile"]
+    },
+    "multiarch": {
+      "description": "Cross-build the image for linux/amd64 and linux/arm64 (Dockerfile.xx)",
+      "paths": [
+        "app/podinfo/Dockerfile",
+        "app/podinfo/Dockerfile.xx",
+        "app/podinfo/go.mod",
+        "app/podinfo/go.sum"
+      ]
+    }
+  }
+}

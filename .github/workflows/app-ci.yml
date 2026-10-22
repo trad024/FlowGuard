@@ -1,0 +1,241 @@
+# App pipeline for the demo service (app/podinfo):
+#   plan -> build -> unit -> optional jobs -> scans -> push to GHCR (tag = commit SHA)
+# The laptop deployer polls this workflow's runs on dev and deploys each successful image to
+# the staging canary (D1: no webhooks). Agent and docs commits do not trigger it.
+#
+# Build, unit tests and scans always run. The plan job only picks which optional jobs run and in
+# what order: the committed Optimizer model by default (a run-all stub until Step 10), or the
+# DSO5 baseline (fixed order + path filters, D2) when the repo variable FLOWGUARD_CI_MODE or the
+# manual input says "baseline".
+#
+# Scans report, they do not block: the allow / review / block decision belongs to the Security
+# agent (DSO4), with its rule-based baseline measured in Step 4.
+name: app-ci
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "app/**"
+      - "ci/**"
+      - ".github/workflows/app-ci.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Plan mode
+        type: choice
+        options: [optimizer, baseline]
+        default: optimizer
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ci-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP_DIR: app/podinfo
+  IMAGE_NAME: flowguard-podinfo
+  TRIVY_IMAGE: aquasec/trivy:0.75.0
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1
+  SYFT_IMAGE: anchore/syft:v1.54.1
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      optional: ${{ steps.plan.outputs.optional }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Changed files
+        id: changed
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ] \
+             && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            git diff --name-only "$BEFORE" "$GITHUB_SHA" > changed.txt
+            echo "args=--changed-files changed.txt" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=--all-changed" >> "$GITHUB_OUTPUT"   # first push or manual run
+          fi
+      - name: Plan optional jobs
+        id: plan
+        env:
+          MODE: ${{ inputs.mode || vars.FLOWGUARD_CI_MODE || 'optimizer' }}
+        run: |
+          python3 ci/plan.py --mode "$MODE" ${{ steps.changed.outputs.args }} \
+            --github-output "$GITHUB_OUTPUT" | tee plan.json
+          { echo '### Plan'; echo '```json'; cat plan.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.APP_DIR }}
+          platforms: linux/amd64
+          build-args: REVISION=${{ github.sha }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          outputs: type=docker,dest=${{ runner.temp }}/image.tar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: image
+          path: ${{ runner.temp }}/image.tar
+          retention-days: 3
+
+  unit:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ${{ env.APP_DIR }}/go.mod
+          cache-dependency-path: ${{ env.APP_DIR }}/go.sum
+      - name: Unit tests
+        working-directory: ${{ env.APP_DIR }}
+        run: go test ./...
+
+  optional:
+    needs: [plan, unit]
+    if: needs.plan.outputs.optional != '[]'
+    runs-on: ubuntu-latest
+    name: optional (${{ matrix.job }})
+    strategy:
+      fail-fast: false
+      max-parallel: 1 # one at a time, in the planned order
+      matrix:
+        job: ${{ fromJSON(needs.plan.outputs.optional) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        if: matrix.job == 'lint'
+        with:
+          go-version-file: ${{ env.APP_DIR }}/go.mod
+          cache-dependency-path: ${{ env.APP_DIR }}/go.sum
+      - name: Lint (go vet, gofmt)
+        if: matrix.job == 'lint'
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          go vet ./...
+          unformatted="$(gofmt -l .)"
+          [ -z "$unformatted" ] || { echo "Not gofmt-formatted:"; echo "$unformatted"; exit 1; }
+      - uses: actions/download-artifact@v8
+        if: matrix.job == 'integration' || matrix.job == 'sbom'
+        with:
+          name: image
+          path: ${{ runner.temp }}
+      - name: Integration test
+        if: matrix.job == 'integration'
+        run: |
+          docker load -i "$RUNNER_TEMP/image.tar"
+          bash ci/integration-test.sh "$IMAGE_NAME:$GITHUB_SHA"
+      - name: SBOM (SPDX)
+        if: matrix.job == 'sbom'
+        run: |
+          docker run --rm -v "$RUNNER_TEMP:/work:ro" "$SYFT_IMAGE" \
+            docker-archive:/work/image.tar -o spdx-json > "$RUNNER_TEMP/sbom.spdx.json"
+      - uses: actions/upload-artifact@v7
+        if: matrix.job == 'sbom'
+        with:
+          name: sbom
+          path: ${{ runner.temp }}/sbom.spdx.json
+      - uses: docker/setup-qemu-action@v4
+        if: matrix.job == 'multiarch'
+      - uses: docker/setup-buildx-action@v4
+        if: matrix.job == 'multiarch'
+      - name: Multi-arch build (amd64, arm64)
+        if: matrix.job == 'multiarch'
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.APP_DIR }}
+          file: ${{ env.APP_DIR }}/Dockerfile.xx
+          platforms: linux/amd64,linux/arm64
+          build-args: REVISION=${{ github.sha }}
+          push: false
+
+  scans:
+    needs: [plan, unit, optional]
+    # Runs after the optional jobs whether they ran or were planned away, never without unit
+    if: always() && needs.unit.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.optional.result)
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: image
+          path: ${{ runner.temp }}
+      - name: Trivy (image vulnerabilities, HIGH and CRITICAL)
+        run: |
+          mkdir -p reports
+          docker run --rm -v "$RUNNER_TEMP:/work:ro" "$TRIVY_IMAGE" \
+            image --input /work/image.tar --severity HIGH,CRITICAL --exit-code 0 \
+            --format json --quiet > reports/trivy.json
+          python3 -c "import json; r=json.load(open('reports/trivy.json')); v=[x for t in r.get('Results',[]) for x in t.get('Vulnerabilities') or []]; print('HIGH', sum(x['Severity']=='HIGH' for x in v), 'CRITICAL', sum(x['Severity']=='CRITICAL' for x in v))" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Gitleaks (secrets in the repository files)
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" "$GITLEAKS_IMAGE" dir /repo \
+            --report-format json --report-path - --exit-code 0 --redact --no-banner \
+            > reports/gitleaks.json
+          python3 -c "import json; print('Gitleaks findings', len(json.load(open('reports/gitleaks.json'))))" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: SonarCloud
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::notice::SonarCloud skipped: no SONAR_TOKEN secret in this repository."
+            echo "SonarCloud skipped: no SONAR_TOKEN secret" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: SonarCloud scan
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_HOST_URL: https://sonarcloud.io
+        with:
+          args: >
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION || github.repository_owner }}
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY || format('{0}_{1}', github.repository_owner, github.event.repository.name) }}
+            -Dsonar.sources=app/podinfo
+            -Dsonar.exclusions=**/*_test.go
+            -Dsonar.tests=app/podinfo
+            -Dsonar.test.inclusions=**/*_test.go
+      - uses: actions/upload-artifact@v7
+        with:
+          name: scan-reports
+          path: reports/
+
+  push:
+    needs: scans
+    if: always() && needs.scans.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: image
+          path: ${{ runner.temp }}
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push ghcr.io/<owner>/flowguard-podinfo:<sha>
+        run: |
+          docker load -i "$RUNNER_TEMP/image.tar"
+          target="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE_NAME:$GITHUB_SHA"
+          docker tag "$IMAGE_NAME:$GITHUB_SHA" "$target"
+          docker push "$target"
+          echo "Pushed \`$target\`" >> "$GITHUB_STEP_SUMMARY"

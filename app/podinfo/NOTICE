@@ -1,0 +1,16 @@
+podinfo
+Copyright Stefan Prodan and the podinfo contributors.
+Licensed under the Apache License, Version 2.0 (see LICENSE in this directory).
+
+Source: https://github.com/stefanprodan/podinfo, tag 6.7.1
+Archive: https://github.com/stefanprodan/podinfo/archive/refs/tags/6.7.1.tar.gz
+         (sha256 a4d951815da389fef049fa4b7299ec139bba035ff5f53800d5c61498ee6b4cfc)
+
+Vendored into FlowGuard as the demo application that the CI pipeline builds, tests, scans and
+deploys. Kept unmodified: cmd/, pkg/, ui/, go.mod, go.sum, Dockerfile, Dockerfile.xx, Makefile,
+LICENSE, README.md, .gitignore. Not vendored: the upstream CI workflows, Helm charts, deploy/,
+kustomize/, timoni/, otel/, test/ and release-signing files.
+Changes made in FlowGuard, if any, are listed below with their date and reason.
+
+Changes:
+(none)

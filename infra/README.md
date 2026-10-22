@@ -23,6 +23,7 @@ In Docker Desktop, set Settings > Resources > Memory to about 4 GB (WSL2: `memor
 .\infra\scripts\setup.ps1             # create the cluster and deploy everything (safe to rerun)
 .\infra\scripts\smoke.ps1             # step 1 checks: services and metrics
 .\infra\scripts\check-step2.ps1       # step 2 checks: good canary promotes, bad one aborts (~8 min)
+.\infra\scripts\check-step3.ps1       # step 3 checks: app commit -> CI -> staging canary (~15-30 min)
 .\infra\scripts\check-resources.ps1   # measured RAM against the 4 GB budget
 .\infra\scripts\teardown.ps1          # delete it all
 ```
@@ -66,6 +67,22 @@ Any change to the podinfo template on a running cluster (including rerunning `se
 template changed) goes through the canary, and **the canary needs traffic**: with no requests,
 L0 has no data and aborts. Run `py evaluation\loadgen.py run` while it rolls out. A new
 cluster's first rollout goes straight to 100% without analysis.
+
+## CI to staging (step 3)
+
+```powershell
+py ci\deployer.py run      # leave running: deploys every successful app-ci run on dev to staging
+```
+
+A commit under `app/` runs `.github/workflows/app-ci.yml` (see `ci/README.md`), which pushes
+`ghcr.io/trad024/flowguard-podinfo:<sha>`. The deployer polls GitHub, then deploys that image
+with `deploy-version.ps1 good -Image ...` while it runs the load generator, so the canary goes
+20/50/100 under L0 with no manual step. `check-step3` proves it end to end: it pushes one marker
+commit under `app/` and one under `docs/` (which must not start the pipeline), then waits for
+CI and the canary. The cluster pulls the image anonymously, so the GHCR package must be public.
+
+Rerunning `setup` resets the Rollout to the upstream podinfo image; the deployer then rolls the
+newest CI image out again.
 
 ## What runs where
 

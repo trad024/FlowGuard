@@ -1,0 +1,7 @@
+{
+  "comment": "Optimizer model read by the CI plan job (D1). Stub until Step 10: it runs every optional job in the fixed order. The trained LightGBM model will replace this file.",
+  "format": 1,
+  "model": "stub-run-all",
+  "trained_on": null,
+  "policy": {"type": "run-all"}
+}
