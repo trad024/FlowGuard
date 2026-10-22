@@ -31,4 +31,6 @@ jobs:
           ./kustomize build infra | ./kubeconform -strict -summary -kubernetes-version 1.31.5 \
             -schema-location default \
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -
-          ./kustomize build infra/argo-rollouts | ./kubeconform -strict -summary -kubernetes-version 1.31.5 -
+          # Upstream CRDs: kubeconform ships no schema for CustomResourceDefinition itself
+          ./kustomize build infra/argo-rollouts | ./kubeconform -strict -summary -kubernetes-version 1.31.5 \
+            -skip CustomResourceDefinition -
