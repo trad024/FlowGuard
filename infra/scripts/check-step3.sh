@@ -5,8 +5,9 @@
 #   3. the canary completes under the L0 analysis (both analyses successful, image promoted);
 #   4. a commit touching only docs/ starts no app pipeline run.
 # It makes and pushes two small marker commits (app/ci-trigger.txt, docs/ci-trigger.txt) to dev
-# under your git identity. It starts its own deployer unless NO_DEPLOYER=1 (use that when one
-# already runs). Usage: ./infra/scripts/check-step3.sh   (needs python3)
+# under your git identity, in two separate pushes: GitHub applies path filters to a whole push
+# and runs the workflow once, for its last commit. It starts its own deployer unless
+# NO_DEPLOYER=1 (use that when one already runs). Usage: ./infra/scripts/check-step3.sh   (needs python3)
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 NAMESPACE=staging
@@ -45,11 +46,8 @@ NOTE="Touched by infra/scripts/check-step3 to test the CI path filters: $STAMP"
 printf '%s\n' "$NOTE" > app/ci-trigger.txt
 git add app/ci-trigger.txt && git commit -q -m "Step 3 check: app change ($STAMP)"
 APP_SHA="$(git rev-parse HEAD)"
-printf '%s\n' "$NOTE" > docs/ci-trigger.txt
-git add docs/ci-trigger.txt && git commit -q -m "Step 3 check: docs-only change ($STAMP)"
-DOCS_SHA="$(git rev-parse HEAD)"
 git push -q origin dev || { echo "git push failed"; exit 1; }
-echo "Pushed app commit ${APP_SHA:0:7} and docs commit ${DOCS_SHA:0:7}."
+echo "Pushed app commit ${APP_SHA:0:7}."
 
 # 1. CI for the app commit
 echo "Waiting for app-ci on ${APP_SHA:0:7}..."
@@ -57,6 +55,13 @@ RUN=""
 wait_until 'RUN="$(run_status "$APP_SHA")"; [ "$(json_get "$RUN" status)" = completed ]' "$CI_TIMEOUT" 60
 echo "      run: $(json_get "$RUN" html_url)"
 check "app commit ran app-ci to success (image pushed)" '[ "$(json_get "$RUN" conclusion)" = success ]'
+
+# Docs-only commit, in its own push; checked at the end, minutes later
+printf '%s\n' "$NOTE" > docs/ci-trigger.txt
+git add docs/ci-trigger.txt && git commit -q -m "Step 3 check: docs-only change ($STAMP)"
+DOCS_SHA="$(git rev-parse HEAD)"
+git push -q origin dev || { echo "git push failed"; exit 1; }
+echo "Pushed docs-only commit ${DOCS_SHA:0:7}."
 
 # 2-3. Deployer -> canary -> promoted under L0
 IMAGE="$IMAGE_REPO:$APP_SHA"

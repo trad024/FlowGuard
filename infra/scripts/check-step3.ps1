@@ -4,7 +4,8 @@
 #   3. the canary completes under the L0 analysis (both analyses successful, image promoted);
 #   4. a commit touching only docs/ starts no app pipeline run.
 # It makes and pushes two small marker commits (app/ci-trigger.txt, docs/ci-trigger.txt) to dev
-# under your git identity. It starts its own deployer unless -NoDeployer is given (use that when
+# under your git identity, in two separate pushes: GitHub applies path filters to a whole push
+# and runs the workflow once, for its last commit. It starts its own deployer unless -NoDeployer is given (use that when
 # one already runs). Usage: .\infra\scripts\check-step3.ps1 [-NoDeployer] [-CiTimeoutMinutes 40]
 param(
     [switch]$NoDeployer,
@@ -65,12 +66,8 @@ try {
     Invoke-Git add app/ci-trigger.txt
     Invoke-Git commit -q -m "Step 3 check: app change ($stamp)"
     $appSha = git -C $Root rev-parse HEAD
-    [IO.File]::WriteAllText((Join-Path $Root "docs\ci-trigger.txt"), $note)
-    Invoke-Git add docs/ci-trigger.txt
-    Invoke-Git commit -q -m "Step 3 check: docs-only change ($stamp)"
-    $docsSha = git -C $Root rev-parse HEAD
     Invoke-Git push -q origin dev
-    Write-Host "Pushed app commit $($appSha.Substring(0,7)) and docs commit $($docsSha.Substring(0,7))."
+    Write-Host "Pushed app commit $($appSha.Substring(0,7))."
 
     # 1. CI for the app commit
     Write-Host "Waiting for app-ci on $($appSha.Substring(0,7))..."
@@ -81,6 +78,14 @@ try {
     } ($CiTimeoutMinutes * 60) 60
     Write-Host "      run: $($run.html_url)"
     Check "app commit ran app-ci to success (image pushed)" { $done -and $run.conclusion -eq "success" }
+
+    # Docs-only commit, in its own push; checked at the end, minutes later
+    [IO.File]::WriteAllText((Join-Path $Root "docs\ci-trigger.txt"), $note)
+    Invoke-Git add docs/ci-trigger.txt
+    Invoke-Git commit -q -m "Step 3 check: docs-only change ($stamp)"
+    $docsSha = git -C $Root rev-parse HEAD
+    Invoke-Git push -q origin dev
+    Write-Host "Pushed docs-only commit $($docsSha.Substring(0,7))."
 
     # 2-3. Deployer -> canary -> promoted under L0
     $image = "$ImageRepo`:$appSha"
@@ -110,7 +115,7 @@ try {
     }
     Check "canary completed under L0 (promoted, 2 successful analyses)" { $promoted -and $ok -ge 2 }
 
-    # 4. Docs-only commit: no app-ci run
+    # 4. Docs-only commit: no app-ci run (GitHub creates runs within seconds of a push)
     Check "docs-only commit $($docsSha.Substring(0,7)) started no app-ci run" { $null -eq (RunStatus $docsSha) }
 } finally {
     if ($dep) { Stop-Process -Id $dep.Id -ErrorAction SilentlyContinue }
