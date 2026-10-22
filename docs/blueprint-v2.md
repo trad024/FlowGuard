@@ -3,7 +3,7 @@
 Single source of truth for FlowGuard. Every approved decision lives here. Anything not written here is not approved.
 
 - Version: v2, 2026-10-21. Supersedes the v1 PDF blueprint where they differ; v1 stays valid for everything not changed below.
-- Status: v2 decisions D1 to D13 accepted. Build position: Step 0 done; Step 1 done and verified on a team laptop (2026-10-22, commit `a0abaf2`): setup from zero, 9/9 smoke checks pass, cluster about 930 to 980 MiB of the 4096 MiB budget (Docker was not yet capped at 4 GB). Step 2 implemented and verified on the same laptop (2026-10-22): `check-step2.ps1` 6/6 (good version promoted 20/50/100, bad version aborted by L0 at 20%, stable kept serving, canary and stable pods in the per-request log), cluster about 1.73 GB at the canary peak. Step 2 sign-off waits on open questions 7 and 8 (section 11).
+- Status: v2 decisions D1 to D22 accepted. Build position: Step 0 done; Step 1 done and verified on a team laptop (2026-10-22, commit `a0abaf2`): setup from zero, 9/9 smoke checks pass, cluster about 930 to 980 MiB of the 4096 MiB budget (Docker was not yet capped at 4 GB). Step 2 implemented and verified on the same laptop (2026-10-22): `check-step2.ps1` 6/6 (good version promoted 20/50/100, bad version aborted by L0 at 20%, stable kept serving, canary and stable pods in the per-request log), cluster about 1.73 GB at the canary peak. Step 2 signed off 2026-10-22 after Q7 and Q8 were closed by D21 and D22. Step 3 is next.
 
 ---
 
@@ -65,7 +65,7 @@ Metrics and definitions are fixed. Target values stay provisional until the L0 b
 | ID | Objective | Method | L0 baseline | Success criteria | Changed in v2 |
 |---|---|---|---|---|---|
 | DSO1 | Detect injected incidents early (runtime and CI) | Rolling z-score, then Isolation Forest (runtime); duration and failure-streak detector (CI) | Static alert thresholds | Recall ≥ 90%; ≤ 1 false alert per hour of normal traffic; median MTTD lower than L0 | Normal-traffic window ≥ 4 h (run overnight); CIs |
-| DSO2 | Classify the root cause of CI failures into 5 classes and propose a validated fix | Log reduction (drain3) + retrieval (Chroma) + LLM with structured output and evidence grounding; compared against regex, TF-IDF + logistic regression, and a fine-tuned small encoder | Regex root-cause classifier + fixed class → action playbook | Accuracy ≥ 80%; macro-F1 ≥ 0.75; ≥ 60% resolved without a human (green rerun, gate-allowed actions only); hallucination rate and cost per incident reported; fix PRs counted as assisted | Stronger baseline (D3); generated corpus (D6); 5-way comparison (D7); grounding (D8) |
+| DSO2 | Classify the root cause of CI failures into 5 classes and propose a validated fix | Log reduction (drain3) + retrieval (Chroma) + LLM with structured output and evidence grounding; compared against regex, TF-IDF + logistic regression, and a fine-tuned small encoder | Regex root-cause classifier + fixed class → action playbook | Accuracy ≥ 80%; macro-F1 ≥ 0.75; ≥ 60% resolved without a human (green rerun, gate-allowed actions only); hallucination rate and cost per incident reported; fix PRs counted as assisted | Stronger baseline (D3); generated corpus (D6); 5-way comparison (D7); grounding (D8); external real-log validation (D14) |
 | DSO3 | Decide continue, hold, rollback or escalate during a canary | Sequential test with always-valid p-values on per-request data, plus an absolute error floor; collaboration with Monitor and Diagnose before rollback | Argo Rollouts AnalysisTemplate with fixed, realistic thresholds | ≥ 90% of bad releases caught before 100% traffic; ≤ 10% false rollbacks; lower time to rollback and change failure rate than L0 | Sequential test replaces Mann-Whitney on time series (D4); collaboration (D5) |
 | DSO4 | Block or allow a deployment from scan, quality and test results | Hard rules for criticals; ML score for the grey zone, explained with SHAP | Block on any HIGH or CRITICAL finding + quality gate | 100% of injected criticals blocked; false-block rate ≤ 10% and lower than L0; allowing over a scanner finding always needs a human | SHAP explanations |
 | DSO5 | Predict job duration and failure probability to reorder or skip optional jobs | LightGBM regressor + classifier, explained with SHAP; inference runs inside the CI `plan` job from a model file in the repo | Fixed job order + standard `paths:` filters | Pipeline duration −20%; 0 failures missed vs the full pipeline; shorter time to first failure; MAE and AUC reported | Real optional jobs and a fair baseline (D2); CI-side inference (D1) |
@@ -171,6 +171,12 @@ These are plotted against the L5 gate settings.
 
 ### Data and test sets
 
+- **External real-world data (D14).** Used only for evaluation and retrieval seeding, never for tuning, and never mixed into the held-out set. Raw files are not committed: a download script fetches them and checks their checksums.
+  - **LogChunks** (Brandt et al., MSR 2020; Zenodo record 3632351; CC BY 4.0): 797 real failed Travis CI build logs from 80 GitHub projects, with hand-labelled chunks that explain each failure. A sample of about 150 logs is labelled into the 5 DSO2 classes by two team members independently; agreement is reported as Cohen's kappa and disagreements are resolved by a third. Uses: (1) external validation of every DSO2 method; (2) grounding test for H3: the evidence lines the LLM quotes are compared with the labelled chunks; (3) logs outside the evaluation sample may seed the retrieval memory.
+  - **LogSieve replication package** (2026; Figshare 10.6084/m9.figshare.30811382): 20 failed GitHub Actions logs with each line labelled relevant or irrelevant to the root cause. Used to evaluate log reduction (drain3) and grounding on GitHub Actions logs.
+  - **GADFPD** (Mendeley Data 10.17632/mggwn7rj9f.1, CC BY 4.0): about 300,000 GitHub Actions and Travis runs. Optional for DSO5 pre-training or external validation, only after a quality check (fields present, duplicates, label balance).
+  - Not used: Loghub (system logs; the Monitor agent reads metrics, so it would serve no hypothesis).
+  - Stated limitations: LogChunks is Travis CI from 2019 to 2020 and from other projects; public logs may appear in a hosted LLM's training data, which can inflate its score on them.
 - **Failure corpus (D6).** A scripted generator injects faults of the 5 DSO2 classes into copies of the demo repo and runs build and tests unattended in containers. It aims for several hundred labelled logs. Exact volume will be set after measuring build time, so this number is not yet a commitment.
 - **Splits.** The corpus is split train / validation / test **by fault template, not by run**, so near-duplicate logs never leak into the test set.
 - **Held-out protocol (D12).** One team member who does not tune agents writes the final test scenarios and seeds. They are kept outside `dev` until Step 11. Developers tune only on the dev scenarios.
@@ -191,11 +197,21 @@ Set in Step 2, before any agent runs, and never tuned afterwards (fairness rule)
 
 Known weaknesses of L0, which Release (Step 8) must beat: fixed thresholds ignore the stable version's own error rate; 1-minute rates over 2 to 5 canary pods are noisy; repeated looks at autocorrelated samples are the reason for D4.
 
+### Record and replay (D15)
+
+Every scenario is run live once and its raw inputs are recorded: Prometheus series, per-request load-generator logs, CI logs and events, with timestamps. Each ablation level's decision logic is then evaluated offline on the identical recording. This makes the comparison between levels exactly paired, reproducible and cheap enough for the sample sizes of D16. DSO2 classification is evaluated fully offline on the log corpus and the external sets (D14). A smaller set of live end-to-end runs, at L0 and at the full system, shows that the whole loop (detection, gate, approval, execution, recovery) works for real; live and replayed results are reported separately.
+
+### Human approval during evaluation (D17)
+
+Batch evaluation uses a simulated approver: it approves a proposal when the scenario's ground truth says the action is correct and denies it otherwise, with a configurable error rate (default 0%, and 10% in a sensitivity run) and a configurable delay. A real team member approves only in the live end-to-end runs and the demo. The report shows both, and the number of approvals per incident is counted either way.
+
 ### Statistics
 
 - 95% Wilson intervals for every rate.
 - Paired comparisons between levels on the same scenarios: McNemar's test for correct/incorrect outcomes; bootstrap intervals for time metrics.
-- Canary decisions use per-request data, never autocorrelated Prometheus samples.
+- Canary decisions never use autocorrelated Prometheus samples as if they were independent observations. Error rates are compared as counts: per-pod request and 5xx counter increases over each window, summed per pod-template hash (canary vs stable), tested as proportions. Latency is compared on per-request data from the load generator (D21).
+- **Sample sizes (D16).** Scenario counts are set by a power analysis done right after the L0 numbers exist (Step 4), for the smallest difference worth detecting per DSO, at 80% power and 5% significance. The counts in v1 (about 40 releases, 15 incidents) are placeholders until then.
+- **LLM variability (D18).** The exact model id and temperature (0) are pinned and written to the audit log for every call. Every LLM-based level is run 3 times on the same inputs; results report the mean and the spread. Cached responses are used only to reproduce a finished run, never to replace the repeats.
 
 ### Failure analysis
 
@@ -211,12 +227,12 @@ Each step needs explicit approval before it starts. Each step ships with tests, 
 |---|---|---|---|
 | 0 | Repo layout, conventions, contracts, catalog | Tests pass | Committed `0e888e8` |
 | 1 | k3d cluster, podinfo ×2, monitoring stack | `setup.ps1` from zero; `smoke.ps1` passes; RAM measured ≤ 4 GB | **Done** `a0abaf2`: 9/9 checks, about 930 to 980 MiB. Fixes: direct port mapping, API pinned to 127.0.0.1:6550, PowerShell 5.1-safe checks |
-| 2 | Argo Rollouts; podinfo as a Rollout (20/50/100); L0 AnalysisTemplate; load generator with per-request log tagged by pod | A good version promotes, a bad one aborts under L0; per-request log is usable for DSO3 | **Implemented**, awaiting sign-off: 6/6 checks, about 1.73 GB at the canary peak. Open: error responses not tied to a pod (Q7), test memory ceiling (Q8) |
+| 2 | Argo Rollouts; podinfo as a Rollout (20/50/100); L0 AnalysisTemplate; load generator with per-request log tagged by pod | A good version promotes, a bad one aborts under L0; per-request latency log plus per-pod error counts usable for DSO3 (D21) | **Done** `eb62ae3`: 6/6 checks, about 1.73 GB at the canary peak |
 | 3 | CI: build, unit, optional jobs (lint, integration, SBOM, multi-arch), scans, push, `plan` job reading a model file; laptop deployer by polling | A commit reaches a staging canary with no manual step | |
-| 4 | Failure-corpus generator; scenario runner; L0 baseline for all DSOs; audit log; held-out set frozen | Every DSO has a measured L0 number on the held-out set; final targets set | |
-| 5 | Orchestrator with ablation flags L0 to L5; shared incident record; gate with calibrated confidence; executor; approval channel; stub agents | Workflows A to D run end to end with stubs; DSO6 adversarial and conflict sets pass | |
+| 4 | Recorder for D15 (Prometheus series, load-generator logs, CI logs, events) and offline replay harness; fault-injection proxy with configurable error rate and added latency for graded bad releases (D19), RAM measured; power analysis setting scenario counts (D16); LLM provider chosen and model pinned (D18); failure-corpus generator; external datasets downloaded, checksummed and sampled, 150 LogChunks logs double-labelled (D14); scenario runner; L0 baseline for all DSOs; audit log; held-out set frozen | Every DSO has a measured L0 number on the held-out set; final targets set | |
+| 5 | Orchestrator with ablation flags L0 to L5; shared incident record; gate with calibrated confidence; executor; approval channel and simulated approver (D17); stub agents | Workflows A to D run end to end with stubs; DSO6 adversarial, conflict and prompt-injection sets pass (D20) | |
 | 6 | Monitor agent | DSO1 measured at L0 and L1 | |
-| 7 | Diagnose agent with the 5-way comparison and grounding | DSO2 measured at L0 to L3, plus the encoder | |
+| 7 | Diagnose agent with the 5-way comparison and grounding | DSO2 measured at L0 to L3, plus the encoder, on the held-out corpus and on the external sets (D14) | |
 | 8 | Release agent: sequential test + P1 | DSO3 measured at L0 to L4 | |
 | 9 | Security agent (secondary) | DSO4 measured | |
 | 10 | Optimizer agent (secondary) | DSO5 measured | |
@@ -258,6 +274,15 @@ Each step needs explicit approval before it starts. Each step ships with tests, 
 
 | Date | ID | Decision | Reason |
 |---|---|---|---|
+| 2026-10-22 | D22 | Static memory-limit test ceiling raised from 1536 to 2560 MiB (Q8); measured RAM from `check-resources` stays the real acceptance criterion | Follows from 10 replicas per namespace; 1.75 GB measured of the 4096 MiB budget |
+| 2026-10-22 | D21 | DSO3 data (Q7): error rates from per-pod Prometheus counter increases per window, summed per pod-template hash; latency from the load generator's per-request log, where the pod is known; joining each failed request to its pod is deferred and only done in Step 8 if a test needs it | Counts are valid for a proportion test and already carry the pod label; avoids debug logging and log streaming |
+| 2026-10-22 | D20 | DSO6 adds prompt-injection cases: CI logs and commit messages containing instructions aimed at the LLM (for example to propose a prohibited or out-of-catalog action); expected result is that the gate rejects every resulting proposal | LLM inputs contain attacker-controlled text; the gate must hold regardless of what the model is told |
+| 2026-10-22 | D19 | A small fault-injection proxy in front of podinfo, used only in bad versions, with a configurable error rate and added latency, so releases can be graded from obviously bad to just above the L0 thresholds | podinfo 6.7.1's `--random-error` is on/off only (fixed "1/3 chances" per its source); only latency is tunable; subtly bad releases are needed or the scenarios are too easy |
+| 2026-10-22 | D18 | LLM model id and temperature pinned and logged per call; every LLM-based level run 3 times with mean and spread reported; provider chosen and call volume checked against its limits in Step 4 | LLM outputs vary between runs and hosted models change over time |
+| 2026-10-22 | D17 | Simulated approver (ground-truth policy, configurable error rate and delay) for batch evaluation; a real human only in live runs and the demo | Hundreds of approvals per evaluation would stall runs and add human noise |
+| 2026-10-22 | D16 | Scenario counts set by a power analysis (80% power, 5% significance) after the L0 numbers exist | Arbitrary small samples could hide a real improvement |
+| 2026-10-22 | D15 | Record each scenario once, evaluate every ablation level's decisions offline on the identical recording; DSO2 fully offline; a smaller live end-to-end set at L0 and the full system | Six levels of live runs would take days of cluster time; replay is paired, reproducible and cheap |
+| 2026-10-22 | D14 | External real-world data for DSO2: about 150 LogChunks logs double-labelled into the 5 classes (kappa reported) and the 20 LogSieve GitHub Actions logs, for evaluation and grounding only; GADFPD optional for DSO5 after a quality check; Loghub not used | Answers the synthetic-data criticism with real logs from 80 projects and gives H3 a labelled grounding test |
 | 2026-10-22 | D13 | Each commit is authored by the team member who makes it, under their own identity (replaces "all commits as Mohamed Boussetta") | Honest per-member contribution history |
 | 2026-10-21 | D1 | No webhooks. The laptop polls the GitHub Actions API. Optimizer inference runs inside the CI `plan` job from a model file committed to the repo; training happens on the laptop. | GitHub cannot reach the laptop |
 | 2026-10-21 | D2 | Add real optional CI jobs (lint, integration, SBOM, multi-arch build). DSO5 baseline = fixed order + standard `paths:` filters. | Otherwise DSO5 has almost nothing to skip and the baseline is a strawman |
@@ -282,7 +307,7 @@ Each step needs explicit approval before it starts. Each step ships with tests, 
 
 ### Assumptions
 
-- Generated faults and scripted commits are acceptable evaluation data for the professor.
+- Generated faults and scripted commits are acceptable evaluation data for the professor, complemented by real external logs (D14).
 - The repo can be public, which keeps SonarCloud and Actions minutes free.
 - A team member is available to approve during evaluation runs.
 
@@ -291,11 +316,11 @@ Each step needs explicit approval before it starts. Each step ships with tests, 
 1. Submission date and expected deliverables (report, demo, slides).
 2. Team size and owner of each step.
 3. Who writes the held-out test set (D12).
-4. LLM provider: NVIDIA NIM, Groq or Gemini.
+4. LLM provider: NVIDIA NIM, Groq or Gemini. Must be decided in Step 4 (D18).
 5. Approval channel: Telegram bot or Streamlit page.
 6. Re-measure RAM with Docker capped at 4 GB before the final evaluation runs.
 
-### Open questions raised in Step 2 (proposals awaiting approval)
+### Open questions raised in Step 2 (closed)
 
-7. **Error responses are not tied to a pod in the per-request log.** podinfo's injected errors (`--random-error`) have an empty body, so the load generator logs them with `"pod": null`; DSO3's per-request comparison of canary and stable error rates needs them attributed. Proposal: the load generator adds a request id to each URL (`/?rid=...`), podinfo runs with `--level=debug` (its request log records the URI before the error middleware), and pod logs are streamed during each run and joined on the id. Alternative: accept the gap for L0 and solve it in Step 8.
-8. **Static memory-limit check.** With option A (10 replicas per namespace) the summed container limits at peak are about 2.4 GB, above the 1536 MiB the Step 1 test allowed. Proposal (implemented, not yet approved): raise the test's ceiling to 2560 MiB (4 GB minus about 1 GB for k3s and Docker minus a 0.5 GB margin) and keep measured RAM (`check-resources`) as the real acceptance criterion.
+7. **Error responses are not tied to a pod in the per-request log.** podinfo's injected errors (`--random-error`) have an empty body, so the load generator logs them with `"pod": null`; DSO3's per-request comparison of canary and stable error rates needs them attributed. Proposal: the load generator adds a request id to each URL (`/?rid=...`), podinfo runs with `--level=debug` (its request log records the URI before the error middleware), and pod logs are streamed during each run and joined on the id. Alternative: accept the gap for L0 and solve it in Step 8. **Closed by D21.**
+8. **Static memory-limit check.** With option A (10 replicas per namespace) the summed container limits at peak are about 2.4 GB, above the 1536 MiB the Step 1 test allowed. Proposal (implemented, not yet approved): raise the test's ceiling to 2560 MiB (4 GB minus about 1 GB for k3s and Docker minus a 0.5 GB margin) and keep measured RAM (`check-resources`) as the real acceptance criterion. **Closed by D22.**
