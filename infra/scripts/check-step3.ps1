@@ -30,7 +30,13 @@ function WaitUntil([scriptblock]$condition, [int]$seconds, [int]$every = 10) {
     }
     return $false
 }
-function Invoke-Git { git -C $Root @args; if ($LASTEXITCODE -ne 0) { throw "git $args failed" } }
+function Invoke-Git {
+    # git writes progress and line-ending warnings to stderr; under "Stop", Windows PowerShell
+    # would turn them into terminating errors whenever output is redirected
+    $ErrorActionPreference = "Continue"
+    git -C $Root @args 2>&1 | ForEach-Object { "$_" } | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "git $args failed" }
+}
 
 $launcher = if (Get-Command py -ErrorAction SilentlyContinue) { "py" } else { "python" }
 $python = & $launcher -c "import sys; print(sys.executable)"
