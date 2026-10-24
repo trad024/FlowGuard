@@ -117,7 +117,7 @@ try {
     Check "canary completed under L0 (promoted, 2 successful analyses)" { $promoted -and $ok -ge 2 }
 
     # Let the deployer finish its own wait, log the outcome and stop its load generator
-    $eventsFile = Join-Path $Root "evaluationuns\deployer-events.jsonl"
+    $eventsFile = Join-Path $Root "evaluation\runs\deployer-events.jsonl"
     $pattern = '"event": "deploy_finished".*"outcome": "promoted".*"sha": "' + $appSha + '"'
     $logged = WaitUntil {
         (Test-Path $eventsFile) -and (Select-String -Path $eventsFile -Pattern $pattern -Quiet)
