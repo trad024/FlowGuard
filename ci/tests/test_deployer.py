@@ -297,3 +297,29 @@ def test_without_a_token_polling_slows_to_stay_under_60_requests_an_hour(tmp_pat
 def test_env_file_is_gitignored():
     ignored = (deployer.ROOT / ".gitignore").read_text().splitlines()
     assert ".env" in ignored
+
+
+def test_scenario_branches_are_url_encoded_in_the_runs_query(api):
+    cfg = config(api)
+    cfg.branch = "scenario/step3-check-1"
+    deployer.GitHub(cfg).latest_success()
+    assert "?branch=scenario%2Fstep3-check-1&status=success" in FakeGitHub.requests[0]["path"]
+
+
+def test_branch_option_overrides_the_configured_branch(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("FLOWGUARD_BRANCH", "dev")
+    seen = []
+
+    class RecordingGitHub:
+        def __init__(self, cfg):
+            seen.append(cfg.branch)
+
+        def run_for_commit(self, sha):
+            return None
+
+    monkeypatch.setattr(deployer, "GitHub", RecordingGitHub)
+    env_file = str(tmp_path / "absent.env")
+    deployer.main(["--env-file", env_file, "status", "--sha", SHA_NEW])
+    deployer.main(["--env-file", env_file, "--branch", "scenario/x", "status", "--sha", SHA_NEW])
+    assert seen == ["dev", "scenario/x"]
+    assert capsys.readouterr().out.split() == ["null", "null"]

@@ -4,11 +4,13 @@
 #   2. the laptop deployer picks it up and starts a staging canary with no manual step;
 #   3. the canary completes under the L0 analysis (both analyses successful, image promoted);
 #   4. the deployer logged the deployment, and a commit touching only docs/ starts no app
-#      pipeline run.
-# It makes and pushes two small marker commits (app/ci-trigger.txt, docs/ci-trigger.txt) to dev
-# under your git identity, in two separate pushes: GitHub applies path filters to a whole push
-# and runs the workflow once, for its last commit. It starts its own deployer unless
-# NO_DEPLOYER=1 (use that when one already runs). Usage: ./infra/scripts/check-step3.sh   (needs python3)
+#      pipeline run;
+#   5. dev is untouched and the scenario branch is gone afterwards.
+# The two marker commits (app/ci-trigger.txt, docs/ci-trigger.txt) go to a throwaway branch
+# scenario/step3-<time>, created by pushing the app commit and deleted at the end; the docs
+# commit is a separate push because GitHub applies path filters to a whole push and runs the
+# workflow once, for its last commit. Commits use your git identity. It starts its own deployer
+# on that branch. Usage: ./infra/scripts/check-step3.sh   (needs python3)
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 NAMESPACE=staging
@@ -31,24 +33,32 @@ cd "$ROOT"
 git fetch -q origin dev
 [ "$(git rev-parse --abbrev-ref HEAD)" = dev ] || { echo "Check out dev first."; exit 1; }
 [ -z "$(git status --porcelain)" ] || { echo "Working tree not clean; commit or stash first."; exit 1; }
-[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/dev)" ] || { echo "dev is not in sync with origin/dev."; exit 1; }
+DEV_BEFORE="$(git rev-parse origin/dev)"
+[ "$(git rev-parse HEAD)" = "$DEV_BEFORE" ] || { echo "dev is not in sync with origin/dev."; exit 1; }
 [ "$(field .status.phase)" = Healthy ] || { echo "Staging Rollout is not Healthy."; exit 1; }
 
-DEP_PID=""
-if [ "${NO_DEPLOYER:-0}" != 1 ]; then
-  echo "Starting the deployer (events: evaluation/runs/deployer-events.jsonl)..."
-  "$PYTHON" "$ROOT/ci/deployer.py" run >/dev/null 2>&1 &
-  DEP_PID=$!
-fi
-trap '[ -n "$DEP_PID" ] && kill "$DEP_PID" 2>/dev/null' EXIT
-
+BRANCH="scenario/step3-$(date -u +%Y%m%d-%H%M%S)"
 STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 NOTE="Touched by infra/scripts/check-step3 to test the CI path filters: $STAMP"
+PUSHED=0
+git switch -q -c "$BRANCH"
+echo "Scenario branch $BRANCH; starting a deployer that follows it..."
+"$PYTHON" "$ROOT/ci/deployer.py" --branch "$BRANCH" run >/dev/null 2>&1 &
+DEP_PID=$!
+cleanup() {
+  kill "$DEP_PID" 2>/dev/null
+  git switch -q dev
+  [ "$PUSHED" = 1 ] && git push -q origin --delete "$BRANCH"
+  git branch -q -D "$BRANCH"
+}
+trap cleanup EXIT
+
 printf '%s\n' "$NOTE" > app/ci-trigger.txt
 git add app/ci-trigger.txt && git commit -q -m "Step 3 check: app change ($STAMP)"
 APP_SHA="$(git rev-parse HEAD)"
-git push -q origin dev || { echo "git push failed"; exit 1; }
-echo "Pushed app commit ${APP_SHA:0:7}."
+git push -q -u origin "$BRANCH" || { echo "git push failed"; exit 1; }
+PUSHED=1
+echo "Pushed app commit ${APP_SHA:0:7} (creates the branch)."
 
 # 1. CI for the app commit
 echo "Waiting for app-ci on ${APP_SHA:0:7}..."
@@ -61,7 +71,7 @@ check "app commit ran app-ci to success (image pushed)" '[ "$(json_get "$RUN" co
 printf '%s\n' "$NOTE" > docs/ci-trigger.txt
 git add docs/ci-trigger.txt && git commit -q -m "Step 3 check: docs-only change ($STAMP)"
 DOCS_SHA="$(git rev-parse HEAD)"
-git push -q origin dev || { echo "git push failed"; exit 1; }
+git push -q origin "$BRANCH" || { echo "git push failed"; exit 1; }
 echo "Pushed docs-only commit ${DOCS_SHA:0:7}."
 
 # 2-3. Deployer -> canary -> promoted under L0
@@ -92,8 +102,15 @@ LOGGED=1
 wait_until 'grep -q "$PATTERN" "$EVENTS"' 120 5 && LOGGED=0
 check "deployer logged the deployment of ${APP_SHA:0:7} as promoted" '[ "$LOGGED" -eq 0 ]'
 
-# 4. Docs-only commit: no app-ci run
+# 4. Docs-only commit: no app-ci run (GitHub creates runs within seconds of a push)
 check "docs-only commit ${DOCS_SHA:0:7} started no app-ci run" '[ "$(run_status "$DOCS_SHA")" = null ]'
+
+# 5. Nothing reached dev; the throwaway branch is gone
+cleanup
+trap - EXIT
+git fetch -q --prune origin
+check "origin/dev unchanged and $BRANCH deleted" \
+  '[ "$(git rev-parse origin/dev)" = "$DEV_BEFORE" ] && [ -z "$(git ls-remote --heads origin "$BRANCH")" ]'
 
 echo
 echo "Deployer events: $ROOT/evaluation/runs/deployer-events.jsonl"

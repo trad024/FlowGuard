@@ -9,6 +9,7 @@ Which commit is deployed is read back from the Rollout itself, so the deployer k
 and a restart never deploys twice; an aborted commit stays aborted until a newer one succeeds.
 
     python ci/deployer.py run              # poll forever (Ctrl+C to stop)
+    python ci/deployer.py --branch scenario/<id> run   # follow a scenario branch instead of dev
     python ci/deployer.py run --once       # one poll, deploy if needed, then exit
     python ci/deployer.py status --sha SHA # the app-ci run for a commit, as JSON
 
@@ -27,6 +28,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -126,7 +128,7 @@ class GitHub:
         c = self.cfg
         data = self.get(
             f"/repos/{c.repo}/actions/workflows/{c.workflow}/runs"
-            f"?branch={c.branch}&status=success&per_page=10"
+            f"?branch={urllib.parse.quote(c.branch, safe='')}&status=success&per_page=10"
         )
         runs = [
             r
@@ -325,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
     parser.add_argument("--namespace", default="staging", choices=sorted(PORTS))
+    parser.add_argument("--branch", help="branch whose app-ci runs are deployed (default: dev)")
     sub = parser.add_subparsers(dest="command", required=True)
     p_run = sub.add_parser("run", help="poll and deploy")
     p_run.add_argument("--once", action="store_true", help="one poll, then exit")
@@ -333,6 +336,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     cfg = load_config(args.env_file, args.namespace)
+    if args.branch:
+        cfg.branch = args.branch
     github = GitHub(cfg)
     if args.command == "status":
         run = github.run_for_commit(args.sha)

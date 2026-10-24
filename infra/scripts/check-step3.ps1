@@ -3,13 +3,14 @@
 #   2. the laptop deployer picks it up and starts a staging canary with no manual step;
 #   3. the canary completes under the L0 analysis (both analyses successful, image promoted);
 #   4. the deployer logged the deployment, and a commit touching only docs/ starts no app
-#      pipeline run.
-# It makes and pushes two small marker commits (app/ci-trigger.txt, docs/ci-trigger.txt) to dev
-# under your git identity, in two separate pushes: GitHub applies path filters to a whole push
-# and runs the workflow once, for its last commit. It starts its own deployer unless -NoDeployer is given (use that when
-# one already runs). Usage: .\infra\scripts\check-step3.ps1 [-NoDeployer] [-CiTimeoutMinutes 40]
+#      pipeline run;
+#   5. dev is untouched and the scenario branch is gone afterwards.
+# The two marker commits (app/ci-trigger.txt, docs/ci-trigger.txt) go to a throwaway branch
+# scenario/step3-<time>, created by pushing the app commit and deleted at the end; the docs
+# commit is a separate push because GitHub applies path filters to a whole push and runs the
+# workflow once, for its last commit. Commits use your git identity. It starts its own deployer
+# on that branch. Usage: .\infra\scripts\check-step3.ps1 [-CiTimeoutMinutes 40]
 param(
-    [switch]$NoDeployer,
     [int]$CiTimeoutMinutes = 40,
     [int]$RolloutTimeoutMinutes = 25
 )
@@ -39,6 +40,7 @@ function Invoke-Git {
     git -C $Root @args 2>&1 | ForEach-Object { "$_" } | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "git $args failed" }
 }
+function GitOut { $ErrorActionPreference = "Continue"; (git -C $Root @args 2>$null) }
 
 $launcher = if (Get-Command py -ErrorAction SilentlyContinue) { "py" } else { "python" }
 $python = & $launcher -c "import sys; print(sys.executable)"
@@ -47,28 +49,30 @@ function RunStatus($sha) { & $python $deployerPy status --sha $sha | ConvertFrom
 
 # Preconditions: on dev, clean, in sync with origin; staging healthy
 Invoke-Git fetch -q origin dev
-if ((git -C $Root rev-parse --abbrev-ref HEAD) -ne "dev") { Write-Host "Check out dev first."; exit 1 }
-if (git -C $Root status --porcelain) { Write-Host "Working tree not clean; commit or stash first."; exit 1 }
-if ((git -C $Root rev-parse HEAD) -ne (git -C $Root rev-parse origin/dev)) {
+if ((GitOut rev-parse --abbrev-ref HEAD) -ne "dev") { Write-Host "Check out dev first."; exit 1 }
+if (GitOut status --porcelain) { Write-Host "Working tree not clean; commit or stash first."; exit 1 }
+$devBefore = GitOut rev-parse origin/dev
+if ((GitOut rev-parse HEAD) -ne $devBefore) {
     Write-Host "dev is not in sync with origin/dev; pull or push first."; exit 1
 }
 if ((Rollout).status.phase -ne "Healthy") { Write-Host "Staging Rollout is not Healthy."; exit 1 }
 
-$dep = $null
-if (-not $NoDeployer) {
-    Write-Host "Starting the deployer (events: evaluation\runs\deployer-events.jsonl)..."
-    $dep = Start-Process -FilePath $python -ArgumentList "`"$deployerPy`" run" -PassThru -WindowStyle Hidden
-}
+$branch = "scenario/step3-$((Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss'))"
+$stamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$note = "Touched by infra/scripts/check-step3 to test the CI path filters: $stamp`n"
+$pushed = $false
+Invoke-Git switch -q -c $branch
+Write-Host "Scenario branch $branch; starting a deployer that follows it..."
+$dep = Start-Process -FilePath $python -ArgumentList "`"$deployerPy`" --branch $branch run" `
+    -PassThru -WindowStyle Hidden
 try {
-    $stamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    $note = "Touched by infra/scripts/check-step3 to test the CI path filters: $stamp`n"
-
     [IO.File]::WriteAllText((Join-Path $Root "app\ci-trigger.txt"), $note)
     Invoke-Git add app/ci-trigger.txt
     Invoke-Git commit -q -m "Step 3 check: app change ($stamp)"
-    $appSha = git -C $Root rev-parse HEAD
-    Invoke-Git push -q origin dev
-    Write-Host "Pushed app commit $($appSha.Substring(0,7))."
+    $appSha = GitOut rev-parse HEAD
+    Invoke-Git push -q -u origin $branch
+    $pushed = $true
+    Write-Host "Pushed app commit $($appSha.Substring(0,7)) (creates the branch)."
 
     # 1. CI for the app commit
     Write-Host "Waiting for app-ci on $($appSha.Substring(0,7))..."
@@ -84,8 +88,8 @@ try {
     [IO.File]::WriteAllText((Join-Path $Root "docs\ci-trigger.txt"), $note)
     Invoke-Git add docs/ci-trigger.txt
     Invoke-Git commit -q -m "Step 3 check: docs-only change ($stamp)"
-    $docsSha = git -C $Root rev-parse HEAD
-    Invoke-Git push -q origin dev
+    $docsSha = GitOut rev-parse HEAD
+    Invoke-Git push -q origin $branch
     Write-Host "Pushed docs-only commit $($docsSha.Substring(0,7))."
 
     # 2-3. Deployer -> canary -> promoted under L0
@@ -127,7 +131,16 @@ try {
     # 4. Docs-only commit: no app-ci run (GitHub creates runs within seconds of a push)
     Check "docs-only commit $($docsSha.Substring(0,7)) started no app-ci run" { $null -eq (RunStatus $docsSha) }
 } finally {
-    if ($dep) { Stop-Process -Id $dep.Id -ErrorAction SilentlyContinue }
+    Stop-Process -Id $dep.Id -ErrorAction SilentlyContinue
+    Invoke-Git switch -q dev
+    if ($pushed) { Invoke-Git push -q origin --delete $branch }
+    Invoke-Git branch -q -D $branch
+}
+
+# 5. Nothing reached dev; the throwaway branch is gone
+Invoke-Git fetch -q --prune origin
+Check "origin/dev unchanged and $branch deleted" {
+    (GitOut rev-parse origin/dev) -eq $devBefore -and -not (GitOut ls-remote --heads origin $branch)
 }
 
 Write-Host ""

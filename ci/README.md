@@ -2,7 +2,15 @@
 
 The app pipeline's scripts and the laptop-side deployer (step 3). The workflow itself is
 `.github/workflows/app-ci.yml`; it runs only for changes under `app/` and `ci/` (and the
-workflow file), so agent, infra and docs commits never build the app.
+workflow file), so agent, infra and docs commits never build the app. It runs on `dev`, `main`
+and `scenario/**`.
+
+## Scenario branches
+
+Check and evaluation commits (marker changes, injected faults) never go to `dev`. They go to a
+throwaway branch `scenario/<id>`, which app-ci builds like `dev`; a deployer started with
+`--branch scenario/<id>` deploys it, and the branch is deleted afterwards. Only real code
+changes are pushed to `dev`.
 
 ## Pipeline
 
@@ -43,6 +51,7 @@ Build, unit and scans are not in `optional-jobs.json`, so no plan can drop them.
 py ci\deployer.py run            # poll and deploy; Ctrl+C to stop
 py ci\deployer.py run --once     # one poll
 py ci\deployer.py status --sha <commit>
+py ci\deployer.py --branch scenario/<id> run   # follow a scenario branch instead of dev
 ```
 
 It polls the GitHub API for the newest successful `app-ci` run on `dev`. When staging runs a

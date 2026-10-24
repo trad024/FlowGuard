@@ -14,7 +14,9 @@ name: app-ci
 
 on:
   push:
-    branches: [dev, main]
+    # scenario/** are throwaway branches for checks and evaluation scenarios, so that test
+    # commits never land on dev
+    branches: [dev, main, "scenario/**"]
     paths:
       - "app/**"
       - "ci/**"
@@ -70,6 +72,8 @@ jobs:
           python3 ci/plan.py --mode "$MODE" ${{ steps.changed.outputs.args }} \
             --github-output "$GITHUB_OUTPUT" | tee plan.json
           { echo '### Plan'; echo '```json'; cat plan.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # Also as an annotation: readable on the run page without signing in
+          python3 -c "import json; p=json.load(open('plan.json')); print('::notice title=plan::mode=%s model=%s run=%s skipped=%s' % (p['mode'], p['model'], ','.join(p['run']) or '-', ','.join(p['skipped']) or '-'))"
 
   build:
     needs: plan

@@ -77,9 +77,10 @@ py ci\deployer.py run      # leave running: deploys every successful app-ci run 
 A commit under `app/` runs `.github/workflows/app-ci.yml` (see `ci/README.md`), which pushes
 `ghcr.io/trad024/flowguard-podinfo:<sha>`. The deployer polls GitHub, then deploys that image
 with `deploy-version.ps1 good -Image ...` while it runs the load generator, so the canary goes
-20/50/100 under L0 with no manual step. `check-step3` proves it end to end: it pushes one marker
-commit under `app/` and one under `docs/` (which must not start the pipeline), then waits for
-CI and the canary. The cluster pulls the image anonymously, so the GHCR package must be public.
+20/50/100 under L0 with no manual step. `check-step3` proves it end to end on a throwaway branch
+`scenario/step3-<time>`: it pushes one marker commit under `app/` and, separately, one under
+`docs/` (which must not start the pipeline), waits for CI and the canary, then deletes the
+branch, so nothing reaches `dev`. The cluster pulls the image anonymously, so the GHCR package must be public.
 
 Rerunning `setup` resets the Rollout to the upstream podinfo image; the deployer then rolls the
 newest CI image out again.
