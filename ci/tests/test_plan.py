@@ -85,3 +85,39 @@ def test_cli_writes_github_outputs(tmp_path, capsys):
     assert json.loads(lines["optional"]) == ["lint", "integration", "sbom", "multiarch"]
     assert json.loads(lines["plan"])["mode"] == "baseline"
     assert json.loads(capsys.readouterr().out)["skipped"] == {}
+
+
+@pytest.mark.parametrize(
+    ("explicit", "branch", "expected"),
+    [
+        (None, "scenario/baseline/check-1", ("baseline", "branch")),
+        ("", "scenario/optimizer/run-7", ("optimizer", "branch")),
+        (None, "dev", ("optimizer", "default")),
+        (None, "scenario/step3-20261025", ("optimizer", "default")),
+        (None, "scenario/baselines/x", ("optimizer", "default")),  # prefix must match exactly
+        (None, None, ("optimizer", "default")),
+        # The manual input or repo variable wins over the branch name
+        ("optimizer", "scenario/baseline/check-1", ("optimizer", "input")),
+        ("baseline", "dev", ("baseline", "input")),
+    ],
+)
+def test_mode_comes_from_input_then_branch_then_default(explicit, branch, expected):
+    assert plan.resolve_mode(explicit, branch) == expected
+
+
+def test_an_unknown_explicit_mode_is_an_error():
+    with pytest.raises(ValueError):
+        plan.resolve_mode("yolo", "dev")
+
+
+def test_cli_applies_the_branch_rule_and_records_its_source(tmp_path, capsys):
+    changed = tmp_path / "changed.txt"
+    changed.write_text("app/ci-trigger.txt\n")
+    assert (
+        plan.main(
+            ["--mode", "", "--branch", "scenario/baseline/x", "--changed-files", str(changed)]
+        )
+        == 0
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert (result["mode"], result["mode_source"], result["run"]) == ("baseline", "branch", [])

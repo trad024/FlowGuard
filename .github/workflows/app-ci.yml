@@ -67,13 +67,15 @@ jobs:
       - name: Plan optional jobs
         id: plan
         env:
-          MODE: ${{ inputs.mode || vars.FLOWGUARD_CI_MODE || 'optimizer' }}
+          # Manual input, then repo variable; empty lets plan.py apply the branch rule
+          # (scenario/baseline/* or scenario/optimizer/*), then the default
+          MODE: ${{ inputs.mode || vars.FLOWGUARD_CI_MODE }}
         run: |
-          python3 ci/plan.py --mode "$MODE" ${{ steps.changed.outputs.args }} \
-            --github-output "$GITHUB_OUTPUT" | tee plan.json
+          python3 ci/plan.py --mode "$MODE" --branch "$GITHUB_REF_NAME" \
+            ${{ steps.changed.outputs.args }} --github-output "$GITHUB_OUTPUT" | tee plan.json
           { echo '### Plan'; echo '```json'; cat plan.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           # Also as an annotation: readable on the run page without signing in
-          python3 -c "import json; p=json.load(open('plan.json')); print('::notice title=plan::mode=%s model=%s run=%s skipped=%s' % (p['mode'], p['model'], ','.join(p['run']) or '-', ','.join(p['skipped']) or '-'))"
+          python3 -c "import json; p=json.load(open('plan.json')); print('::notice title=plan::mode=%s (from %s) model=%s run=%s skipped=%s' % (p['mode'], p['mode_source'], p['model'], ','.join(p['run']) or '-', ','.join(p['skipped']) or '-'))"
 
   build:
     needs: plan

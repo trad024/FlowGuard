@@ -6,11 +6,17 @@ Two modes:
   baseline   the DSO5 baseline: the fixed order, each job filtered by its standard path rules
              from ci/optional-jobs.json.
 
+The mode comes from, in order: an explicit --mode (the manual-run input or the repo variable
+FLOWGUARD_CI_MODE), then the branch name (scenario/baseline/* or scenario/optimizer/*), then
+the default, optimizer. The branch rule lets scenario runs pick a mode without a manual run,
+which GitHub only offers for workflows on the default branch.
+
 Build, unit tests and scans are not optional jobs and cannot be planned away. If the model
 file is missing, unreadable or of an unknown type, the plan falls back to running everything:
 a planning failure must never skip a check.
 
-    python ci/plan.py --mode optimizer --changed-files changed.txt --github-output "$GITHUB_OUTPUT"
+    python ci/plan.py --branch "$GITHUB_REF_NAME" --changed-files changed.txt \
+        --github-output "$GITHUB_OUTPUT"
 
 Standard library only: it runs on the hosted runner's own Python without installing anything.
 """
@@ -28,6 +34,7 @@ CI_DIR = Path(__file__).resolve().parent
 JOBS_FILE = CI_DIR / "optional-jobs.json"
 MODEL_FILE = CI_DIR / "optimizer" / "model.json"
 MODES = ("optimizer", "baseline")
+DEFAULT_MODE = "optimizer"
 
 
 @dataclass
@@ -37,6 +44,19 @@ class Plan:
     run: list[str]
     skipped: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    mode_source: str = "default"
+
+
+def resolve_mode(explicit: str | None, branch: str | None) -> tuple[str, str]:
+    """(mode, where it came from): explicit setting, then branch name, then the default."""
+    if explicit:
+        if explicit not in MODES:
+            raise ValueError(f"mode must be one of {MODES}, got {explicit!r}")
+        return explicit, "input"
+    for mode in MODES:
+        if (branch or "").startswith(f"scenario/{mode}/"):
+            return mode, "branch"
+    return DEFAULT_MODE, "default"
 
 
 def load_catalog(path: Path = JOBS_FILE) -> dict:
@@ -92,7 +112,8 @@ def read_changed(path: Path | None, all_changed: bool) -> list[str] | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--mode", default="optimizer", choices=MODES)
+    parser.add_argument("--mode", help=f"explicit mode {MODES}; empty means not set")
+    parser.add_argument("--branch", help="branch name, for the scenario/<mode>/* rule")
     parser.add_argument("--changed-files", type=Path, help="one changed path per line")
     parser.add_argument("--all-changed", action="store_true", help="changes unknown: all")
     parser.add_argument("--model", type=Path, default=MODEL_FILE)
@@ -102,7 +123,9 @@ def main(argv: list[str] | None = None) -> int:
 
     catalog = load_catalog(args.jobs)
     changed = read_changed(args.changed_files, args.all_changed)
-    plan = make_plan(args.mode, changed, catalog, args.model)
+    mode, source = resolve_mode(args.mode, args.branch)
+    plan = make_plan(mode, changed, catalog, args.model)
+    plan.mode_source = source
     print(json.dumps(asdict(plan), indent=2))
     for warning in plan.warnings:
         print(f"::warning::plan: {warning}", file=sys.stderr)
