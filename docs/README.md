@@ -34,3 +34,6 @@ The project blueprint is the reference for every decision. Key points for quick 
 | 2026-10-22 | 3 | `check-step3` pushes the app commit and the docs-only commit separately and waits for the deployer's own `deploy_finished` event | GitHub runs a workflow once per push, for its last commit; stopping the deployer early left its load generator running |
 | 2026-10-24 | 3 | Check and scenario commits go to throwaway `scenario/<id>` branches (app-ci also runs there; the deployer takes `--branch`); the branch is deleted afterwards | Test commits polluted `dev`; only code changes belong there |
 | 2026-10-24 | 3 | The plan job also writes its mode and plan as a workflow annotation | Annotations are public; job logs and step summaries need a signed-in account |
+| 2026-10-25 | 3 | Plan mode also from the branch name: `scenario/baseline/*`, `scenario/optimizer/*`; manual input and repo variable keep priority | GitHub offers manual runs only for workflows on the default branch (`main`), which is not merged |
+| 2026-10-25 | 3 | D24 applied with Go 1.26.10 instead of 1.25.x (approved amendment) | Go 1.25 is end-of-life: x/net 0.60.0 needs Go 1.26 and four stdlib CVEs have no 1.25 fix |
+| 2026-10-25 | 3 | podinfo's own `replace golang.org/x/text => v0.19.0` raised to v0.42.0 | The upstream security floor pinned x/text below the current fixes, whatever `require` said |

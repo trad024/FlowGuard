@@ -193,6 +193,7 @@ jobs:
       - name: Gitleaks (secrets in the repository files)
         run: |
           docker run --rm -v "$PWD:/repo:ro" "$GITLEAKS_IMAGE" dir /repo \
+            --gitleaks-ignore-path /repo/.gitleaksignore \
             --report-format json --report-path - --exit-code 0 --redact --no-banner \
             > reports/gitleaks.json
           python3 -c "import json; print('Gitleaks findings', len(json.load(open('reports/gitleaks.json'))))" \
