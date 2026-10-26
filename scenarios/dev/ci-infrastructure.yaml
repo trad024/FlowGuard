@@ -1,0 +1,8 @@
+# CI failure generator (DSO2 class: infrastructure). Ground truth for Diagnose (Step 7).
+id: ci-infrastructure
+family: ci
+description: CI failure of class infrastructure
+environment: staging
+fault: {kind: infrastructure, delivery: commit}
+intensity: 1
+ground_truth: {root_cause: infrastructure, expected_l0: ci_failure}

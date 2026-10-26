@@ -1,0 +1,10 @@
+# A bad release shipped as code through CI: the fault is on by default in the commit.
+id: release-commit-errors-10
+family: release
+description: Commit turns on a 10% 500 rate in podinfo's defaults
+environment: staging
+fault: {kind: http_errors, delivery: commit, error_rate: 0.1}
+intensity: 0.1
+timing: {observe_s: 900}
+load: {rate: 10}
+ground_truth: {bad_release: true, expected_l0: abort}

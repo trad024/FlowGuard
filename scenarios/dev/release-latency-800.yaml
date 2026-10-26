@@ -1,0 +1,10 @@
+# Slow release: +800 ms on every user request, above L0's 500 ms p99 threshold.
+id: release-latency-800
+family: release
+description: 800 ms added to every user request
+environment: staging
+fault: {kind: latency, delivery: config, latency_ms: 800}
+intensity: 800
+timing: {warmup_s: 30, observe_s: 600, cooldown_s: 20}
+load: {rate: 10}
+ground_truth: {bad_release: true, expected_l0: abort}

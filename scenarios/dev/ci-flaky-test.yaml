@@ -1,0 +1,8 @@
+# CI failure generator (DSO2 class: flaky_test). Ground truth for Diagnose (Step 7).
+id: ci-flaky-test
+family: ci
+description: CI failure of class flaky_test
+environment: staging
+fault: {kind: flaky_test, delivery: commit}
+intensity: 1
+ground_truth: {root_cause: flaky_test, expected_l0: ci_failure}

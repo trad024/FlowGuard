@@ -1,0 +1,8 @@
+# CI failure generator (DSO2 class: environment). Ground truth for Diagnose (Step 7).
+id: ci-environment
+family: ci
+description: CI failure of class environment
+environment: staging
+fault: {kind: environment, delivery: commit}
+intensity: 1
+ground_truth: {root_cause: environment, expected_l0: ci_failure}

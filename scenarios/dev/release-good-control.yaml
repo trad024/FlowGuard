@@ -1,0 +1,10 @@
+# Control: a release with no fault. L0 must promote it (a false abort here is a false rollback).
+id: release-good-control
+family: release
+description: Same image, new UI message only; no fault
+environment: staging
+fault: {kind: none, delivery: config}
+intensity: 0
+timing: {warmup_s: 30, observe_s: 600, cooldown_s: 20}
+load: {rate: 10}
+ground_truth: {bad_release: false, expected_l0: promote}

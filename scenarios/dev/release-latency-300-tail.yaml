@@ -1,0 +1,10 @@
+# Tail latency: +300..600 ms on 3% of requests. The p99 lands near L0's 500 ms threshold.
+id: release-latency-300-tail
+family: release
+description: 300-600 ms added to 3% of user requests
+environment: staging
+fault: {kind: latency, delivery: config, latency_ms: 300, jitter_ms: 300, fraction: 0.03}
+intensity: 0.03
+timing: {warmup_s: 30, observe_s: 600, cooldown_s: 20}
+load: {rate: 10}
+ground_truth: {bad_release: true, expected_l0: abort}

@@ -1,0 +1,10 @@
+# Clearly bad: 5% of user requests fail with a 500, five times L0's 1% threshold.
+id: release-errors-05
+family: release
+description: 5% of user requests answer 500
+environment: staging
+fault: {kind: http_errors, delivery: config, error_rate: 0.05}
+intensity: 0.05
+timing: {warmup_s: 30, observe_s: 600, cooldown_s: 20}
+load: {rate: 10}
+ground_truth: {bad_release: true, expected_l0: abort}

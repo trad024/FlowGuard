@@ -1,0 +1,11 @@
+# Subtly bad: 0.5% 5xx is a real regression but below L0's fixed 1% threshold, so L0 is
+# expected to promote it (a known L0 miss that the agents should catch).
+id: release-errors-0005
+family: release
+description: 0.5% of user requests answer 500 (below the L0 threshold)
+environment: staging
+fault: {kind: http_errors, delivery: config, error_rate: 0.005}
+intensity: 0.005
+timing: {warmup_s: 30, observe_s: 600, cooldown_s: 20}
+load: {rate: 10}
+ground_truth: {bad_release: true, expected_l0: promote}
