@@ -5,5 +5,5 @@
 # default value of its --jwt-secret flag and the same value in a unit test. It signs tokens for
 # podinfo's demo /token endpoint only, protects nothing in FlowGuard, and is public upstream.
 # Re-check these lines if app/podinfo/cmd/podinfo/main.go or token_test.go ever change.
-/repo/app/podinfo/cmd/podinfo/main.go:generic-api-key:82
+/repo/app/podinfo/cmd/podinfo/main.go:generic-api-key:83
 /repo/app/podinfo/pkg/api/grpc/token_test.go:generic-api-key:27

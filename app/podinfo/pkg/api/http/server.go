@@ -71,6 +71,7 @@ type Config struct {
 	FaultLatencyMs        int           `mapstructure:"fault-latency-ms"`
 	FaultJitterMs         int           `mapstructure:"fault-jitter-ms"`
 	FaultFraction         float64       `mapstructure:"fault-fraction"`
+	FaultAdmin            bool          `mapstructure:"fault-admin"`
 	Unhealthy             bool          `mapstructure:"unhealthy"`
 	Unready               bool          `mapstructure:"unready"`
 	JWTSecret             string        `mapstructure:"jwt-secret"`
@@ -85,6 +86,7 @@ type Server struct {
 	handler        http.Handler
 	tracer         trace.Tracer
 	tracerProvider *sdktrace.TracerProvider
+	fault          *faultMiddleware // FlowGuard (D19)
 }
 
 func NewServer(config *Config, logger *zap.Logger) (*Server, error) {
@@ -155,22 +157,30 @@ func (s *Server) registerMiddlewares() {
 	if s.config.RandomError {
 		s.router.Use(randomErrorMiddleware)
 	}
-	// FlowGuard (D19): graded fault injection, off unless configured
-	fault := NewFaultMiddleware(FaultConfig{
-		ErrorRate: s.config.FaultErrorRate,
-		LatencyMs: s.config.FaultLatencyMs,
-		JitterMs:  s.config.FaultJitterMs,
-		Fraction:  s.config.FaultFraction,
-		Hostname:  s.config.Hostname,
-	})
-	if fault.cfg.Enabled() {
-		s.router.Use(fault.Handler)
+	// FlowGuard (D19): graded fault injection, off unless configured or adjustable at run time
+	if s.faultMiddleware().Config().Enabled() || s.config.FaultAdmin {
+		s.router.Use(s.fault.Handler)
 	}
+}
+
+// faultMiddleware builds the fault middleware once, from the flags.
+func (s *Server) faultMiddleware() *faultMiddleware {
+	if s.fault == nil {
+		s.fault = NewFaultMiddleware(FaultConfig{
+			ErrorRate: s.config.FaultErrorRate,
+			LatencyMs: s.config.FaultLatencyMs,
+			JitterMs:  s.config.FaultJitterMs,
+			Fraction:  s.config.FaultFraction,
+			Hostname:  s.config.Hostname,
+		})
+	}
+	return s.fault
 }
 
 func (s *Server) ListenAndServe() (*http.Server, *http.Server, *int32, *int32) {
 	ctx := context.Background()
 
+	s.faultMiddleware() // before the metrics server, which serves its admin endpoint
 	go s.startMetricsServer()
 
 	s.initTracer(ctx)
@@ -282,6 +292,9 @@ func (s *Server) startMetricsServer() {
 	if s.config.PortMetrics > 0 {
 		mux := http.DefaultServeMux
 		mux.Handle("/metrics", promhttp.Handler())
+		if s.config.FaultAdmin {
+			mux.Handle("/fault", s.fault.AdminHandler()) // FlowGuard (D19): run-time faults
+		}
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("OK"))

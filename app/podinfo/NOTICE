@@ -27,3 +27,9 @@ Changes:
             --fault-fraction, also PODINFO_FAULT_* env), four Config fields and the middleware
             registration in pkg/api/http/server.go. Off by default; user routes only; probes and
             the metrics port are never touched.
+2026-10-27  SOURCE MODIFIED (D19, amended again): fault settings can change at run time.
+            fault.go keeps them in an atomic pointer, adds a memory leak at a fixed rate and an
+            admin handler (GET/PUT/DELETE /fault) served on the metrics port only with
+            --fault-admin (PODINFO_FAULT_ADMIN); server.go builds the middleware before the
+            metrics server and registers it when --fault-admin is set; main.go adds the flag.
+            Injected errors answer {"error": "internal error", "hostname": ...}.

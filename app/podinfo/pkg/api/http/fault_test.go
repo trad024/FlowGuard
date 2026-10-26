@@ -131,7 +131,7 @@ func TestInjectedErrorNamesThePod(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 		t.Fatalf("body is not JSON: %q", rr.Body.String())
 	}
-	if body["hostname"] != "podinfo-abc-1" || body["error"] != "injected fault" {
+	if body["hostname"] != "podinfo-abc-1" || body["error"] != "internal error" {
 		t.Errorf("unexpected body %v", body)
 	}
 }
@@ -143,9 +143,9 @@ func TestFaultIsOffByDefaultAndValuesAreClamped(t *testing.T) {
 	if (FaultConfig{ErrorRate: 0.5, Fraction: 0}).Enabled() {
 		t.Error("fraction 0 must disable the fault")
 	}
-	m := NewFaultMiddleware(FaultConfig{ErrorRate: 7, Fraction: -1, LatencyMs: -5})
-	if m.cfg.ErrorRate != 1 || m.cfg.Fraction != 0 || m.cfg.LatencyMs != 0 {
-		t.Errorf("not clamped: %+v", m.cfg)
+	m := NewFaultMiddleware(FaultConfig{ErrorRate: 7, Fraction: -1, LatencyMs: -5, LeakKBPerSec: -1})
+	if c := m.Config(); c.ErrorRate != 1 || c.Fraction != 0 || c.LatencyMs != 0 || c.LeakKBPerSec != 0 {
+		t.Errorf("not clamped: %+v", c)
 	}
 }
 
@@ -194,4 +194,71 @@ func TestInjectedErrorsAppearInPodinfoMetrics(t *testing.T) {
 		t.Errorf("5xx share on path=root is %.4f, want about 0.05", share)
 	}
 	t.Logf("path=root: %v requests, %.2f%% 5xx", total, 100*share)
+}
+
+func TestFaultSettingsChangeAtRunTime(t *testing.T) {
+	m, _ := seeded(FaultConfig{Fraction: 1})
+	h := m.Handler(okHandler)
+	if code := serve(h, "/").Code; code != http.StatusOK {
+		t.Fatalf("no fault configured, got %d", code)
+	}
+	m.Set(FaultConfig{ErrorRate: 1, Fraction: 1})
+	if code := serve(h, "/").Code; code != http.StatusInternalServerError {
+		t.Fatalf("after Set, got %d, want 500", code)
+	}
+	if code := serve(h, "/readyz").Code; code != http.StatusOK {
+		t.Fatalf("probes must stay untouched at run time, got %d", code)
+	}
+	m.Set(FaultConfig{})
+	if code := serve(h, "/").Code; code != http.StatusOK {
+		t.Fatalf("after clearing, got %d", code)
+	}
+}
+
+func TestFaultAdminEndpoint(t *testing.T) {
+	m, _ := seeded(FaultConfig{Hostname: "podinfo-abc-1"})
+	admin := m.AdminHandler()
+	put := httptest.NewRequest(http.MethodPut, "/fault",
+		strings.NewReader(`{"error_rate": 0.2, "latency_ms": 50, "fraction": 1}`))
+	rr := httptest.NewRecorder()
+	admin.ServeHTTP(rr, put)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT returned %d", rr.Code)
+	}
+	if c := m.Config(); c.ErrorRate != 0.2 || c.LatencyMs != 50 || c.Hostname != "podinfo-abc-1" {
+		t.Fatalf("settings not applied: %+v", c)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(serve(admin, "/fault").Body.Bytes(), &got)
+	if got["settings"].(map[string]any)["error_rate"] != 0.2 {
+		t.Errorf("GET shows %v", got)
+	}
+	bad := httptest.NewRecorder()
+	admin.ServeHTTP(bad, httptest.NewRequest(http.MethodPut, "/fault", strings.NewReader("{")))
+	if bad.Code != http.StatusBadRequest {
+		t.Errorf("invalid JSON returned %d", bad.Code)
+	}
+	del := httptest.NewRecorder()
+	admin.ServeHTTP(del, httptest.NewRequest(http.MethodDelete, "/fault", nil))
+	if c := m.Config(); del.Code != http.StatusOK || c.ErrorRate != 0 || c.LatencyMs != 0 {
+		t.Errorf("DELETE did not clear: %d %+v", del.Code, c)
+	}
+}
+
+func TestFaultLeakGrowsAndIsReleased(t *testing.T) {
+	m := NewFaultMiddleware(FaultConfig{})
+	m.leakOnce(256)
+	m.leakOnce(256)
+	if got := m.LeakedBytes(); got != 512*1024 {
+		t.Fatalf("leaked %d bytes, want %d", got, 512*1024)
+	}
+	m.Set(FaultConfig{LeakKBPerSec: 64})
+	time.Sleep(2200 * time.Millisecond)
+	if got := m.LeakedBytes(); got < 2*64*1024 {
+		t.Errorf("running leak held %d bytes after 2s, want at least %d", got, 2*64*1024)
+	}
+	m.Set(FaultConfig{})
+	if got := m.LeakedBytes(); got != 0 {
+		t.Errorf("leak not released: %d bytes", got)
+	}
 }

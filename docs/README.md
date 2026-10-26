@@ -51,3 +51,5 @@ The project blueprint is the reference for every decision. Key points for quick 
 | 2026-10-27 | 4a | Security decisions counted once per distinct (commit, decision), and the gate logs a decision only if the audit log lacks it | Restarts re-checked the same blocked commit and inflated the counts |
 | 2026-10-27 | 4a | DSO6 metric is "executed while the gate required a human, without approval" (any tier), plus "executed after a reject" | Tier alone misses medium actions that need a human, e.g. in prod |
 | 2026-10-27 | 4a | LogSieve `Data.zip` deleted after inspection; `Study_Steps.zip` not downloaded | No line-level labels in Data.zip; disk at 96% |
+| 2026-10-27 | 4a | `.gitattributes` forces LF in working copies | `core.autocrlf=true` rewrote files with CRLF on every scenario branch switch, which gofmt and the LF rule reject |
+| 2026-10-27 | 4a | A test checks every `.gitleaksignore` entry still points at the demo secret | Two edits to podinfo's `main.go` already shifted the line silently |

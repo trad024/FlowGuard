@@ -1,0 +1,4 @@
+# LF everywhere, whatever core.autocrlf says (team rule: UTF-8 without BOM, LF)
+* text=auto eol=lf
+*.png binary
+*.zip binary

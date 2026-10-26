@@ -177,3 +177,14 @@ def test_podinfo_metrics_and_liveness_avoid_the_fault_middleware():
     # deploy-version replaces the whole command, so it must keep the flag
     for script in ("deploy-version.ps1", "deploy-version.sh"):
         assert "--port-metrics=9797" in (INFRA / "scripts" / script).read_text()
+
+
+def test_runtime_fault_admin_is_enabled_in_staging_only():
+    def env_names(overlay):
+        kust = yaml.safe_load(
+            (INFRA / "apps" / "podinfo" / overlay / "kustomization.yaml").read_text()
+        )
+        return "PODINFO_FAULT_ADMIN" in json.dumps(kust.get("patches", []))
+
+    assert env_names("staging")
+    assert not env_names("prod")

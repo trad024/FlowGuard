@@ -8,3 +8,15 @@ labels:
       flowguard/environment: staging
     includeSelectors: false
     includeTemplates: true
+patches:
+  # Run-time fault settings (D19 amended) for runtime-incident scenarios: staging only.
+  # The admin endpoint is on the metrics port, which no Service exposes.
+  - target:
+      kind: Rollout
+      name: podinfo
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: PODINFO_FAULT_ADMIN
+            value: "true"
