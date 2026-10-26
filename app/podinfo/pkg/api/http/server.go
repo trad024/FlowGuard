@@ -67,6 +67,10 @@ type Config struct {
 	RandomDelayMin        int           `mapstructure:"random-delay-min"`
 	RandomDelayMax        int           `mapstructure:"random-delay-max"`
 	RandomError           bool          `mapstructure:"random-error"`
+	FaultErrorRate        float64       `mapstructure:"fault-error-rate"`
+	FaultLatencyMs        int           `mapstructure:"fault-latency-ms"`
+	FaultJitterMs         int           `mapstructure:"fault-jitter-ms"`
+	FaultFraction         float64       `mapstructure:"fault-fraction"`
 	Unhealthy             bool          `mapstructure:"unhealthy"`
 	Unready               bool          `mapstructure:"unready"`
 	JWTSecret             string        `mapstructure:"jwt-secret"`
@@ -150,6 +154,17 @@ func (s *Server) registerMiddlewares() {
 	}
 	if s.config.RandomError {
 		s.router.Use(randomErrorMiddleware)
+	}
+	// FlowGuard (D19): graded fault injection, off unless configured
+	fault := NewFaultMiddleware(FaultConfig{
+		ErrorRate: s.config.FaultErrorRate,
+		LatencyMs: s.config.FaultLatencyMs,
+		JitterMs:  s.config.FaultJitterMs,
+		Fraction:  s.config.FaultFraction,
+		Hostname:  s.config.Hostname,
+	})
+	if fault.cfg.Enabled() {
+		s.router.Use(fault.Handler)
 	}
 }
 

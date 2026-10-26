@@ -1,4 +1,4 @@
-podinfo
+podinfo (modified by FlowGuard, see Changes below)
 Copyright Stefan Prodan and the podinfo contributors.
 Licensed under the Apache License, Version 2.0 (see LICENSE in this directory).
 
@@ -19,5 +19,11 @@ Changes:
             -> 0.60.0, golang.org/x/text replace floor 0.19.0 -> 0.42.0, go.opentelemetry.io/otel
             and otel/sdk 1.30.0 -> 1.44.0, github.com/golang-jwt/jwt/v4 4.5.0 -> 4.5.2,
             github.com/klauspost/compress 1.17.9 -> 1.18.7, and the versions they require.
-            'as' -> 'AS' in both Dockerfiles. No source code changed.
+            'as' -> 'AS' in both Dockerfiles. No source code changed then.
 2026-10-26  Runtime image alpine:3.20 (end-of-life 2026-04-01) -> alpine:3.24 in both Dockerfiles.
+2026-10-26  SOURCE MODIFIED (FlowGuard decision D19, amended): fault injection for graded bad
+            versions. New pkg/api/http/fault.go and fault_test.go; four flags in
+            cmd/podinfo/main.go (--fault-error-rate, --fault-latency-ms, --fault-jitter-ms,
+            --fault-fraction, also PODINFO_FAULT_* env), four Config fields and the middleware
+            registration in pkg/api/http/server.go. Off by default; user routes only; probes and
+            the metrics port are never touched.
