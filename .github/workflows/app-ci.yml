@@ -45,7 +45,7 @@ env:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       optional: ${{ steps.plan.outputs.optional }}
     steps:
@@ -79,7 +79,7 @@ jobs:
 
   build:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -100,7 +100,7 @@ jobs:
 
   unit:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -114,7 +114,7 @@ jobs:
   optional:
     needs: [plan, unit]
     if: needs.plan.outputs.optional != '[]'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     name: optional (${{ matrix.job }})
     strategy:
       fail-fast: false
@@ -173,7 +173,7 @@ jobs:
     needs: [plan, unit, optional]
     # Runs after the optional jobs whether they ran or were planned away, never without unit
     if: always() && needs.unit.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.optional.result)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
@@ -217,6 +217,18 @@ jobs:
             -Dsonar.exclusions=**/*_test.go
             -Dsonar.tests=app/podinfo
             -Dsonar.test.inclusions=**/*_test.go
+      - name: Scan counts annotation
+        # Public and machine-readable: the laptop deployer's L0 security gate reads it
+        run: |
+          python3 - <<'PY'
+          import json
+          t = json.load(open("reports/trivy.json"))
+          v = [x for r in t.get("Results", []) for x in r.get("Vulnerabilities") or []]
+          high = sum(x["Severity"] == "HIGH" for x in v)
+          critical = sum(x["Severity"] == "CRITICAL" for x in v)
+          leaks = len(json.load(open("reports/gitleaks.json")))
+          print(f"::notice title=scan-counts::trivy_high={high} trivy_critical={critical} gitleaks={leaks}")
+          PY
       - uses: actions/upload-artifact@v7
         with:
           name: scan-reports
@@ -225,7 +237,7 @@ jobs:
   push:
     needs: scans
     if: always() && needs.scans.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
