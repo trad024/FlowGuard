@@ -43,7 +43,7 @@ NOTE="Touched by infra/scripts/check-step3 to test the CI path filters: $STAMP"
 PUSHED=0
 git switch -q -c "$BRANCH"
 echo "Scenario branch $BRANCH; starting a deployer that follows it..."
-"$PYTHON" "$ROOT/ci/deployer.py" --branch "$BRANCH" run >/dev/null 2>&1 &
+"$PYTHON" "$ROOT/ci/deployer.py" --branch "$BRANCH" --no-prod run >/dev/null 2>&1 &
 DEP_PID=$!
 cleanup() {
   kill "$DEP_PID" 2>/dev/null

@@ -45,20 +45,30 @@ decision belongs to the Security agent (DSO4, Step 9) and its rule baseline (Ste
 
 Build, unit and scans are not in `optional-jobs.json`, so no plan can drop them.
 
-## Laptop deployer (D1)
+## Laptop deployer (D1, D23, DSO4 baseline)
 
 ```powershell
 py ci\deployer.py run            # poll and deploy; Ctrl+C to stop
 py ci\deployer.py run --once     # one poll
 py ci\deployer.py status --sha <commit>
-py ci\deployer.py --branch scenario/<id> run   # follow a scenario branch instead of dev
+py ci\deployer.py gate --sha <commit>           # scan counts and the L0 security verdict
+py ci\deployer.py --branch scenario/<id> --no-prod run   # a scenario branch, staging only
 ```
 
-It polls the GitHub API for the newest successful `app-ci` run on `dev`. When staging runs a
-different commit, it starts the load generator, deploys the image with
-`infra/scripts/deploy-version` (canary 20/50/100 under L0), waits for promotion or abort, stops
-the load and logs each step to `evaluation/runs/deployer-events.jsonl`. The deployed commit is
-read from the Rollout itself, so a restart never deploys twice.
+It polls the GitHub API for the newest successful `app-ci` run on `dev`, then:
+
+1. **L0 security gate (DSO4 baseline).** It reads the run's `scan-counts` annotation
+   (`trivy_high=… trivy_critical=… gitleaks=…`). Any finding, or no counts at all, blocks the
+   image: a `security_decision` event, no deployment.
+2. **Staging canary.** It starts the load generator, deploys the image with
+   `infra/scripts/deploy-version` (canary 20/50/100 under L0), waits for promotion or abort and
+   stops the load.
+3. **Prod canary (D23, L0).** After a promoted staging canary the same image goes through the
+   prod canary the same way (`--no-prod` stops after staging).
+
+Each step goes to `evaluation/runs/deployer-events.jsonl` and to the audit log
+(`agents/flowguard/audit.py`). The deployed commit is read from each Rollout, so a restart never
+deploys twice and still releases a staging-promoted commit to prod.
 
 Configuration: `.env` at the repo root (see `.env.example`). `GITHUB_TOKEN_READ` is optional; a
 fine-grained token with read access to this repository's Actions raises the limit from 60 to

@@ -63,7 +63,7 @@ $note = "Touched by infra/scripts/check-step3 to test the CI path filters: $stam
 $pushed = $false
 Invoke-Git switch -q -c $branch
 Write-Host "Scenario branch $branch; starting a deployer that follows it..."
-$dep = Start-Process -FilePath $python -ArgumentList "`"$deployerPy`" --branch $branch run" `
+$dep = Start-Process -FilePath $python -ArgumentList "`"$deployerPy`" --branch $branch --no-prod run" `
     -PassThru -WindowStyle Hidden
 try {
     [IO.File]::WriteAllText((Join-Path $Root "app\ci-trigger.txt"), $note)

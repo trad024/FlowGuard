@@ -10,10 +10,13 @@ from pathlib import Path
 import pytest
 
 import deployer
+from flowguard import audit_metrics
+from flowguard.audit import AuditLog
 
 IMAGE_REPO = "ghcr.io/trad024/flowguard-podinfo"
 SHA_OLD = "a" * 40
 SHA_NEW = "b" * 40
+CLEAN = "trivy_high=0 trivy_critical=0 gitleaks=0"
 
 
 def gh_run(run_number, sha, conclusion="success", event="push", path=deployer.WORKFLOW_PATH):
@@ -30,11 +33,36 @@ def gh_run(run_number, sha, conclusion="success", event="push", path=deployer.WO
 
 
 class FakeGitHub(BaseHTTPRequestHandler):
-    """Serves /actions/... like GitHub: ETag + 304, rate limiting, auth header recorded."""
+    """Serves the Actions API like GitHub: ETag + 304, rate limiting, jobs and annotations."""
 
     runs: list = []
     requests: list = []
     rate_limited = False
+    scan_messages: dict = {}  # run id -> scan-counts message; None = no annotation
+
+    def answer(self):
+        path = self.path
+        if "/check-runs/" in path:
+            run_id = int(path.split("/check-runs/")[1].split("/")[0]) - 9000
+            message = FakeGitHub.scan_messages.get(run_id, CLEAN)
+            notes = [{"title": "plan", "message": "mode=optimizer"}]
+            if message is not None:
+                notes.append({"title": "scan-counts", "message": message})
+            return notes
+        if "/jobs" in path:
+            run_id = int(path.split("/runs/")[1].split("/")[0])
+            return {
+                "jobs": [
+                    {"id": 8000 + run_id, "name": "plan"},
+                    {"id": 9000 + run_id, "name": "scans"},
+                ]
+            }
+        if "head_sha=" in path:
+            sha = path.split("head_sha=")[1].split("&")[0]
+            runs = [r for r in FakeGitHub.runs if r["head_sha"] == sha]
+        else:
+            runs = list(FakeGitHub.runs)
+        return {"total_count": len(runs), "workflow_runs": runs}
 
     def do_GET(self):  # noqa: N802 (http.server API)
         FakeGitHub.requests.append({"path": self.path, "headers": dict(self.headers)})
@@ -44,12 +72,7 @@ class FakeGitHub(BaseHTTPRequestHandler):
             self.send_header("X-RateLimit-Reset", "1999999999")
             self.end_headers()
             return
-        if "head_sha=" in self.path:
-            sha = self.path.split("head_sha=")[1].split("&")[0]
-            runs = [r for r in FakeGitHub.runs if r["head_sha"] == sha]
-        else:
-            runs = list(FakeGitHub.runs)
-        body = json.dumps({"total_count": len(runs), "workflow_runs": runs}).encode()
+        body = json.dumps(self.answer()).encode()
         etag = f'"{hash(body)}"'
         if self.headers.get("If-None-Match") == etag:
             self.send_response(304)
@@ -68,6 +91,7 @@ class FakeGitHub(BaseHTTPRequestHandler):
 @pytest.fixture
 def api():
     FakeGitHub.runs, FakeGitHub.requests, FakeGitHub.rate_limited = [], [], False
+    FakeGitHub.scan_messages = {}
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), FakeGitHub)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}"
@@ -75,8 +99,10 @@ def api():
     httpd.server_close()
 
 
-def config(api_url, token=""):
-    return deployer.Config(api_url=api_url, token=token, image=IMAGE_REPO, rollout_timeout=60)
+def config(api_url, token="", prod=False):
+    return deployer.Config(
+        api_url=api_url, token=token, image=IMAGE_REPO, rollout_timeout=60, release_to_prod=prod
+    )
 
 
 def rollout(image, phase="Healthy", stable="h1", current="h1", abort=False, generation=1):
@@ -93,11 +119,15 @@ def rollout(image, phase="Healthy", stable="h1", current="h1", abort=False, gene
     }
 
 
+def promoted(image):
+    return rollout(image, phase="Healthy", stable="h2", current="h2", generation=2)
+
+
 class FakeCluster:
     """Starts on `image`; after deploy() it plays back the given Rollout states."""
 
     def __init__(self, image, after_deploy=(), fail=False):
-        self.state = rollout(image)
+        self.state = rollout(image) if isinstance(image, str) else image
         self.after_deploy = list(after_deploy)
         self.fail = fail
         self.deployed = []
@@ -136,24 +166,27 @@ class Clock:
         self.now += seconds
 
 
-def make(api_url, cluster, tmp_path, token=""):
+def make(api_url, tmp_path, staging, prod=None, token="", release_to_prod=False):
     clock = Clock()
-    events = deployer.EventLog(tmp_path / "events.jsonl")
-    d = deployer.Deployer(
-        config(api_url, token),
-        deployer.GitHub(config(api_url, token)),
-        cluster,
-        FakeLoad(),
+    cfg = config(api_url, token, release_to_prod)
+    events = deployer.EventLog(tmp_path / "events.jsonl", AuditLog(tmp_path / "audit.db"))
+    return deployer.Deployer(
+        cfg,
+        deployer.GitHub(cfg),
+        {"staging": staging, "prod": prod or FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}")},
+        {"staging": FakeLoad(), "prod": FakeLoad()},
         events,
         sleep=clock.sleep,
         clock=clock,
     )
-    return d
 
 
 def events(tmp_path):
     lines = (tmp_path / "events.jsonl").read_text().splitlines()
     return [json.loads(line) for line in lines]
+
+
+# ---------------------------------------------------------------- GitHub client
 
 
 def test_latest_success_ignores_failures_other_events_and_older_runs(api):
@@ -199,71 +232,206 @@ def test_run_for_commit_only_counts_the_app_workflow(api):
     assert gh.run_for_commit(SHA_NEW)["run_number"] == 2
 
 
+def test_scan_counts_come_from_the_scans_job_annotation(api):
+    FakeGitHub.scan_messages = {7: "trivy_high=3 trivy_critical=1 gitleaks=0", 8: None}
+    gh = deployer.GitHub(config(api))
+    assert gh.scan_counts(7) == {"trivy_high": 3, "trivy_critical": 1, "gitleaks": 0}
+    assert gh.scan_counts(8) is None
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (CLEAN, {"trivy_high": 0, "trivy_critical": 0, "gitleaks": 0}),
+        (
+            "gitleaks=2 trivy_critical=0 trivy_high=11",
+            {"trivy_high": 11, "trivy_critical": 0, "gitleaks": 2},
+        ),
+        ("trivy_high=0 trivy_critical=0", None),  # incomplete
+        ("", None),
+    ],
+)
+def test_parse_scan_counts(message, expected):
+    assert deployer.parse_scan_counts(message) == expected
+
+
+@pytest.mark.parametrize(
+    ("counts", "decision"),
+    [
+        ({"trivy_high": 0, "trivy_critical": 0, "gitleaks": 0}, "allow"),
+        ({"trivy_high": 1, "trivy_critical": 0, "gitleaks": 0}, "block"),
+        ({"trivy_high": 0, "trivy_critical": 1, "gitleaks": 0}, "block"),
+        ({"trivy_high": 0, "trivy_critical": 0, "gitleaks": 1}, "block"),
+        (None, "block"),  # no counts: fail closed
+    ],
+)
+def test_l0_security_verdict(counts, decision):
+    assert deployer.security_verdict(counts)[0] == decision
+
+
+# ---------------------------------------------------------------- staging
+
+
 def test_nothing_to_do_when_staging_already_runs_the_newest_image(api, tmp_path):
     FakeGitHub.runs = [gh_run(1, SHA_NEW)]
-    cluster = FakeCluster(f"{IMAGE_REPO}:{SHA_NEW}")
-    assert make(api, cluster, tmp_path).poll_once() == "idle"
-    assert cluster.deployed == []
+    staging = FakeCluster(f"{IMAGE_REPO}:{SHA_NEW}")
+    assert make(api, tmp_path, staging).poll_once() == {}
+    assert staging.deployed == []
 
 
 def test_nothing_to_do_without_a_successful_run(api, tmp_path):
     FakeGitHub.runs = [gh_run(1, SHA_NEW, conclusion="failure")]
-    cluster = FakeCluster("ghcr.io/stefanprodan/podinfo:6.7.1")
-    assert make(api, cluster, tmp_path).poll_once() == "idle"
+    staging = FakeCluster("ghcr.io/stefanprodan/podinfo:6.7.1")
+    assert make(api, tmp_path, staging).poll_once() == {}
 
 
 def test_new_successful_run_is_deployed_under_load_until_promoted(api, tmp_path):
     FakeGitHub.runs = [gh_run(7, SHA_NEW)]
     new = f"{IMAGE_REPO}:{SHA_NEW}"
-    cluster = FakeCluster(
+    staging = FakeCluster(
         f"{IMAGE_REPO}:{SHA_OLD}",
         after_deploy=[
             rollout(new, phase="Healthy", stable="h1", current="h1", generation=1),  # not observed
             rollout(new, phase="Progressing", stable="h1", current="h2", generation=2),
-            rollout(new, phase="Healthy", stable="h2", current="h2", generation=2),
+            promoted(new),
         ],
     )
-    d = make(api, cluster, tmp_path)
-    assert d.poll_once() == "promoted"
-    assert cluster.deployed == [(new, f"FlowGuard {SHA_NEW[:7]}")]
-    assert d.loadgen.calls == [("start", SHA_NEW[:12]), ("stop",)]
+    d = make(api, tmp_path, staging)
+    assert d.poll_once() == {"staging": "promoted"}
+    assert staging.deployed == [(new, f"FlowGuard {SHA_NEW[:7]}")]
+    assert d.loadgens["staging"].calls == [("start", SHA_NEW[:12]), ("stop",)]
     names = [e["event"] for e in events(tmp_path)]
-    assert names == ["run_detected", "deploy_started", "deploy_finished"]
+    assert names == ["security_decision", "run_detected", "deploy_started", "deploy_finished"]
     finished = events(tmp_path)[-1]
-    assert (finished["outcome"], finished["sha"], finished["run_id"]) == ("promoted", SHA_NEW, 1007)
+    assert (finished["outcome"], finished["sha"], finished["environment"]) == (
+        "promoted",
+        SHA_NEW,
+        "staging",
+    )
+
+
+def test_every_deployer_event_also_reaches_the_audit_log(api, tmp_path):
+    FakeGitHub.runs = [gh_run(7, SHA_NEW)]
+    staging = FakeCluster(
+        f"{IMAGE_REPO}:{SHA_OLD}", after_deploy=[promoted(f"{IMAGE_REPO}:{SHA_NEW}")]
+    )
+    make(api, tmp_path, staging).poll_once()
+    log = AuditLog(tmp_path / "audit.db")
+    kinds = [(e["source"], e["kind"]) for e in log.events()]
+    assert kinds == [
+        ("security_gate", "security_decision"),
+        ("deployer", "run_detected"),
+        ("deployer", "deploy_started"),
+        ("deployer", "deploy_finished"),
+    ]
+    assert audit_metrics.deployment_outcomes(log, "staging") == {"promoted": 1}
+    assert audit_metrics.security_decisions(log) == {"allow": 1}
+    (finished,) = log.events("deploy_finished")
+    assert finished["commit_sha"] == SHA_NEW and finished["environment"] == "staging"
 
 
 def test_an_aborted_canary_is_reported_and_not_redeployed(api, tmp_path):
     FakeGitHub.runs = [gh_run(2, SHA_NEW)]
     new = f"{IMAGE_REPO}:{SHA_NEW}"
-    cluster = FakeCluster(
+    staging = FakeCluster(
         f"{IMAGE_REPO}:{SHA_OLD}",
         after_deploy=[rollout(new, phase="Degraded", stable="h1", current="h2", abort=True)],
     )
-    d = make(api, cluster, tmp_path)
-    assert d.poll_once() == "aborted"
+    d = make(api, tmp_path, staging, release_to_prod=True)
+    assert d.poll_once() == {"staging": "aborted"}  # no prod release after an abort
     # The Rollout spec now names the aborted commit: the next poll leaves it alone
-    assert d.poll_once() == "idle"
-    assert len(cluster.deployed) == 1
+    assert d.poll_once() == {}
+    assert len(staging.deployed) == 1
 
 
 def test_a_canary_that_never_finishes_times_out_and_stops_the_load(api, tmp_path):
     FakeGitHub.runs = [gh_run(1, SHA_NEW)]
-    new = f"{IMAGE_REPO}:{SHA_NEW}"
-    stuck = rollout(new, phase="Progressing", stable="h1", current="h2", generation=2)
-    cluster = FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}", after_deploy=[stuck] * 100)
-    d = make(api, cluster, tmp_path)
-    assert d.poll_once() == "timeout"
-    assert d.loadgen.calls[-1] == ("stop",)
+    stuck = rollout(
+        f"{IMAGE_REPO}:{SHA_NEW}", phase="Progressing", stable="h1", current="h2", generation=2
+    )
+    d = make(api, tmp_path, FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}", after_deploy=[stuck] * 100))
+    assert d.poll_once() == {"staging": "timeout"}
+    assert d.loadgens["staging"].calls[-1] == ("stop",)
 
 
 def test_a_failed_deploy_script_is_logged_and_stops_the_load(api, tmp_path):
     FakeGitHub.runs = [gh_run(1, SHA_NEW)]
-    cluster = FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}", fail=True)
-    d = make(api, cluster, tmp_path)
-    assert d.poll_once() == "error"
-    assert d.loadgen.calls[-1] == ("stop",)
-    assert "patch refused" in events(tmp_path)[1]["detail"]
+    d = make(api, tmp_path, FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}", fail=True))
+    assert d.poll_once() == {"staging": "error"}
+    assert d.loadgens["staging"].calls[-1] == ("stop",)
+    error = next(e for e in events(tmp_path) if e["event"] == "deploy_error")
+    assert "patch refused" in error["detail"]
+
+
+# ---------------------------------------------------------------- L0 security gate
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["trivy_high=1 trivy_critical=0 gitleaks=0", "trivy_high=0 trivy_critical=0 gitleaks=2", None],
+)
+def test_security_gate_blocks_findings_and_missing_counts_without_deploying(api, tmp_path, message):
+    FakeGitHub.runs = [gh_run(4, SHA_NEW)]
+    FakeGitHub.scan_messages = {1004: message}
+    staging = FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}")
+    d = make(api, tmp_path, staging, release_to_prod=True)
+    assert d.poll_once() == {"staging": "blocked"}
+    assert staging.deployed == [] and d.loadgens["staging"].calls == []
+    (decision,) = events(tmp_path)
+    assert (decision["event"], decision["decision"], decision["sha"]) == (
+        "security_decision",
+        "block",
+        SHA_NEW,
+    )
+    # Logged once: later polls do not repeat the decision for the same commit
+    assert d.poll_once() == {}
+    assert len(events(tmp_path)) == 1
+    assert audit_metrics.security_decisions(AuditLog(tmp_path / "audit.db")) == {"block": 1}
+
+
+# ---------------------------------------------------------------- prod (D23, L0)
+
+
+def test_a_promoted_staging_canary_is_released_to_prod(api, tmp_path):
+    FakeGitHub.runs = [gh_run(9, SHA_NEW)]
+    new = f"{IMAGE_REPO}:{SHA_NEW}"
+    staging = FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}", after_deploy=[promoted(new)])
+    prod = FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}", after_deploy=[promoted(new)])
+    d = make(api, tmp_path, staging, prod, release_to_prod=True)
+    assert d.poll_once() == {"staging": "promoted", "prod": "promoted"}
+    assert prod.deployed == [(new, f"FlowGuard {SHA_NEW[:7]}")]
+    assert d.loadgens["prod"].calls == [("start", SHA_NEW[:12]), ("stop",)]
+    finished = [e for e in events(tmp_path) if e["event"] == "deploy_finished"]
+    assert [(e["environment"], e["outcome"]) for e in finished] == [
+        ("staging", "promoted"),
+        ("prod", "promoted"),
+    ]
+    assert d.poll_once() == {}  # both environments now run the commit
+
+
+def test_a_pending_prod_release_is_picked_up_after_a_restart(api, tmp_path):
+    FakeGitHub.runs = [gh_run(9, SHA_NEW)]
+    new = f"{IMAGE_REPO}:{SHA_NEW}"
+    staging = FakeCluster(promoted(new))  # promoted before the restart
+    prod = FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}", after_deploy=[promoted(new)])
+    d = make(api, tmp_path, staging, prod, release_to_prod=True)
+    assert d.poll_once() == {"prod": "promoted"}
+    assert staging.deployed == []
+
+
+def test_no_prod_release_when_disabled(api, tmp_path):
+    FakeGitHub.runs = [gh_run(9, SHA_NEW)]
+    new = f"{IMAGE_REPO}:{SHA_NEW}"
+    prod = FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}")
+    d = make(
+        api, tmp_path, FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}", after_deploy=[promoted(new)]), prod
+    )
+    assert d.poll_once() == {"staging": "promoted"}
+    assert d.poll_once() == {}
+    assert prod.deployed == []
+
+
+# ---------------------------------------------------------------- config and CLI
 
 
 def test_deployed_sha_only_trusts_images_from_the_ci_registry():
@@ -323,3 +491,12 @@ def test_branch_option_overrides_the_configured_branch(monkeypatch, tmp_path, ca
     deployer.main(["--env-file", env_file, "--branch", "scenario/x", "status", "--sha", SHA_NEW])
     assert seen == ["dev", "scenario/x"]
     assert capsys.readouterr().out.split() == ["null", "null"]
+
+
+def test_gate_command_prints_counts_and_verdict(api, monkeypatch, capsys):
+    FakeGitHub.runs = [gh_run(3, SHA_NEW)]
+    FakeGitHub.scan_messages = {1003: "trivy_high=0 trivy_critical=2 gitleaks=0"}
+    monkeypatch.setattr(deployer, "load_config", lambda env_file: config(api))
+    assert deployer.main(["gate", "--sha", SHA_NEW]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["counts"]["trivy_critical"] == 2 and out["decision"] == "block"

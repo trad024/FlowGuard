@@ -1,17 +1,25 @@
-"""Laptop deployer (D1): polls GitHub for successful app-ci runs on dev and deploys each new
-image to the staging canary. No webhooks: GitHub cannot reach the laptop.
+"""Laptop deployer (D1, D23, DSO4 baseline): polls GitHub for successful app-ci runs and
+releases each new image to staging, then to prod. No webhooks: GitHub cannot reach the laptop.
 
-On every poll it compares the newest successful run's commit with the image the staging
-Rollout already runs. When they differ it starts the load generator (the L0 analysis needs
-traffic), deploys the image with infra/scripts/deploy-version, waits until the canary is
-promoted or aborted, stops the load and logs every step to evaluation/runs/deployer-events.jsonl.
-Which commit is deployed is read back from the Rollout itself, so the deployer keeps no state
-and a restart never deploys twice; an aborted commit stays aborted until a newer one succeeds.
+On every poll, for the newest successful run on the branch:
+  1. L0 security gate (DSO4 baseline): the run's scans job publishes its counts as a
+     "scan-counts" annotation. Any HIGH or CRITICAL Trivy finding or any Gitleaks finding, or
+     no counts at all, blocks the image: it is logged as a security decision and not deployed.
+  2. Staging canary: with the load generator running (L0 analysis needs traffic) it deploys the
+     image with infra/scripts/deploy-version and waits until the canary is promoted or aborted.
+  3. Prod canary (D23, L0): after a promoted staging canary, the same image goes through the
+     prod canary the same way. In agents mode (Step 5) Release proposes this and the gate sends
+     it to a human; at L0 the rule releases it.
+Which commit each environment runs is read back from its Rollout, so the deployer keeps no
+state: a restart never deploys twice and picks up a pending prod release; an aborted commit
+stays aborted until a newer one succeeds. Every step goes to evaluation/runs/deployer-events.jsonl
+and to the audit log (agents/flowguard/audit.py).
 
     python ci/deployer.py run              # poll forever (Ctrl+C to stop)
-    python ci/deployer.py --branch scenario/<id> run   # follow a scenario branch instead of dev
     python ci/deployer.py run --once       # one poll, deploy if needed, then exit
+    python ci/deployer.py --branch scenario/<id> --no-prod run   # a scenario branch, staging only
     python ci/deployer.py status --sha SHA # the app-ci run for a commit, as JSON
+    python ci/deployer.py gate --sha SHA   # its scan counts and the L0 security verdict
 
 Configuration comes from the environment or from .env at the repo root (never committed):
 GITHUB_TOKEN_READ (optional read-only token; without it GitHub allows 60 requests per hour),
@@ -24,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -35,10 +44,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "agents"))
+from flowguard.audit import AuditLog  # noqa: E402 (needs the path above)
+
 SCRIPTS = ROOT / "infra" / "scripts"
 RUNS_DIR = ROOT / "evaluation" / "runs"
 PORTS = {"staging": 9898, "prod": 9899}
 WORKFLOW_PATH = ".github/workflows/app-ci.yml"
+SCAN_KEYS = ("trivy_high", "trivy_critical", "gitleaks")
 
 
 @dataclass
@@ -47,10 +60,10 @@ class Config:
     branch: str = "dev"
     workflow: str = "app-ci.yml"
     image: str = "ghcr.io/trad024/flowguard-podinfo"
-    namespace: str = "staging"
     token: str = ""
     poll_seconds: int = 60
     rollout_timeout: int = 1200
+    release_to_prod: bool = True
     api_url: str = "https://api.github.com"
 
 
@@ -68,10 +81,10 @@ def read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
-def load_config(env_file: Path, namespace: str = "staging") -> Config:
+def load_config(env_file: Path) -> Config:
     """The process environment wins over .env, which wins over the defaults."""
     env = {**read_env_file(env_file), **os.environ}
-    cfg = Config(namespace=namespace, token=env.get("GITHUB_TOKEN_READ", ""))
+    cfg = Config(token=env.get("GITHUB_TOKEN_READ", ""))
     cfg.repo = env.get("FLOWGUARD_REPO") or cfg.repo
     cfg.branch = env.get("FLOWGUARD_BRANCH") or cfg.branch
     cfg.workflow = env.get("FLOWGUARD_WORKFLOW") or cfg.workflow
@@ -80,6 +93,24 @@ def load_config(env_file: Path, namespace: str = "staging") -> Config:
     default_poll = 30 if cfg.token else 60
     cfg.poll_seconds = int(env.get("FLOWGUARD_POLL_SECONDS") or default_poll)
     return cfg
+
+
+def parse_scan_counts(message: str) -> dict[str, int] | None:
+    """'trivy_high=0 trivy_critical=0 gitleaks=0' -> counts; None unless all three are there."""
+    found = dict(re.findall(r"(\w+)=(\d+)", message or ""))
+    if not all(k in found for k in SCAN_KEYS):
+        return None
+    return {k: int(found[k]) for k in SCAN_KEYS}
+
+
+def security_verdict(counts: dict[str, int] | None) -> tuple[str, str]:
+    """L0 security gate (DSO4 baseline): block on any finding; no counts also blocks."""
+    if counts is None:
+        return "block", "no scan counts for this run"
+    findings = [f"{k}={v}" for k, v in counts.items() if v > 0]
+    if findings:
+        return "block", "findings: " + ", ".join(findings)
+    return "allow", "no HIGH, CRITICAL or Gitleaks finding"
 
 
 class RateLimited(Exception):
@@ -96,7 +127,7 @@ class GitHub:
         self.cfg = cfg
         self._cache: dict[str, tuple[str, dict]] = {}
 
-    def get(self, path: str) -> dict:
+    def get(self, path: str):
         url = self.cfg.api_url.rstrip("/") + path
         headers = {
             "Accept": "application/vnd.github+json",
@@ -143,9 +174,21 @@ class GitHub:
         runs = [r for r in data.get("workflow_runs", []) if r.get("path") == WORKFLOW_PATH]
         return max(runs, key=lambda r: r["run_number"], default=None)
 
+    def scan_counts(self, run_id: int) -> dict[str, int] | None:
+        """The counts the run's scans job published as its "scan-counts" annotation."""
+        jobs = self.get(f"/repos/{self.cfg.repo}/actions/runs/{run_id}/jobs?per_page=50")
+        for job in jobs.get("jobs", []):
+            if job.get("name") != "scans":
+                continue
+            notes = self.get(f"/repos/{self.cfg.repo}/check-runs/{job['id']}/annotations")
+            for note in notes:
+                if note.get("title") == "scan-counts":
+                    return parse_scan_counts(note.get("message", ""))
+        return None
+
 
 class Cluster:
-    """kubectl and the deploy-version script, kept behind one small interface for the tests."""
+    """kubectl and the deploy-version script for one namespace, behind a small interface."""
 
     def __init__(self, namespace: str):
         self.namespace = namespace
@@ -165,19 +208,13 @@ class Cluster:
             cmd = ["powershell", "-NoProfile", "-File", script, "good"]
             cmd += ["-Namespace", self.namespace, "-Message", message, "-Image", image]
         else:
-            cmd = [
-                "bash",
-                str(SCRIPTS / "deploy-version.sh"),
-                "good",
-                self.namespace,
-                message,
-                image,
-            ]
+            script = str(SCRIPTS / "deploy-version.sh")
+            cmd = ["bash", script, "good", self.namespace, message, image]
         subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
 class LoadGenerator:
-    """Runs evaluation/loadgen.py against the namespace for the length of one canary."""
+    """Runs evaluation/loadgen.py against one namespace for the length of one canary."""
 
     def __init__(self, namespace: str):
         self.namespace = namespace
@@ -206,15 +243,28 @@ def utc_now() -> str:
 
 
 class EventLog:
-    def __init__(self, path: Path):
-        self.path = path
+    """Each event goes to the JSONL file, to stdout and to the audit log."""
 
-    def write(self, event: str, **fields) -> dict:
+    def __init__(self, path: Path, audit: AuditLog | None = None):
+        self.path = path
+        self.audit = audit
+
+    def write(self, event: str, source: str = "deployer", **fields) -> dict:
         record = {"ts": utc_now(), "event": event, **fields}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8", newline="\n") as f:
             f.write(json.dumps(record) + "\n")
         print(json.dumps(record), flush=True)
+        if self.audit:
+            payload = {k: v for k, v in fields.items() if k not in ("environment", "sha")}
+            self.audit.event(
+                source,
+                event,
+                environment=fields.get("environment"),
+                commit_sha=fields.get("sha"),
+                ts=record["ts"],
+                **payload,
+            )
         return record
 
 
@@ -245,57 +295,90 @@ def rollout_outcome(rollout: dict, image: str) -> str | None:
 
 class Deployer:
     def __init__(
-        self, cfg, github, cluster, loadgen, events, sleep=time.sleep, clock=time.monotonic
+        self, cfg, github, clusters, loadgens, events, sleep=time.sleep, clock=time.monotonic
     ):
         self.cfg = cfg
         self.github = github
-        self.cluster = cluster
-        self.loadgen = loadgen
+        self.clusters = clusters  # {"staging": Cluster, "prod": Cluster}
+        self.loadgens = loadgens  # {"staging": LoadGenerator, "prod": LoadGenerator}
         self.events = events
         self.sleep = sleep
         self.clock = clock
+        self.blocked: set[str] = set()  # commits already refused by the security gate
 
-    def poll_once(self) -> str:
-        """One poll. Returns 'idle', or the outcome of the deployment it made."""
+    def poll_once(self) -> dict[str, str]:
+        """One poll. Returns what happened per environment; {} when there was nothing to do."""
         run = self.github.latest_success()
         if run is None:
-            return "idle"
+            return {}
         sha = run["head_sha"]
-        if deployed_sha(self.cluster.rollout(), self.cfg.image) == sha:
-            return "idle"
-        return self.deploy(run)
+        image = f"{self.cfg.image}:{sha}"
+        staging = self.clusters["staging"].rollout()
+        if deployed_sha(staging, self.cfg.image) != sha:
+            if sha in self.blocked:
+                return {}
+            if not self.security_gate(run, image):
+                self.blocked.add(sha)
+                return {"staging": "blocked"}
+            result = {"staging": self.release("staging", run)}
+            if result["staging"] == "promoted" and self.cfg.release_to_prod:
+                result["prod"] = self.release("prod", run)
+            return result
+        # Staging already runs this commit: release it to prod if that is still pending
+        if (
+            self.cfg.release_to_prod
+            and rollout_outcome(staging, image) == "promoted"
+            and deployed_sha(self.clusters["prod"].rollout(), self.cfg.image) != sha
+        ):
+            return {"prod": self.release("prod", run)}
+        return {}
 
-    def deploy(self, run: dict) -> str:
+    def security_gate(self, run: dict, image: str) -> bool:
+        counts = self.github.scan_counts(run["id"])
+        decision, reason = security_verdict(counts)
+        self.events.write(
+            "security_decision",
+            source="security_gate",
+            sha=run["head_sha"],
+            run_id=run["id"],
+            image=image,
+            decision=decision,
+            reason=reason,
+            **(counts or {}),
+        )
+        return decision == "allow"
+
+    def release(self, environment: str, run: dict) -> str:
         sha = run["head_sha"]
         image = f"{self.cfg.image}:{sha}"
         ids = {"sha": sha, "run_id": run["id"], "run_url": run.get("html_url"), "image": image}
-        self.events.write("run_detected", namespace=self.cfg.namespace, **ids)
-        log = self.loadgen.start(sha[:12])
+        self.events.write("run_detected", environment=environment, **ids)
+        loadgen = self.loadgens[environment]
+        log = loadgen.start(sha[:12])
         started = self.clock()
         outcome = "error"
         try:
-            self.cluster.deploy(image, f"FlowGuard {sha[:7]}")
-            self.events.write(
-                "deploy_started", namespace=self.cfg.namespace, load_log=str(log), **ids
-            )
-            outcome = self.wait(image)
+            self.clusters[environment].deploy(image, f"FlowGuard {sha[:7]}")
+            self.events.write("deploy_started", environment=environment, load_log=str(log), **ids)
+            outcome = self.wait(environment, image)
         except subprocess.CalledProcessError as exc:
-            self.events.write("deploy_error", detail=(exc.stderr or str(exc))[-500:], **ids)
+            detail = (exc.stderr or str(exc))[-500:]
+            self.events.write("deploy_error", environment=environment, detail=detail, **ids)
         finally:
-            self.loadgen.stop()
+            loadgen.stop()
         self.events.write(
             "deploy_finished",
-            namespace=self.cfg.namespace,
+            environment=environment,
             outcome=outcome,
             seconds=round(self.clock() - started),
             **ids,
         )
         return outcome
 
-    def wait(self, image: str) -> str:
+    def wait(self, environment: str, image: str) -> str:
         deadline = self.clock() + self.cfg.rollout_timeout
         while self.clock() < deadline:
-            outcome = rollout_outcome(self.cluster.rollout(), image)
+            outcome = rollout_outcome(self.clusters[environment].rollout(), image)
             if outcome:
                 return outcome
             self.sleep(10)
@@ -306,7 +389,7 @@ class Deployer:
             "deployer_started",
             repo=self.cfg.repo,
             branch=self.cfg.branch,
-            namespace=self.cfg.namespace,
+            release_to_prod=self.cfg.release_to_prod,
             authenticated=bool(self.cfg.token),
             poll_seconds=self.cfg.poll_seconds,
         )
@@ -326,29 +409,45 @@ class Deployer:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--env-file", type=Path, default=ROOT / ".env")
-    parser.add_argument("--namespace", default="staging", choices=sorted(PORTS))
     parser.add_argument("--branch", help="branch whose app-ci runs are deployed (default: dev)")
+    parser.add_argument("--no-prod", action="store_true", help="stop after the staging canary")
     sub = parser.add_subparsers(dest="command", required=True)
     p_run = sub.add_parser("run", help="poll and deploy")
     p_run.add_argument("--once", action="store_true", help="one poll, then exit")
     p_status = sub.add_parser("status", help="print the app-ci run for a commit as JSON")
     p_status.add_argument("--sha", required=True)
+    p_gate = sub.add_parser("gate", help="print a commit's scan counts and L0 security verdict")
+    p_gate.add_argument("--sha", required=True)
     args = parser.parse_args(argv)
 
-    cfg = load_config(args.env_file, args.namespace)
+    cfg = load_config(args.env_file)
     if args.branch:
         cfg.branch = args.branch
+    cfg.release_to_prod = not args.no_prod
     github = GitHub(cfg)
     if args.command == "status":
         run = github.run_for_commit(args.sha)
         keys = ("id", "head_sha", "status", "conclusion", "html_url", "created_at", "updated_at")
         print(json.dumps({k: run.get(k) for k in keys} if run else None))
         return 0
+    if args.command == "gate":
+        run = github.run_for_commit(args.sha)
+        counts = github.scan_counts(run["id"]) if run else None
+        decision, reason = security_verdict(counts)
+        print(json.dumps({"counts": counts, "decision": decision, "reason": reason}))
+        return 0
 
-    events = EventLog(RUNS_DIR / "deployer-events.jsonl")
-    deployer = Deployer(cfg, github, Cluster(cfg.namespace), LoadGenerator(cfg.namespace), events)
+    events = EventLog(RUNS_DIR / "deployer-events.jsonl", AuditLog.open())
+    envs = ("staging", "prod")
+    deployer = Deployer(
+        cfg,
+        github,
+        {env: Cluster(env) for env in envs},
+        {env: LoadGenerator(env) for env in envs},
+        events,
+    )
     if args.once:
-        print(deployer.poll_once())
+        print(json.dumps(deployer.poll_once()))
         return 0
     try:
         deployer.run_forever()
