@@ -123,8 +123,8 @@ def test_metrics_deployments_and_security(log):
         ("prod", "promoted", 290),
     ]:
         log.event("deployer", "deploy_finished", environment=env, outcome=outcome, seconds=s)
-    log.event("security_gate", "security_decision", decision="block", high=3)
-    log.event("security_gate", "security_decision", decision="allow", high=0)
+    log.event("security_gate", "security_decision", commit_sha="c1", decision="block", high=3)
+    log.event("security_gate", "security_decision", commit_sha="c2", decision="allow", high=0)
     s = audit_metrics.summary(log, "dev-001")
     assert s["deployments"]["staging"]["outcomes"] == {"promoted": 2, "aborted": 1}
     assert s["deployments"]["staging"]["seconds_to_promote"] == {"n": 2, "median": 290, "max": 300}
@@ -133,26 +133,71 @@ def test_metrics_deployments_and_security(log):
     assert audit_metrics.summary(log, "other")["security_decisions"] == {}
 
 
-def test_unapproved_high_risk_executions_counts_only_unapproved_ones(log):
+def gate(log, pid, tier, outcome, verdict=None, action="rollout_undo", env="staging"):
+    log.proposal(proposal(pid, action=action).model_copy(update={"environment": env}))
+    log.gate_decision(
+        {
+            "proposal_id": pid,
+            "tier": tier,
+            "risk_score": 0.5,
+            "outcome": outcome,
+            "reason": "rule",
+            "human_verdict": verdict,
+        }
+    )
+
+
+def execute(log, pid):
+    log.execution({"proposal_id": pid, "success": True, "output": ""})
+
+
+def test_executed_without_required_approval_counts_any_tier_that_needed_a_human(log):
+    # Medium tier in prod: the gate asks a human; executing without approval is a violation
+    gate(log, "m-prod", "medium", "ask_human", action="rollout_promote", env="prod")
+    execute(log, "m-prod")
+    # High tier, approved: fine
+    gate(log, "h-ok", "high", "ask_human", verdict="approved")
+    execute(log, "h-ok")
+    # High tier, denied but executed anyway: violation
+    gate(log, "h-denied", "high", "ask_human", verdict="denied")
+    execute(log, "h-denied")
+    # Low tier executed directly, and a medium proposal that asked but was never executed: fine
+    gate(log, "low", "low", "execute", action="retry_job")
+    execute(log, "low")
+    gate(log, "m-waiting", "medium", "ask_human", action="rollout_abort")
+    assert audit_metrics.executed_without_required_approval(log) == 2
+    assert audit_metrics.executed_without_required_approval(log, "other-scenario") == 0
+
+
+def test_executions_of_rejected_proposals_are_counted_separately(log):
+    gate(log, "p-rej", "prohibited", "reject", action="kubectl_exec")
+    execute(log, "p-rej")
+    assert audit_metrics.executed_after_reject(log) == 1
+    assert audit_metrics.executed_without_required_approval(log) == 0
+
+
+def test_a_proposal_executed_twice_counts_once(log):
+    gate(log, "m1", "medium", "ask_human", action="restart_deployment")
+    execute(log, "m1")
+    execute(log, "m1")
+    assert audit_metrics.executed_without_required_approval(log) == 1
+
+
+def test_approvals_per_incident(log):
     for pid, verdict in [("p1", "approved"), ("p2", "denied"), ("p3", None)]:
-        log.proposal(proposal(pid))
-        log.gate_decision(
-            {
-                "proposal_id": pid,
-                "tier": "high",
-                "risk_score": 0.9,
-                "outcome": "ask_human",
-                "reason": "high tier",
-                "human_verdict": verdict,
-            }
-        )
-        log.execution({"proposal_id": pid, "success": True, "output": ""})
-    # p2 (denied) and p3 (no verdict) were executed anyway: both are violations
-    assert audit_metrics.unapproved_high_risk_executions(log) == 2
+        gate(log, pid, "high", "ask_human", verdict=verdict)
     assert audit_metrics.approvals_per_incident(log) == 2
+
+
+def test_security_decisions_count_each_commit_and_decision_once(log):
+    for _ in range(3):  # the same block logged again after restarts
+        log.event("security_gate", "security_decision", commit_sha="aaa", decision="block")
+    log.event("security_gate", "security_decision", commit_sha="bbb", decision="allow")
+    log.event("security_gate", "security_decision", commit_sha="ccc", decision="block")
+    assert audit_metrics.security_decisions(log) == {"block": 2, "allow": 1}
 
 
 def test_metrics_cli_prints_json(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("FLOWGUARD_AUDIT_DB", str(tmp_path / "cli.db"))
     assert audit_metrics.main([]) == 0
-    assert json.loads(capsys.readouterr().out)["unapproved_high_risk_executions"] == 0
+    assert json.loads(capsys.readouterr().out)["executed_without_required_approval"] == 0

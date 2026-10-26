@@ -500,3 +500,14 @@ def test_gate_command_prints_counts_and_verdict(api, monkeypatch, capsys):
     assert deployer.main(["gate", "--sha", SHA_NEW]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["counts"]["trivy_critical"] == 2 and out["decision"] == "block"
+
+
+def test_security_decision_is_logged_once_per_commit_across_restarts(api, tmp_path):
+    FakeGitHub.runs = [gh_run(4, SHA_NEW)]
+    FakeGitHub.scan_messages = {1004: "trivy_high=2 trivy_critical=0 gitleaks=0"}
+    for _ in range(3):  # three deployer processes, e.g. after restarts
+        d = make(api, tmp_path, FakeCluster(f"{IMAGE_REPO}:{SHA_OLD}"))
+        assert d.poll_once() == {"staging": "blocked"}
+    log = AuditLog(tmp_path / "audit.db")
+    assert len(list(log.events("security_decision"))) == 1
+    assert len(events(tmp_path)) == 1

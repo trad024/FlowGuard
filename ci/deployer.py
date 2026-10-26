@@ -336,6 +336,8 @@ class Deployer:
     def security_gate(self, run: dict, image: str) -> bool:
         counts = self.github.scan_counts(run["id"])
         decision, reason = security_verdict(counts)
+        if self.already_decided(run["head_sha"], decision):
+            return decision == "allow"  # logged by an earlier process: log each decision once
         self.events.write(
             "security_decision",
             source="security_gate",
@@ -347,6 +349,17 @@ class Deployer:
             **(counts or {}),
         )
         return decision == "allow"
+
+    def already_decided(self, sha: str, decision: str) -> bool:
+        audit = getattr(self.events, "audit", None)
+        if audit is None:
+            return False
+        rows = audit.query(
+            "SELECT 1 FROM events WHERE kind = 'security_decision' AND commit_sha = ? "
+            "AND json_extract(payload, '$.decision') = ? LIMIT 1",
+            (sha, decision),
+        )
+        return bool(rows)
 
     def release(self, environment: str, run: dict) -> str:
         sha = run["head_sha"]
