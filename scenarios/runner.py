@@ -383,14 +383,23 @@ class Runner:
             )
             self.event("branch_deleted", branch=branch, pushed=pushed)
 
-    def wait_ci(self, github, sha: str, timeout: int = 2400) -> dict | None:
+    def wait_ci(self, github, sha: str, timeout: int = 2400, sleep=time.sleep) -> dict | None:
+        """Poll until the commit's app-ci run completes; network hiccups are retried."""
         deadline = time.monotonic() + timeout
         run = None
         while time.monotonic() < deadline:
-            run = github.run_for_commit(sha)
+            try:
+                run = github.run_for_commit(sha)
+            except deployer.RateLimited as exc:
+                sleep(max(30, exc.reset_at - int(time.time()) + 5))
+                continue
+            except OSError as exc:  # URLError, timeouts, TLS handshake failures
+                self.event("poll_retry", detail=str(exc)[:200])
+                sleep(30)
+                continue
             if run and run.get("status") == "completed":
                 return run
-            time.sleep(30)
+            sleep(30)
         return run
 
 

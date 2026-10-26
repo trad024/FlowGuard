@@ -191,3 +191,21 @@ def test_generator_refuses_unknown_classes_and_missing_patterns(repo_copy):
     ci_failures.apply(repo_copy, "code")
     with pytest.raises(ValueError):  # already applied: the pattern is gone
         ci_failures.apply(repo_copy, "code")
+
+
+def test_wait_ci_retries_network_errors(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLOWGUARD_AUDIT_DB", str(tmp_path / "audit.db"))
+    r = runner.Runner(spec(), run_id="release-errors-05-x")
+    calls = []
+
+    class FlakyGitHub:
+        def run_for_commit(self, sha):
+            calls.append(sha)
+            if len(calls) < 3:
+                raise OSError("The handshake operation timed out")
+            return {"id": 1, "status": "completed", "conclusion": "failure"}
+
+    run = r.wait_ci(FlakyGitHub(), "abc", sleep=lambda s: None)
+    assert run["conclusion"] == "failure" and len(calls) == 3
+    retries = [e for e in r.audit.events("poll_retry")]
+    assert len(retries) == 2
