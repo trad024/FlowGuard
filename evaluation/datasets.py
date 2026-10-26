@@ -24,8 +24,10 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import http.client
 import random
 import sys
+import time
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
@@ -81,16 +83,34 @@ def md5_of(path: Path) -> str:
     return h.hexdigest()
 
 
-def download(archive: Archive, dest_dir: Path = RAW) -> Path:
-    """Download unless a verified copy is already there; verify size and MD5 either way."""
+def download(archive: Archive, dest_dir: Path = RAW, attempts: int = 30) -> Path:
+    """Download unless a verified copy is already there; verify size and MD5 either way.
+    Large files are resumed after a dropped connection: each attempt asks the source URL
+    again (its signed redirect may have expired) for the bytes still missing."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / archive.name
     if not (dest.is_file() and dest.stat().st_size == archive.size):
         tmp = dest.with_suffix(".part")
-        req = urllib.request.Request(archive.url, headers={"User-Agent": "flowguard-datasets"})
-        with urllib.request.urlopen(req, timeout=120) as r, tmp.open("wb") as out:
-            for block in iter(lambda: r.read(1 << 20), b""):
-                out.write(block)
+        for attempt in range(attempts):
+            have = tmp.stat().st_size if tmp.exists() else 0
+            if have >= archive.size:
+                break
+            headers = {"User-Agent": "flowguard-datasets"}
+            if have:
+                headers["Range"] = f"bytes={have}-"
+            try:
+                req = urllib.request.Request(archive.url, headers=headers)
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    mode = "ab" if have and r.status == 206 else "wb"
+                    with tmp.open(mode) as out:
+                        for block in iter(lambda: r.read(1 << 20), b""):
+                            out.write(block)
+            except (OSError, http.client.HTTPException) as exc:  # includes timeouts
+                print(
+                    f"{archive.name}: attempt {attempt + 1} stopped ({exc}); resuming",
+                    file=sys.stderr,
+                )
+                time.sleep(min(30, 2 * (attempt + 1)))
         tmp.replace(dest)
     verify(dest, archive)
     return dest
