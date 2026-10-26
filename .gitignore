@@ -17,3 +17,6 @@ evaluation/runs/
 # Scenario recordings (D15) and the held-out scenario set, kept outside dev (D12)
 evaluation/recordings/
 scenarios/heldout/
+
+# External datasets (D14): raw downloads are never committed
+evaluation/datasets/raw/
