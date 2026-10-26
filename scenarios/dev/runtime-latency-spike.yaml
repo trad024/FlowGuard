@@ -1,0 +1,10 @@
+# Runtime incident, no release: +800 ms on half of the user requests, on every running pod.
+id: runtime-latency-spike
+family: runtime
+description: Latency spike on running pods
+environment: staging
+fault: {kind: latency_spike, delivery: runtime, latency_ms: 800, fraction: 0.5}
+intensity: 800
+timing: {warmup_s: 60, incident_s: 180, cooldown_s: 60}
+load: {rate: 10}
+ground_truth: {incident: true, expected_l0: detect}

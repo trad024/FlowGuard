@@ -1,0 +1,10 @@
+# Runtime incident, no release: 30% of user requests fail on 3 of the 10 running pods.
+id: runtime-error-burst
+family: runtime
+description: Error burst on running pods
+environment: staging
+fault: {kind: error_burst, delivery: runtime, error_rate: 0.3, pods_fraction: 0.3}
+intensity: 0.09
+timing: {warmup_s: 60, incident_s: 180, cooldown_s: 60}
+load: {rate: 10}
+ground_truth: {incident: true, expected_l0: detect}

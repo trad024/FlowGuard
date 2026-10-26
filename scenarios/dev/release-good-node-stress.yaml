@@ -1,0 +1,12 @@
+# H4 collaboration case: a good release while the node is under CPU stress. The release is not
+# bad; a rollback here is a wrong decision caused by the infrastructure, not the release.
+id: release-good-node-stress
+family: release
+description: Good release while the node is under CPU stress
+environment: staging
+fault: {kind: none, delivery: config}
+node_stress: {cpu_workers: 6}
+intensity: 6
+timing: {warmup_s: 45, observe_s: 600, cooldown_s: 20}
+load: {rate: 10}
+ground_truth: {bad_release: false, expected_l0: promote}

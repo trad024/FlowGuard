@@ -1,0 +1,8 @@
+# DSO1 CI detector case: a passing but slow unit-test job (+120 s); the release itself is fine.
+id: pipeline-slow-step
+family: pipeline
+description: Unit tests take two minutes longer
+environment: staging
+fault: {kind: slow_step, delivery: commit, added_s: 120}
+intensity: 120
+ground_truth: {anomaly: true, bad_release: false, expected_l0: detect}

@@ -1,0 +1,9 @@
+# A dependency version with a single MODERATE advisory: harmless for L0, which must allow it
+# (and the release then goes through the canary).
+id: security-low-severity-finding
+family: security
+description: Dependency version with a moderate advisory only
+environment: staging
+fault: {kind: low_severity_finding, delivery: commit}
+intensity: 0
+ground_truth: {bad_release: false, expected_l0: promote}

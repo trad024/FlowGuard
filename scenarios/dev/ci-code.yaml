@@ -1,4 +1,4 @@
-# CI failure generator (DSO2 class: code). Ground truth for Diagnose (Step 7).
+# DSO2 class code: a random template of the class unless fault.template names one (ci_failures.py).
 id: ci-code
 family: ci
 description: CI failure of class code

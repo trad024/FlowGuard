@@ -1,4 +1,4 @@
-# CI failure generator (DSO2 class: infrastructure). Ground truth for Diagnose (Step 7).
+# DSO2 class infrastructure: a random template of the class unless fault.template names one (ci_failures.py).
 id: ci-infrastructure
 family: ci
 description: CI failure of class infrastructure

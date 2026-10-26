@@ -1,0 +1,8 @@
+# A dependency pinned back to a version with known HIGH CVEs: L0 must block the image.
+id: security-vulnerable-dependency
+family: security
+description: Dependency pinned to a version with HIGH CVEs
+environment: staging
+fault: {kind: vulnerable_dependency, delivery: commit}
+intensity: 1
+ground_truth: {bad_release: true, expected_l0: block}

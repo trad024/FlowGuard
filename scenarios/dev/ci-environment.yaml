@@ -1,4 +1,4 @@
-# CI failure generator (DSO2 class: environment). Ground truth for Diagnose (Step 7).
+# DSO2 class environment: a random template of the class unless fault.template names one (ci_failures.py).
 id: ci-environment
 family: ci
 description: CI failure of class environment

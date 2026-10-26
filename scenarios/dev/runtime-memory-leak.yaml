@@ -1,0 +1,11 @@
+# Runtime incident, no release: 2 pods leak 512 KB/s until the 64 Mi limit OOM-kills them; the
+# leak is re-applied after each restart, so they crash-loop for the length of the incident.
+id: runtime-memory-leak
+family: runtime
+description: Memory leak to a crash loop on two running pods
+environment: staging
+fault: {kind: memory_leak, delivery: runtime, leak_kb_per_s: 512, pods_fraction: 0.2}
+intensity: 512
+timing: {warmup_s: 60, incident_s: 300, cooldown_s: 60}
+load: {rate: 10}
+ground_truth: {incident: true, expected_l0: detect}
