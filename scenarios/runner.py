@@ -313,7 +313,7 @@ class Runner:
             if n != 1:
                 raise ValueError(f"main.go: flag {flag} not found")
         (ROOT / rel).write_text(text, encoding="utf-8", newline="\n")
-        return {"files": [str(rel)], "summary": "fault enabled by default in the code"}
+        return {"files": [rel.as_posix()], "summary": "fault enabled by default in the code"}
 
     def run_commit(self) -> tuple[list[int], list[Path]]:
         if self.git("rev-parse", "--abbrev-ref", "HEAD") != "dev" or self.git(

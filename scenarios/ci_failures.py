@@ -40,7 +40,9 @@ def _edit(root: Path, rel: Path, pattern: str, replacement: str) -> None:
 def code(root: Path) -> Change:
     rel = APP / "pkg/api/http/version.go"
     _edit(root, rel, r'"commit":\s+version\.REVISION,', '"commit":  version.VERSION,')
-    return Change("code", (str(rel),), "version handler reports the version as the commit", "unit")
+    return Change(
+        "code", (rel.as_posix(),), "version handler reports the version as the commit", "unit"
+    )
 
 
 def dependency(root: Path) -> Change:
@@ -52,7 +54,7 @@ def dependency(root: Path) -> Change:
         "require (\n\tgithub.com/flowguard-scenarios/missing-module v0.0.1\n",
     )
     return Change(
-        "dependency", (str(rel),), "requires a module version that does not exist", "build"
+        "dependency", (rel.as_posix(),), "requires a module version that does not exist", "build"
     )
 
 
@@ -62,7 +64,10 @@ def environment(root: Path) -> Change:
         root, rel, r"^FROM golang:[\d.]+-alpine AS builder$", "FROM golang:1.22-alpine AS builder"
     )
     return Change(
-        "environment", (str(rel),), "build image's Go 1.22 is older than go.mod requires", "build"
+        "environment",
+        (rel.as_posix(),),
+        "build image's Go 1.22 is older than go.mod requires",
+        "build",
     )
 
 
@@ -87,7 +92,7 @@ func TestScenarioFlakyNetworkTiming(t *testing.T) {
 def flaky_test(root: Path) -> Change:
     rel = APP / "pkg/api/http/scenario_flaky_test.go"
     (root / rel).write_text(FLAKY_TEST, encoding="utf-8", newline="\n")
-    return Change("flaky_test", (str(rel),), "a test that fails at random (p=0.8)", "unit")
+    return Change("flaky_test", (rel.as_posix(),), "a test that fails at random (p=0.8)", "unit")
 
 
 def infrastructure(root: Path) -> Change:
@@ -102,7 +107,7 @@ def infrastructure(root: Path) -> Change:
     )
     return Change(
         "infrastructure",
-        (str(rel),),
+        (rel.as_posix(),),
         "integration job pulls from an unreachable registry",
         "optional (integration)",
     )

@@ -209,3 +209,9 @@ def test_wait_ci_retries_network_errors(monkeypatch, tmp_path):
     assert run["conclusion"] == "failure" and len(calls) == 3
     retries = [e for e in r.audit.events("poll_retry")]
     assert len(retries) == 2
+
+
+def test_changed_files_are_reported_as_posix_paths(repo_copy):
+    for cls in ("code", "infrastructure"):
+        change = ci_failures.apply(repo_copy, cls)
+        assert all("\\" not in f for f in change.files)

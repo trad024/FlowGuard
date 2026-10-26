@@ -37,6 +37,7 @@ Grafana password (`flowguard`), which is for local use only.
 py evaluation\loadgen.py run --rate 10                 # traffic + per-request log, Ctrl+C to stop
 .\infra\scripts\deploy-version.ps1 good                # harmless change: new UI message
 .\infra\scripts\deploy-version.ps1 bad                 # podinfo --random-error: about 11% 5xx
+.\infra\scripts\deploy-version.ps1 fault -ErrorRate 0.05 -LatencyMs 200   # graded fault (D19)
 kubectl -n staging get rollout podinfo -w              # follow the steps
 kubectl -n staging get analysisrun                     # L0 verdicts
 py evaluation\loadgen.py summary evaluation\runs\<file>.jsonl --namespace staging

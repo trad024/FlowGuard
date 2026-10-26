@@ -1,8 +1,52 @@
 # evaluation
 
-Metric queries over the audit log and Prometheus, comparison reports (agents vs baseline) and
-Grafana dashboards. Built in steps 4 and 11.
+Data collection and, later, the comparison reports (agents vs baseline, Steps 4b and 11).
 
-`loadgen.py` (step 2): fixed-rate load on podinfo with one JSON line per request (time,
-namespace, status, latency, pod) in the gitignored `runs/` folder, and a per-pod-template-hash
-summary. Standard library only; tests in `tests/`.
+## Load generator (step 2)
+
+`loadgen.py`: fixed-rate load on podinfo with one JSON line per request (time, namespace,
+status, latency, pod) in the gitignored `runs/` folder, and a per-pod-template-hash summary.
+Injected faults (D19) answer with the pod's hostname, so failed requests are attributed too.
+
+## Recorder (D15, step 4a)
+
+`recorder.py` saves the raw inputs of a time window into `recordings/<run id>/` (gitignored):
+
+| File | Content |
+| --- | --- |
+| `manifest.json` | window, git commit, Prometheus selectors, per-source counts, the spec and what L0 did |
+| `ground_truth.json` | the scenario's ground truth |
+| `prometheus/<name>.json` | raw samples (a `selector[window]` query, not resampled) for request counters, latency buckets and sums, `up`, CPU, memory, restarts |
+| `loadgen.jsonl` | per-request lines inside the window |
+| `deployer-events.jsonl`, `audit-events.jsonl` | deployer and audit-log events inside the window |
+| `ci/<run>/` | run, jobs with step results, annotations; job logs when the token may read them |
+
+The scenario runner calls it for every scenario; it also runs alone:
+
+```powershell
+py evaluation\recorder.py --scenario manual-1 --start 2026-10-26T18:00:00Z --end 2026-10-26T18:10:00Z --loadgen evaluation\runs\<file>.jsonl
+```
+
+CI job logs need a GitHub token with read access to the repository's Actions (a fine-grained
+token with *Actions: Read*). Without it the recording marks them unavailable and keeps the
+jobs, steps and annotations.
+
+## Audit metrics (step 4a)
+
+`py -m flowguard.audit_metrics [--scenario <run id>]` (with `agents` on `PYTHONPATH`):
+deployment outcomes and time to promotion per environment, security decisions, unapproved
+high-risk executions (must stay 0), approvals per incident.
+
+## External datasets (D14, step 4a)
+
+```powershell
+py evaluation\datasets.py download                  # LogChunks, MD5-verified, extracted
+py evaluation\datasets.py download --with-logsieve  # also LogSieve Data.zip (1 GB, verified)
+py evaluation\datasets.py sample                    # the 150-log sample (seed 20261026)
+py evaluation\datasets.py sheet                     # the blank labelling sheet
+```
+
+Raw files stay in the gitignored `datasets/raw/`. Committed: `datasets/logchunks-sample-150.csv`
+(identifiers and SHA-256, no log text) and `datasets/labelling/` (blank sheet and guide).
+LogSieve's `Data.zip` holds raw GitHub Actions run logs (111,172 files, 9 GB unpacked, not
+extracted); the line-labelled logs D14 refers to were not found in it.
