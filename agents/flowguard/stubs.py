@@ -87,7 +87,8 @@ class Diagnose:
     def __init__(self, llm: Callable[[str], dict] | None = None):
         self.llm = llm
 
-    def classify(self, inp: AgentInput, cfg) -> tuple[str, dict[str, float], list[int]]:
+    def classify(self, inp: AgentInput, cfg) -> tuple[str, dict[str, float], list[int], str]:
+        """(class, label scores, evidence lines, the action the LLM proposed or "")."""
         if cfg.llm and self.llm is not None:
             answer = self.llm(inp.log)
             cls = answer.get("root_cause", "unclear")
@@ -95,14 +96,15 @@ class Diagnose:
             if cfg.grounding:  # D8: only lines that exist in the real log count as evidence
                 lines = [n for n in lines if 1 <= n <= len(inp.log.splitlines())]
             scores = answer.get("scores") or {c: (0.9 if c == cls else 0.025) for c in CLASSES}
-            return cls, scores, lines
+            return cls, scores, lines, str(answer.get("action") or "")
         cls, lines = baselines.classify(inp.log)
         scores = {c: (1.0 if c == cls else 0.0) for c in CLASSES}
-        return cls, scores, lines
+        return cls, scores, lines, ""
 
     def run(self, inp: AgentInput, cfg) -> AgentOutput:
-        cls, scores, lines = self.classify(inp, cfg)
-        action = baselines.playbook(cls if cls in CLASSES else "unclear")
+        cls, scores, lines, proposed = self.classify(inp, cfg)
+        # An LLM may propose any action; the gate, not the agent, decides what may run (D20)
+        action = proposed or baselines.playbook(cls if cls in CLASSES else "unclear")
         p = proposal(self.name, action, inp, f"root cause {cls}; evidence lines {lines[:5]}")
         cause = "infrastructure" if cls == "infrastructure" else "release"
         post = EvidencePost(
