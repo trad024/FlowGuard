@@ -1,5 +1,5 @@
 """External datasets: checksum verification, safe extraction, the LogChunks parser, the
-seeded sample and the labelling sheet. Synthetic data only; no download."""
+seeded sample. Synthetic data only; no download."""
 
 import csv
 import hashlib
@@ -91,19 +91,15 @@ def test_sample_never_exceeds_the_available_logs(tmp_path):
     assert len(datasets.draw_sample(datasets.labelled_logs(tmp_path), size=150)) == 2
 
 
-def test_sample_csv_and_blank_sheet(tmp_path):
+def test_sample_csv(tmp_path):
     make_logchunks(tmp_path, {"Go/a@b": 2, "Rust/c@d": 2})
     picked = datasets.draw_sample(datasets.labelled_logs(tmp_path), size=3)
-    sample, sheet = tmp_path / "sample.csv", tmp_path / "sheet.csv"
+    sample = tmp_path / "sample.csv"
     datasets.write_sample(picked, tmp_path, sample)
-    datasets.write_sheet(sample, sheet)
     rows = list(csv.DictReader(sample.open(encoding="utf-8")))
     assert [r["sample_id"] for r in rows] == ["LC001", "LC002", "LC003"]
     log = tmp_path / "logs" / rows[0]["log_path"]
     assert rows[0]["log_sha256"] == hashlib.sha256(log.read_bytes()).hexdigest()
-    blank = list(csv.DictReader(sheet.open(encoding="utf-8")))
-    assert [b["sample_id"] for b in blank] == ["LC001", "LC002", "LC003"]
-    assert all(b["root_cause"] == "" and b["labeller"] == "" for b in blank)
 
 
 def test_committed_sample_has_150_rows_from_many_repositories():

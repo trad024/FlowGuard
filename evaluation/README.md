@@ -54,16 +54,14 @@ whatever the tier (DSO6, must stay 0), executions after a reject, approvals per 
 py evaluation\datasets.py download                  # LogChunks, MD5-verified, extracted
 py evaluation\datasets.py download --with-logsieve  # LogSieve Data.zip (1 GB): not used, see below
 py evaluation\datasets.py sample                    # the 150-log sample (seed 20261026)
-py evaluation\datasets.py sheet                     # the blank labelling sheet
 ```
 
-Labelling (D26a): one labeller fills a copy of the blank sheet for all 150 logs. At least 7
-days after finishing, `py evaluation\relabel.py --first <first pass>.csv --finished <date>`
-writes a blind sheet for a seeded random 50 (seed 20261027, shuffled, no first answers); the
-intra-rater kappa is Step 4b.
+LogChunks is used for evidence localization only (D32): no manual labelling. The lines
+Diagnose quotes are compared with each log's human-labelled chunk (see
+`datasets/labelling/README.md`).
 
 Raw files stay in the gitignored `datasets/raw/`. Committed: `datasets/logchunks-sample-150.csv`
-(identifiers and SHA-256, no log text) and `datasets/labelling/` (blank sheet and guide).
+(identifiers and SHA-256, no log text) and `datasets/labelling/README.md` (how LogChunks is used).
 LogSieve's `Data.zip` holds raw GitHub Actions run logs (111,172 files, 9 GB unpacked, not
 extracted); the line-labelled logs D14 refers to were not found in it, so it was deleted and
 LogSieve is not used unless a small labels file is identified (D14).

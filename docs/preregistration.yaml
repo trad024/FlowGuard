@@ -36,7 +36,8 @@ freeze_rule:
 smallest_effect:
   H1: {metric: DSO1 recall, difference: +10 percentage points, levels: [L0, L1]}
   H2: {metric: DSO2 macro-F1, difference: +0.10, levels: [regex, L3]}
-  H3: {metric: hallucination rate, difference: -10 percentage points, levels: [L2, L3]}
+  H3: {metric: LogChunks localization hit rate, difference: +10 percentage points, levels: [L2, L3],
+       note: proposed with D32, to confirm; the hallucination rate (secondary) keeps -10 points}
   H4: {metric: wrong decisions, difference: -50% relative, levels: [L3, L4]}
 
 # ------------------------------------------------------------------ scenario families
@@ -233,9 +234,16 @@ ground_truth:
   pipeline: {anomaly: true, expected_l0: detect}
 
 # ------------------------------------------------------------------ external sets (D14, D26a)
-external:
-  logchunks: {sample: evaluation/datasets/logchunks-sample-150.csv, labels: single labeller,
-              intra_rater_check: seeded 50, at least 7 days later}
+external:                        # D32: no manual labelling
+  logchunks:
+    use: evidence localization only (no root-cause labels)
+    sample: evaluation/datasets/logchunks-sample-150.csv
+    target: >-
+      the log lines matching the human-labelled chunk (whitespace collapsed, ANSI codes and
+      carriage-return overwrites removed); logs whose chunk matches no line are excluded and
+      counted (20 of 150 on 2026-10-27)
+    hit: at least one quoted line inside the target
+    line_metrics: precision and recall of the quoted lines against the target
 
 # ------------------------------------------------------------------ LLM (D27, D28)
 llm:
@@ -252,8 +260,9 @@ llm:
 # Poisson interval instead.
 metrics:
   H1: {primary: DSO1 recall, secondary: [false alerts per hour of normal traffic, MTTD]}
-  H2: {primary: DSO2 macro-F1, secondary: [accuracy, cost per incident, latency per incident]}
-  H3: {primary: hallucination rate (quoted lines not in the log), secondary: [macro-F1]}
+  H2: {primary: DSO2 macro-F1 on the generated corpus, secondary: [accuracy, cost per incident, latency per incident]}
+  H3: {primary: localization hit rate on LogChunks (D32),
+       secondary: [hallucination rate (quoted lines not in the log), line-level precision and recall, macro-F1 on the corpus]}
   H4: {primary: wrong decisions (false rollbacks and wrong fixes) in collaboration scenarios}
   H5: {primary: share of incidents resolved without a human at each gate setting,
        constraint: 0 unapproved high-risk actions}
@@ -280,7 +289,7 @@ comparisons:                     # paired: same scenarios, seeds and order at ev
     test: >-
       paired bootstrap of the macro-F1 difference, 10000 resamples; all five methods reported
       with their intervals
-  H3: {levels: [L2, L3], test: exact McNemar on hallucinated / grounded; macro-F1 by paired bootstrap}
+  H3: {levels: [L2, L3], test: exact McNemar on hit / miss per LogChunks log; hallucination by exact McNemar and macro-F1 by paired bootstrap (secondary)}
   H4: {levels: [L3, L4], test: exact McNemar on wrong / right decisions}
   H5: {levels: [L5 settings], test: none; Wilson interval per setting, the constraint is a count}
 time_metrics: paired bootstrap intervals, 10000 resamples (MTTD, time to rollback, durations)

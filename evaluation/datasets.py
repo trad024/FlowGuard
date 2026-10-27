@@ -1,15 +1,15 @@
-"""External datasets (D14): download with checksums, a reproducible LogChunks sample, and the
-blank labelling sheet for the two human labellers.
+"""External datasets (D14, D32): download with checksums and a reproducible LogChunks sample.
+LogChunks is used for evidence localization only (D32): its human-labelled failure-reason
+chunks are compared with the log lines Diagnose quotes; nothing is labelled by hand.
 
     python evaluation/datasets.py download                  # LogChunks (24 MB)
     python evaluation/datasets.py download --with-logsieve  # also LogSieve Data.zip (1 GB)
     python evaluation/datasets.py sample                    # 150 LogChunks logs, seeded
-    python evaluation/datasets.py sheet                     # blank labelling sheet
 
 Raw files go to evaluation/datasets/raw/ (gitignored). Every archive is checked against the
 size and MD5 published by its repository before it is extracted. The data is only read as
 text, never executed. What is committed: the sample list (identifiers and SHA-256 of each log,
-no log text) and the blank sheet.
+no log text).
 
 Datasets, both CC BY 4.0:
   LogChunks  Brandt et al., MSR 2020, Zenodo 10.5281/zenodo.3632351: 797 failed Travis CI logs
@@ -39,7 +39,6 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "evaluation" / "datasets"
 RAW = DATA / "raw"
 SAMPLE_CSV = DATA / "logchunks-sample-150.csv"
-SHEET_CSV = DATA / "labelling" / "logchunks-labels-blank.csv"
 SEED = 20261026
 SAMPLE_SIZE = 150
 ROOT_CAUSES = ("code", "dependency", "environment", "flaky_test", "infrastructure")
@@ -230,35 +229,12 @@ def write_sample(picked: list[LabelledLog], logchunks_dir: Path, out: Path = SAM
             )
 
 
-def write_sheet(sample_csv: Path = SAMPLE_CSV, out: Path = SHEET_CSV) -> None:
-    """One row per sampled log; each labeller fills their own copy, without seeing the other."""
-    with sample_csv.open(encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f, lineterminator="\n")
-        w.writerow(
-            [
-                "sample_id",
-                "log_path",
-                "labeller",
-                "root_cause",
-                "confidence_1_to_3",
-                "evidence_lines",
-                "notes",
-            ]
-        )
-        for row in rows:
-            w.writerow([row["sample_id"], row["log_path"], "", "", "", "", ""])
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     p_dl = sub.add_parser("download", help="download, verify and extract")
     p_dl.add_argument("--with-logsieve", action="store_true", help="also LogSieve Data.zip (1 GB)")
     sub.add_parser("sample", help=f"draw the {SAMPLE_SIZE}-log LogChunks sample (seed {SEED})")
-    sub.add_parser("sheet", help="write the blank labelling sheet from the sample")
     args = parser.parse_args(argv)
 
     if args.command == "download":
@@ -279,9 +255,6 @@ def main(argv: list[str] | None = None) -> int:
             f"{len(picked)} of {len(logs)} labelled failed logs, {repos} repositories"
             f" -> {SAMPLE_CSV}"
         )
-        return 0
-    write_sheet()
-    print(f"blank sheet -> {SHEET_CSV}")
     return 0
 
 
