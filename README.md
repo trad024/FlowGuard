@@ -42,6 +42,9 @@ pytest                             # tests
 ```
 
 The same checks run on every push and pull request (`.github/workflows/checks.yml`).
+`conftest.py` makes every unit test fail if it calls kubectl, Docker, k3d, curl, gh or an infra
+script, or opens a non-loopback connection. Tests that need the cluster or the network are
+marked `@pytest.mark.integration` and only run with `FLOWGUARD_INTEGRATION=1`.
 
 ## Status
 

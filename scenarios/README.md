@@ -43,7 +43,7 @@ ground_truth:
 
 | Family | Fault kinds | Delivery |
 | --- | --- | --- |
-| `release` (DSO3) | `http_errors`, `latency`, `none` (good control, optionally under node CPU stress, H4) | `config`: the same image and command with a new release Secret (`podinfo-release-<random>`, envFrom) holding the fault settings, which starts a canary (D19 amended, D25); good releases get one with empty values, so the pod spec never tells them apart. `commit`: the fault turned on by default in podinfo's code, pushed on `scenario/<run id>`, through CI, the L0 security gate and the staging canary |
+| `release` (DSO3) | `http_errors`, `latency`, `none` (good control, optionally under node CPU stress, H4) | `config`: the same image and command with a new release Secret (`podinfo-release-<random>`, envFrom) holding the fault settings, which starts a canary (D19 amended, D25); good releases get one with empty values, so the pod spec never tells them apart. `commit` (`http_errors` only): an ordinary code defect (D30), a periodic refresh in `info.go` that parses the wrong `/proc/self/stat` field, so one request per pod per interval answers 500; the interval comes from the target error rate and the load and is at least 5 s, so podinfo's unit tests never trigger it. Pushed on `scenario/<run id>`, through CI, the L0 security gate and the staging canary |
 | `security` (DSO4) | `leaked_secret`, `vulnerable_dependency` (must block), `low_severity_finding` (must allow) | `commit`: a hard-coded API key; `golang.org/x/text` pinned back to v0.19.0 (HIGH CVEs); `gorilla/websocket` v1.5.3 -> v1.5.0 (no HIGH or CRITICAL finding) |
 | `ci` (DSO2) | `code`, `dependency`, `environment`, `flaky_test`, `infrastructure` | `commit`: one template per run from `ci_failures.py`; the failed CI run is the scenario |
 | `runtime` (DSO1) | `error_burst`, `latency_spike`, `memory_leak` | `runtime`: settings PUT to the staging-only `/fault` admin endpoint (metrics port) of a share of the running pods, cleared after `incident_s`; no deployment |
@@ -69,8 +69,11 @@ in, `kubectl exec`, is a prohibited catalog action, so agent tools have no route
 `heldout.py` draws the held-out scenarios from the frozen pre-registration
 (`docs/preregistration.yaml`) with a secret seed: `commit-seed` stores the seed in `.env` and
 writes only its SHA-256 to `heldout-seed.sha256` (committed); `generate --confirm-step-11`
-refuses to run before the pre-registration is frozen and Step 11 is confirmed, and writes to the
-gitignored `heldout/`. Nothing has been generated.
+refuses to run before the pre-registration is frozen, the agent code is tagged `eval-freeze`
+(with `agents/` unchanged since) and Step 11 is confirmed. It writes the specs and a seeded
+`run-order.txt` to the gitignored `heldout/`. Release and runtime faults are drawn within an
+intensity band (below, near or above the L0 thresholds), recorded as `band` in the ground
+truth. Nothing has been generated.
 
 ## No label leakage
 

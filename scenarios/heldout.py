@@ -9,11 +9,13 @@ this generator from the frozen pre-registration (docs/preregistration.yaml) with
 `commit-seed` creates the seed, stores it in .env (never committed) and writes only its SHA-256
 to scenarios/heldout-seed.sha256, which is committed: anyone can later check that the set was
 drawn from the seed fixed before the agents existed. `generate` refuses to run unless the
-pre-registration is frozen, the seed matches the committed hash and Step 11 is confirmed; it
-writes the specs to scenarios/heldout/ (gitignored) and never prints them.
+pre-registration is frozen, the agent code is tagged eval-freeze (and agents/ has not changed
+since), the seed matches the committed hash and Step 11 is confirmed; it writes the specs and
+a seeded run order to scenarios/heldout/ (gitignored) and never prints them.
 
 Every scenario is drawn from its own HMAC-derived random stream, so a scenario does not change
-when another family's count changes. Ids are opaque (h-<hex>).
+when another family's count changes. Release and runtime faults are drawn within an intensity
+band (below, near or above the L0 thresholds), recorded in the ground truth. Ids are opaque.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import hmac
 import math
 import random
 import secrets
+import subprocess
 import sys
 from pathlib import Path
 
@@ -40,6 +43,7 @@ HASH_FILE = ROOT / "scenarios" / "heldout-seed.sha256"
 ENV_FILE = ROOT / ".env"
 OUT = ROOT / "scenarios" / "heldout"
 SEED_VAR = "FLOWGUARD_HELDOUT_SEED"
+FREEZE_TAG = "eval-freeze"
 
 # The frozen L0 thresholds (docs/blueprint-v2.md, "L0 canary baseline"), for expected_l0 only
 L0_MAX_5XX = 0.01
@@ -120,12 +124,13 @@ def predicted_l0(fault: dict) -> str:
     return "promote"
 
 
-def ground_truth(family: str, fault: dict) -> dict:
+def ground_truth(family: str, fault: dict, band: str | None = None) -> dict:
     kind = fault["kind"]
+    banded = {"band": band} if band else {}
     if family == "release":
-        return {"bad_release": kind != "none", "expected_l0": predicted_l0(fault)}
+        return {"bad_release": kind != "none", "expected_l0": predicted_l0(fault), **banded}
     if family == "runtime":
-        return {"incident": True, "expected_l0": "detect"}
+        return {"incident": True, "expected_l0": "detect", **banded}
     if family == "ci":
         return {"root_cause": kind, "expected_l0": "ci_failure"}
     if family == "security":
@@ -136,12 +141,24 @@ def ground_truth(family: str, fault: dict) -> dict:
     raise ValueError(family)
 
 
+def fault_params(cfg: dict, kind: str, rng: random.Random) -> tuple[dict, str | None]:
+    """Parameters for one fault, drawn within a band when the family has bands."""
+    bands = (cfg.get("bands") or {}).get(kind)
+    band = weighted({b: v["weight"] for b, v in bands.items()}, rng) if bands else None
+    dists = bands[band]["params"] if bands else (cfg.get("parameters") or {}).get(kind, {})
+    params = {name: draw(dist, rng) for name, dist in dists.items()}
+    if "effective_error_rate" in params:  # the service-wide share, spread over pods_fraction
+        effective = params.pop("effective_error_rate")
+        params["error_rate"] = round(min(1.0, effective / params["pods_fraction"]), 4)
+    return params, band
+
+
 def scenario(seed: str, family: str, index: int, cfg: dict) -> dict:
     rng = stream(seed, f"{family}:{index}")
     kind = weighted(cfg["kinds"], rng)
     fault = {"kind": kind, "delivery": cfg["delivery"]}
-    for name, dist in (cfg.get("parameters") or {}).get(kind, {}).items():
-        fault[name] = draw(dist, rng)
+    params, band = fault_params(cfg, kind, rng)
+    fault.update(params)
     if family == "ci":
         templates = [t for t in cfg.get("templates") or [] if t.startswith(f"{kind}-")]
         if not templates:
@@ -155,11 +172,13 @@ def scenario(seed: str, family: str, index: int, cfg: dict) -> dict:
         "environment": "staging",
         "fault": fault,
         "intensity": 1,
-        "ground_truth": ground_truth(family, fault),
+        "ground_truth": ground_truth(family, fault, band),
     }
     stress = cfg.get("node_stress")
-    if stress and kind == "none" and rng.random() < stress["share_of_none"]:
-        spec["node_stress"] = {"cpu_workers": draw(stress["cpu_workers"], rng)}
+    if stress:  # good releases under stress must be promoted, bad ones still rolled back
+        share = stress["share_of_none"] if kind == "none" else stress["share_of_bad"]
+        if rng.random() < share:
+            spec["node_stress"] = {"cpu_workers": draw(stress["cpu_workers"], rng)}
     for key in ("timing", "load"):
         if key in cfg:
             spec[key] = dict(cfg[key])
@@ -177,6 +196,27 @@ def generate(prereg: dict, seed: str) -> list[dict]:
         if errors := runner.validate_spec(s):
             raise SystemExit(f"{s['id']}: {errors}")
     return specs
+
+
+def run_order(seed: str, specs: list[dict]) -> list[str]:
+    """The seeded random order in which the live scenarios run (and every level replays)."""
+    ids = sorted(s["id"] for s in specs)
+    stream(seed, "run-order").shuffle(ids)
+    return ids
+
+
+def frozen_agents(root: Path = ROOT) -> None:
+    """Refuse unless the eval-freeze tag exists and agents/ is unchanged since it."""
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+
+    if git("rev-parse", "-q", "--verify", f"refs/tags/{FREEZE_TAG}").returncode != 0:
+        raise SystemExit(f"tag the agent code {FREEZE_TAG} before generating the held-out set")
+    changed = git("diff", "--quiet", FREEZE_TAG, "--", "agents").returncode
+    untracked = git("ls-files", "--others", "--exclude-standard", "--", "agents").stdout.strip()
+    if changed != 0 or untracked:
+        raise SystemExit(f"agents/ has changed since {FREEZE_TAG}")
 
 
 # ---------------------------------------------------------------- command line
@@ -205,12 +245,16 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("the pre-registration is not frozen")
     if not args.confirm_step_11:
         raise SystemExit("held-out scenarios are generated only at Step 11 (--confirm-step-11)")
+    frozen_agents()
     if OUT.is_dir() and any(OUT.glob("*.yaml")):
         raise SystemExit(f"{OUT} already holds specs; the held-out set is generated once")
-    specs = generate(prereg, checked_seed())
+    seed = checked_seed()
+    specs = generate(prereg, seed)
     OUT.mkdir(parents=True, exist_ok=True)
     for s in specs:
         (OUT / f"{s['id']}.yaml").write_text(yaml.safe_dump(s, sort_keys=False), encoding="utf-8")
+    order = "".join(i + "\n" for i in run_order(seed, specs))
+    (OUT / "run-order.txt").write_text(order, encoding="utf-8", newline="\n")
     print(f"{len(specs)} held-out specs written to {OUT.relative_to(ROOT).as_posix()}/")
     return 0
 
