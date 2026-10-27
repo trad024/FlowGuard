@@ -1,6 +1,7 @@
 """The test-suite guard (conftest.py): unit tests cannot reach kubectl, Docker, the infra
 scripts or the network; loopback servers and local programs still work."""
 
+import os
 import socket
 import subprocess
 import sys
@@ -51,3 +52,10 @@ def test_the_network_is_refused_but_loopback_works():
 def test_integration_tests_are_skipped_unless_enabled():
     # Reached only with FLOWGUARD_INTEGRATION=1, and then without the guard
     assert subprocess.Popen.__name__ == "Popen"
+
+
+def test_no_proxy_is_visible_to_tests():
+    # A proxy on 127.0.0.1 would relay a loopback connection to the network
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY"):
+        assert name not in os.environ and name.lower() not in os.environ
+    assert urllib.request.getproxies() == {}

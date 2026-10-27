@@ -1,8 +1,9 @@
 """Test-suite guard: no unit test may reach the cluster, Docker or the network.
 
 Every test runs with subprocess guarded (kubectl, docker, k3d, curl, gh and the infra scripts
-are refused) and with sockets limited to loopback (the fake GitHub and Prometheus servers the
-tests start themselves). A test that really needs the cluster or the network is marked
+are refused), with sockets limited to loopback (the fake GitHub and Prometheus servers the
+tests start themselves) and with no HTTP proxy, which would otherwise relay a loopback
+connection to the network. A test that really needs the cluster or the network is marked
 `@pytest.mark.integration`; it is skipped unless FLOWGUARD_INTEGRATION=1, and only then runs
 without the guard.
 """
@@ -11,12 +12,14 @@ import os
 import re
 import socket
 import subprocess
+import urllib.request
 
 import pytest
 
 BLOCKED_PROGRAMS = {"kubectl", "docker", "k3d", "curl", "gh", "helm"}
 BLOCKED_PATHS = ("infra/scripts", "infra\\scripts")
 LOOPBACK = {"localhost", "127.0.0.1", "::1", "0.0.0.0", ""}
+PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY")
 
 
 class ExternalCallError(RuntimeError):
@@ -65,6 +68,13 @@ def no_cluster_or_network(request, monkeypatch):
             super().__init__(args, *a, **kw)
 
     monkeypatch.setattr(subprocess, "Popen", GuardedPopen)
+
+    # A proxy on loopback would carry any request out: no proxy from the environment, and none
+    # from the Windows registry either (urllib falls back to it when the variables are unset)
+    for name in PROXY_VARS:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    monkeypatch.setattr(urllib.request, "getproxies", dict)
 
     real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
     real_getaddrinfo = socket.getaddrinfo
