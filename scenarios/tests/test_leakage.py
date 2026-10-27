@@ -100,11 +100,11 @@ def test_log_scan_ignores_lines_a_normal_run_also_has():
 # ---------------------------------------------------------------- generated changes
 
 
-@pytest.mark.parametrize("template_id", sorted(ci_failures.TEMPLATES))
+@pytest.mark.parametrize("template_id", sorted(ci_failures.ALL_VARIANTS))
 def test_ci_templates_do_not_leak(head_archive, tmp_path, template_id):
     original = extract(head_archive, tmp_path / "a")
     root = extract(head_archive, tmp_path / "b")
-    template = ci_failures.TEMPLATES[template_id]
+    template = ci_failures.ALL_VARIANTS[template_id]
     changed = template.apply(root)
     problems = leakage.scan_change(
         diff_files(root, changed, original),

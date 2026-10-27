@@ -78,21 +78,22 @@ def go(src: Path, script: str, toolchain: str = "local") -> tuple[int, str]:
     )
 
 
-def build(src: Path, tag: str) -> tuple[int, str]:
-    return run(
-        ["docker", "build", "--no-cache", "--progress=plain", "-t", tag, str(src / "app/podinfo")]
-    )
+def build(src: Path, tag: str, no_cache: bool = True) -> tuple[int, str]:
+    cache = ["--no-cache"] if no_cache else []
+    return run(["docker", "build", *cache, "--progress=plain", "-t", tag, str(src / "app/podinfo")])
 
 
-def check(src: Path, job: str, tag: str, toolchain: str = "local") -> tuple[int, str]:
+def check(
+    src: Path, job: str, tag: str, toolchain: str = "local", no_cache: bool = True
+) -> tuple[int, str]:
     if job == "build":
-        return build(src, tag)
+        return build(src, tag, no_cache)
     if job == "unit":
         return go(src, "go test ./... 2>&1", toolchain)
     if job == "optional (lint)":
         return go(src, 'go vet ./... 2>&1 && test -z "$(gofmt -l .)"')
     if job == "optional (integration)":
-        code, out = build(src, tag)
+        code, out = build(src, tag, no_cache)
         if code:
             return code, out
         # Git Bash explicitly: on Windows a bare "bash" can resolve to WSL, which cannot read

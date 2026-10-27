@@ -353,11 +353,11 @@ def test_templates_differ_in_files_and_failing_jobs(head_archive, tmp_path):
         assert len(expects) >= 5, cls
 
 
-@pytest.mark.parametrize("template_id", sorted(ci_failures.TEMPLATES))
+@pytest.mark.parametrize("template_id", sorted(ci_failures.ALL_VARIANTS))
 def test_every_template_applies_to_head(head_archive, tmp_path, template_id):
     with tarfile.open(fileobj=io.BytesIO(head_archive)) as tar:
         tar.extractall(tmp_path, filter="data")
-    changed = ci_failures.TEMPLATES[template_id].apply(tmp_path)
+    changed = ci_failures.ALL_VARIANTS[template_id].apply(tmp_path)
     assert changed and all("\\" not in f for f in changed)
 
 
@@ -422,3 +422,26 @@ def test_refresh_interval_gives_the_share_and_never_drops_below_the_minimum(rate
 )
 def test_a_release_through_ci_must_be_an_error_defect(fault):
     assert any("through CI" in e for e in runner.validate_spec(spec(fault=fault)))
+
+
+def test_corpus_split_is_by_template_seeded_and_covers_every_class():
+    import corpus
+
+    by_class = {c: [t.id for t in ci_failures.BY_CLASS[c]] for c in ci_failures.CLASSES}
+    split = corpus.split(by_class)
+    assert split == corpus.split(by_class) != corpus.split(by_class, seed="other")
+    for cls, ids in by_class.items():
+        parts = [split[t] for t in ids]
+        assert {"train", "validation", "test"} <= set(parts), cls
+        assert parts.count("train") >= len(ids) // 2
+    # every variant follows its template into one split
+    for vid in ci_failures.ALL_VARIANTS:
+        assert ci_failures.template_of(vid) in split
+
+
+def test_corpus_runs_the_jobs_in_app_ci_order():
+    import corpus
+
+    assert corpus.jobs_for(ci_failures.ALL_VARIANTS["code-05"]) == ["build", "unit"]
+    lint = ci_failures.ALL_VARIANTS["code-06.v2"]
+    assert corpus.jobs_for(lint) == ["build", "unit", "optional (lint)"]
