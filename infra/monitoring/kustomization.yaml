@@ -10,5 +10,8 @@ configMapGenerator:
   - name: grafana-dashboards
     files:
       - grafana/podinfo-dashboard.json
+  - name: prometheus-rules
+    files:
+      - prometheus/l0-alerts.yml
 generatorOptions:
   disableNameSuffixHash: true

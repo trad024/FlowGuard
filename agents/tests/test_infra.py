@@ -199,3 +199,25 @@ def test_every_release_gets_a_settings_secret_and_no_fault_flags():
         assert "release-settings" in text  # the label the deployer's clean-up selects on
         for key in ("ERROR_RATE", "LATENCY_MS", "JITTER_MS", "FRACTION"):
             assert f"PODINFO_FAULT_{key}" in text
+
+
+def test_dso1_l0_alert_rules_are_frozen():
+    # Changing these values changes the DSO1 baseline: update the blueprint first.
+    rules_file = INFRA / "monitoring" / "prometheus" / "l0-alerts.yml"
+    (group,) = yaml.safe_load(rules_file.read_text())["groups"]
+    rules = {r["alert"]: r for r in group["rules"]}
+    expected = {
+        "HighErrorRatio": (") > 0.05", "1m"),
+        "HighLatencyP99": ("> 1", "1m"),
+        "ContainerOOMKilled": ('reason="OOMKilled"}[10m]) == 1', None),
+        "PodCrashLooping": ('reason="CrashLoopBackOff"}[5m]) >= 1', "2m"),
+        "ContainerHighMemory": ("> 0.8", "2m"),
+    }
+    assert set(rules) == set(expected)
+    for name, (threshold, for_) in expected.items():
+        assert threshold in rules[name]["expr"], name
+        assert rules[name].get("for") == for_, name
+    # Built into the rules ConfigMap that Prometheus loads
+    kust = yaml.safe_load((INFRA / "monitoring" / "kustomization.yaml").read_text())
+    generated = {g["name"]: g["files"] for g in kust["configMapGenerator"]}
+    assert generated["prometheus-rules"] == ["prometheus/l0-alerts.yml"]

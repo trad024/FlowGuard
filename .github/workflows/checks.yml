@@ -34,3 +34,9 @@ jobs:
           # Upstream CRDs: kubeconform ships no schema for CustomResourceDefinition itself
           ./kustomize build infra/argo-rollouts | ./kubeconform -strict -summary -kubernetes-version 1.31.5 \
             -skip CustomResourceDefinition -
+      - name: Check and unit-test the DSO1 L0 alert rules
+        run: |
+          curl -fsSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz | tar xz
+          cd infra/monitoring/prometheus
+          ../../../prometheus-3.5.0.linux-amd64/promtool check rules l0-alerts.yml
+          ../../../prometheus-3.5.0.linux-amd64/promtool test rules l0-alerts.test.yml

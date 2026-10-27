@@ -1,0 +1,91 @@
+# promtool test rules: each L0 alert fires just above its threshold and stays silent just below.
+rule_files:
+  - l0-alerts.yml
+evaluation_interval: 15s
+tests:
+  # 6% of requests answer 5xx (above 5%) in staging, 4% in prod
+  - interval: 15s
+    input_series:
+      - series: 'http_request_duration_seconds_count{app="podinfo",path="root",namespace="staging",status="200"}'
+        values: '0+141x40'
+      - series: 'http_request_duration_seconds_count{app="podinfo",path="root",namespace="staging",status="500"}'
+        values: '0+9x40'
+      - series: 'http_request_duration_seconds_count{app="podinfo",path="root",namespace="prod",status="200"}'
+        values: '0+144x40'
+      - series: 'http_request_duration_seconds_count{app="podinfo",path="root",namespace="prod",status="500"}'
+        values: '0+6x40'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: HighErrorRatio
+        exp_alerts:
+          - exp_labels: {severity: critical, namespace: staging}
+            exp_annotations: {summary: More than 5% of requests to / answer 5xx in staging}
+  # every request above 1 s in staging; every request below 0.5 s in prod
+  - interval: 15s
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{app="podinfo",path="root",namespace="staging",le="1"}'
+        values: '0x40'
+      - series: 'http_request_duration_seconds_bucket{app="podinfo",path="root",namespace="staging",le="2.5"}'
+        values: '0+150x40'
+      - series: 'http_request_duration_seconds_bucket{app="podinfo",path="root",namespace="staging",le="+Inf"}'
+        values: '0+150x40'
+      - series: 'http_request_duration_seconds_bucket{app="podinfo",path="root",namespace="prod",le="0.5"}'
+        values: '0+150x40'
+      - series: 'http_request_duration_seconds_bucket{app="podinfo",path="root",namespace="prod",le="1"}'
+        values: '0+150x40'
+      - series: 'http_request_duration_seconds_bucket{app="podinfo",path="root",namespace="prod",le="+Inf"}'
+        values: '0+150x40'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: HighLatencyP99
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: staging}
+            exp_annotations: {summary: p99 latency of / above 1 s in staging}
+  # one pod restarted after an OOM kill, another restarted for another reason
+  - interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="staging",pod="a",container="podinfo"}'
+        values: '0 0 0 0 0 0 0 0 0 0 1 1'
+      - series: 'kube_pod_container_status_last_terminated_reason{namespace="staging",pod="a",container="podinfo",reason="OOMKilled"}'
+        values: '1x11'
+      - series: 'kube_pod_container_status_restarts_total{namespace="staging",pod="b",container="podinfo"}'
+        values: '0 0 0 0 0 0 0 0 0 0 1 1'
+      - series: 'kube_pod_container_status_last_terminated_reason{namespace="staging",pod="b",container="podinfo",reason="Error"}'
+        values: '1x11'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: ContainerOOMKilled
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: staging, pod: a, container: podinfo}
+            exp_annotations: {summary: staging/a was OOMKilled}
+  # crash looping for 3 minutes; a short 1-minute wait does not alert
+  - interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_waiting_reason{namespace="staging",pod="a",container="podinfo",reason="CrashLoopBackOff"}'
+        values: '1x5'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: PodCrashLooping
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: PodCrashLooping
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: staging, pod: a, container: podinfo, reason: CrashLoopBackOff}
+            exp_annotations: {summary: staging/a is crash looping}
+  # 85% of the limit for 3 minutes on pod a; 75% on pod b
+  - interval: 1m
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="staging",pod="a",container="podinfo"}'
+        values: '57042534x5'
+      - series: 'kube_pod_container_resource_limits{namespace="staging",pod="a",container="podinfo",resource="memory"}'
+        values: '67108864x5'
+      - series: 'container_memory_working_set_bytes{namespace="staging",pod="b",container="podinfo"}'
+        values: '50331648x5'
+      - series: 'kube_pod_container_resource_limits{namespace="staging",pod="b",container="podinfo",resource="memory"}'
+        values: '67108864x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ContainerHighMemory
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: staging, pod: a}
+            exp_annotations: {summary: staging/a uses more than 80% of its memory limit}

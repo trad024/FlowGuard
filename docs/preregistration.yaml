@@ -88,42 +88,41 @@ families:
     count: null                  # v1 placeholder about 15
     delivery: runtime
     kinds: {error_burst: 1, latency_spike: 1, memory_leak: 1}
-    # Bands use the service-wide L0 thresholds; they are re-checked against the DSO1 L0 static
-    # alert thresholds once those are set in 4b, before freezing.
+    # Bands against the DSO1 L0 alert rules (D33): 5xx > 5% and p99 > 1 s, service-wide.
     bands:
       error_burst:               # effective 5xx share of the service = error_rate x pods_fraction
         below:
           weight: 1
           params:
-            effective_error_rate: {dist: uniform, low: 0.003, high: 0.007}
+            effective_error_rate: {dist: uniform, low: 0.01, high: 0.03}
             pods_fraction: {dist: uniform, low: 0.1, high: 0.5}
         near:
           weight: 1
           params:
-            effective_error_rate: {dist: uniform, low: 0.008, high: 0.015}
-            pods_fraction: {dist: uniform, low: 0.1, high: 0.5}
+            effective_error_rate: {dist: uniform, low: 0.04, high: 0.065}
+            pods_fraction: {dist: uniform, low: 0.2, high: 0.5}
         above:
           weight: 1
           params:
-            effective_error_rate: {dist: log_uniform, low: 0.03, high: 0.15}
-            pods_fraction: {dist: uniform, low: 0.2, high: 0.5}
+            effective_error_rate: {dist: log_uniform, low: 0.08, high: 0.2}
+            pods_fraction: {dist: uniform, low: 0.4, high: 0.5}
       latency_spike:             # delay on fraction x pods_fraction >= 5% of requests
         below:
           weight: 1
           params:
-            latency_ms: {dist: int, low: 150, high: 350}
+            latency_ms: {dist: int, low: 300, high: 700}
             fraction: {dist: uniform, low: 0.25, high: 1.0}
             pods_fraction: {dist: uniform, low: 0.2, high: 0.5}
         near:
           weight: 1
           params:
-            latency_ms: {dist: int, low: 420, high: 560}
+            latency_ms: {dist: int, low: 850, high: 1150}
             fraction: {dist: uniform, low: 0.25, high: 1.0}
             pods_fraction: {dist: uniform, low: 0.2, high: 0.5}
         above:
           weight: 1
           params:
-            latency_ms: {dist: int, low: 700, high: 1500}
+            latency_ms: {dist: int, low: 1500, high: 3000}
             fraction: {dist: uniform, low: 0.25, high: 1.0}
             pods_fraction: {dist: uniform, low: 0.2, high: 0.5}
       memory_leak:               # against the 64 Mi limit: about 50 MB of headroom (estimated
