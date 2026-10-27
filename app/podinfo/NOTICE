@@ -33,3 +33,5 @@ Changes:
             --fault-admin (PODINFO_FAULT_ADMIN); server.go builds the middleware before the
             metrics server and registers it when --fault-admin is set; main.go adds the flag.
             Injected errors answer {"error": "internal error", "hostname": ...}.
+2026-10-28  Dockerfile and Dockerfile.xx: git installed in the build stage, so the go command can
+            fetch modules the proxy cannot serve (runtime image unchanged).

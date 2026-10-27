@@ -12,6 +12,7 @@ Writes evaluation/runs/template-checks/<id>.log and summary.json (gitignored).
 from __future__ import annotations
 
 import json
+import secrets
 import shutil
 import subprocess
 import sys
@@ -94,7 +95,12 @@ def check(src: Path, job: str, tag: str, toolchain: str = "local") -> tuple[int,
         code, out = build(src, tag)
         if code:
             return code, out
-        return run(["bash", str(src / "ci/integration-test.sh"), tag], timeout=600)
+        # Git Bash explicitly: on Windows a bare "bash" can resolve to WSL, which cannot read
+        # the Windows path of the script
+        git_bash = Path("C:/Program Files/Git/bin/bash.exe")
+        bash = str(git_bash) if git_bash.exists() else "bash"
+        script = (src / "ci/integration-test.sh").resolve().as_posix()
+        return run([bash, script, tag], timeout=600)
     raise ValueError(job)
 
 
@@ -103,7 +109,8 @@ def verify(template: ci_failures.Template) -> dict:
         src = Path(tmp)
         export_head(src)
         template.apply(src)
-        tag = f"podinfo-check:{template.id.replace('_', '-')}"
+        # An opaque tag: docker build prints it, and the log must not name the class
+        tag = f"podinfo-check:{secrets.token_hex(4)}"
         # The toolchain template fails where setup-go downloads Go: GOTOOLCHAIN=auto does that
         toolchain = "auto" if template.id == "environment-05" else "local"
         attempts = 3 if template.root_cause == "flaky_test" else 1

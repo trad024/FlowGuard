@@ -321,6 +321,44 @@ def wait_outcome(cluster, image: str, timeout: int, sleep=time.sleep, clock=time
     return "timeout"
 
 
+def retry_rollout(namespace: str) -> None:
+    """Clear an abort so the controller runs the canary again (what `rollouts retry` does)."""
+    kubectl(
+        "-n",
+        namespace,
+        "patch",
+        "rollout",
+        "podinfo",
+        "--subresource=status",
+        "--type",
+        "merge",
+        "-p",
+        '{"status":{"abort":false}}',
+    )
+
+
+def suspend_gaps(loadgen_files: list[Path], threshold_s: float = 60) -> list[dict]:
+    """Periods when the host was asleep: no request for `threshold_s`, or a request that took
+    that long. Load and metrics both stop then, so L0 sees no data and the run is not valid."""
+    gaps = []
+    for path in loadgen_files:
+        if not Path(path).is_file():
+            continue
+        last = None
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+                ts = datetime.fromisoformat(row["ts"].replace("Z", "+00:00"))
+            except (ValueError, KeyError):
+                continue
+            stalled = (row.get("latency_ms") or 0) / 1000 >= threshold_s
+            if stalled or (last and (ts - last).total_seconds() >= threshold_s):
+                after = recorder.iso(last) if last else None
+                gaps.append({"file": Path(path).name, "at": row["ts"], "after": after})
+            last = ts
+    return gaps
+
+
 def stable_pods(namespace: str, stable_hash: str) -> list[dict]:
     data = json.loads(
         kubectl(
@@ -418,6 +456,11 @@ class Runner:
         finally:
             end = utc()
             correct = l0_correct(self.truth["expected_l0"], self.observed.get("l0", "unknown"))
+            if gaps := suspend_gaps(loadgen_files):
+                # The host slept: no load and no metrics for a while, so the outcome says
+                # nothing about L0. The run is kept but must be excluded from scoring.
+                self.observed["host_suspended"] = gaps
+                correct = None
             self.event(
                 "scenario_finished",
                 observed=self.observed,
@@ -432,7 +475,12 @@ class Runner:
             loadgen_files=loadgen_files,
             ci_runs=ci_runs,
             ground_truth=self.truth,
-            extra={"spec": self.spec, "observed": self.observed, "l0_correct": correct},
+            extra={
+                "spec": self.spec,
+                "observed": self.observed,
+                "l0_correct": correct,
+                "valid": "host_suspended" not in self.observed,
+            },
             github=recorder.GitHubReader(cfg.repo, cfg.token),
             recording_id=self.run_id,
         )
@@ -473,9 +521,18 @@ class Runner:
         return log
 
     def restore(self, image: str, command: list[str]) -> None:
-        """Back to the pre-scenario template; a promoted fault needs a canary back (with load)."""
+        """Back to the pre-scenario template; a promoted fault needs a canary back (with load).
+        An aborted restore (no data after a host sleep, a dead load generator) is retried once
+        with fresh load, so staging is not left Degraded."""
         patch_template(self.env, image, command)
-        outcome = wait_outcome(self.cluster, image, self.timing["observe_s"])
+        for attempt in (1, 2):
+            if not self.loadgen.alive():
+                self.loadgen.start(f"{self.run_id}-restore-{attempt}")
+            outcome = wait_outcome(self.cluster, image, self.timing["observe_s"])
+            if outcome == "promoted" or attempt == 2:
+                break
+            self.event("restore_retried", outcome=outcome)
+            retry_rollout(self.env)
         self.observed["restore"] = outcome
         self.event("template_restored", outcome=outcome)
 

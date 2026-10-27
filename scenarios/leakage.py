@@ -73,11 +73,18 @@ def normalize(line: str) -> str:
     return NOISE.sub("#", line).strip()
 
 
+# Phrases tools print in failures of every class ("exit code: 1" from Docker, Go test output
+# "wrong status code"): the word "code" in them says nothing about the root cause.
+TOOL_PHRASES = re.compile(r"\b(exit|status|return|error)[ _-]?code\b", re.IGNORECASE)
+
+
 def scan_log(log: str, baseline: str) -> list[str]:
-    """Lines of a CI log with a forbidden word that a normal run's log does not have."""
+    """Lines of a CI log with a forbidden word that a normal run's log does not have, after
+    masking the tool phrases above."""
     known = {normalize(line) for line in baseline.splitlines()}
     problems = []
     for line in log.splitlines():
-        if (found := hits(line)) and normalize(line) not in known:
+        found = hits(TOOL_PHRASES.sub(" ", line))
+        if found and normalize(line) not in known:
             problems.append(f"{line.strip()[:160]!r}: {sorted(found)}")
     return problems

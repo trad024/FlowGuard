@@ -5,6 +5,9 @@ FROM --platform=$BUILDPLATFORM tonistiigi/xx:${XX_VERSION} AS xx
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS builder
 
+# git lets the go command fetch modules the proxy cannot serve
+RUN apk add --no-cache git
+
 # Copy the build utilities.
 COPY --from=xx / /
 

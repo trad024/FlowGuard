@@ -203,7 +203,7 @@ DEPENDENCY = [
             "replace github.com/gorilla/mux => github.com/gorilla/handlers v1.5.2\n\n"
             "// Fix CVE-2022-28948\n",
         ),
-        "declares its path as",
+        "missing go.sum entry",
     ),
     Template(
         "dependency-07",
@@ -427,6 +427,7 @@ INFRASTRUCTURE = [
             DOCKERFILE,
             "    ca-certificates curl netcat-openbsd\n",
             "    ca-certificates curl netcat-openbsd\n\nRUN apk add --no-cache "
+            "--repositories-file /dev/null "
             "--repository https://alpine-mirror.internal/v3.24/main tzdata\n",
         ),
         "alpine-mirror.internal",

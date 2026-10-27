@@ -179,6 +179,46 @@ def test_wait_ci_retries_network_errors(monkeypatch, tmp_path):
     assert len(list(r.audit.events("poll_retry"))) == 2
 
 
+def test_host_sleep_is_detected_in_the_load_log(tmp_path):
+    log = tmp_path / "load.jsonl"
+    rows = [
+        '{"ts":"2026-10-27T12:52:00.000Z","status":200,"latency_ms":20}',
+        '{"ts":"2026-10-27T12:52:01.000Z","status":200,"latency_ms":25}',
+    ]
+    log.write_text("\n".join(rows), encoding="utf-8")
+    assert runner.suspend_gaps([log]) == []
+    # A request in flight over a one-hour sleep, then a gap in the log
+    rows += [
+        '{"ts":"2026-10-27T12:52:15.000Z","status":200,"latency_ms":3629606.7}',
+        '{"ts":"2026-10-27T13:53:00.000Z","status":200,"latency_ms":20}',
+    ]
+    log.write_text("\n".join(rows), encoding="utf-8")
+    gaps = runner.suspend_gaps([log, tmp_path / "missing.jsonl"])
+    assert [g["at"] for g in gaps] == ["2026-10-27T12:52:15.000Z", "2026-10-27T13:53:00.000Z"]
+
+
+def test_an_aborted_restore_is_retried_once_with_live_load(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLOWGUARD_AUDIT_DB", str(tmp_path / "audit.db"))
+    r = runner.Runner(spec(), run_id="r-0000abcd")
+    outcomes = iter(["aborted", "promoted"])
+    calls = []
+    monkeypatch.setattr(runner, "patch_template", lambda *a: calls.append("patch"))
+    monkeypatch.setattr(runner, "retry_rollout", lambda ns: calls.append("retry"))
+    monkeypatch.setattr(runner, "wait_outcome", lambda *a: next(outcomes))
+
+    class DeadLoad:
+        def alive(self):
+            return False
+
+        def start(self, label):
+            calls.append(label)
+
+    r.loadgen = DeadLoad()
+    r.restore("img:1", ["./podinfo"])
+    assert calls == ["patch", "r-0000abcd-restore-1", "retry", "r-0000abcd-restore-2"]
+    assert r.observed["restore"] == "promoted"
+
+
 # ---------------------------------------------------------------- CI failure templates
 
 

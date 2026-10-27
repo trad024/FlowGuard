@@ -175,3 +175,8 @@ def baseline_for(template_id):
 def test_captured_logs_do_not_leak(template_id):
     log = (CHECKS / f"{template_id}.log").read_text(encoding="utf-8", errors="replace")
     assert leakage.scan_log(log, baseline_for(template_id)) == []
+
+
+def test_tool_phrases_are_masked_but_class_words_still_count():
+    assert leakage.scan_log("ERROR: exit code: 1\nwrong status code: got 200", "") == []
+    assert leakage.scan_log("code generation failed", "")  # "code" on its own still counts

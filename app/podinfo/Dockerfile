@@ -1,5 +1,8 @@
 FROM golang:1.26.10-alpine AS builder
 
+# git lets the go command fetch modules the proxy cannot serve
+RUN apk add --no-cache git
+
 ARG REVISION
 
 RUN mkdir -p /podinfo/

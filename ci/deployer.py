@@ -231,6 +231,9 @@ class LoadGenerator:
         )
         return out
 
+    def alive(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
     def stop(self) -> None:
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
