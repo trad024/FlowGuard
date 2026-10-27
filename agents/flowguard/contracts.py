@@ -196,3 +196,28 @@ class ExecutionResult(Contract):
     output: str
     validated: bool | None = None  # e.g. pipeline rerun green; None = not applicable
     finished_at: datetime = Field(default_factory=utcnow)
+
+
+# ---------------------------------------------------------------- Collaboration (D5, Step 5)
+
+AblationLevel = Literal["L0", "L1", "L2", "L3", "L4", "L5"]
+
+
+class EvidencePost(Contract):
+    """A claim an agent posts to the shared incident record, with what supports it."""
+
+    incident_id: str
+    agent: AgentName
+    claim: str
+    refs: list[str] = Field(default_factory=list)  # metric names, log line numbers, run ids
+    posted_at: datetime = Field(default_factory=utcnow)
+
+
+class AgentRequest(Contract):
+    """One agent asks another for evidence (P1: Release asks Monitor and Diagnose)."""
+
+    incident_id: str
+    from_agent: AgentName
+    to_agent: AgentName
+    question: str
+    asked_at: datetime = Field(default_factory=utcnow)

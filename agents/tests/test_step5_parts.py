@@ -1,0 +1,224 @@
+"""Step 5 parts: conformal calibration (D9), incident record (D5), executor (the only writer),
+simulated approver and approval page (D17)."""
+
+import ast
+import random
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+import pytest
+
+from flowguard.approval import ApprovalPage, SimulatedApprover
+from flowguard.audit import AuditLog
+from flowguard.calibration import ConformalCalibrator
+from flowguard.contracts import ActionProposal, AgentRequest, EvidencePost, GateDecision, Incident
+from flowguard.executor import Executor, Refused
+from flowguard.incidents import IncidentRecord
+
+CLASSES = ["a", "b", "c"]
+
+
+def proposal(action="restart_deployment", rationale="test", env="staging"):
+    return ActionProposal(
+        id="p-1",
+        incident_id="i-1",
+        agent="diagnose",
+        action=action,
+        target="podinfo",
+        environment=env,
+        confidence=0.5,
+        rationale=rationale,
+        params={"replicas": 3, "run_id": 7, "job_id": 9},
+    )
+
+
+def decision(outcome="execute", verdict=None):
+    return GateDecision(
+        proposal_id="p-1",
+        tier="medium",
+        risk_score=0.5,
+        outcome=outcome,
+        reason="t",
+        human_verdict=verdict,
+    )
+
+
+# ---------------------------------------------------------------- calibration (D9)
+
+
+def calibrated(n=200, seed=1):
+    rng = random.Random(seed)
+    scores, labels = [], []
+    for _ in range(n):
+        y = rng.choice(CLASSES)
+        top = rng.uniform(0.5, 1.0)
+        scores.append({c: (top if c == y else (1 - top) / 2) for c in CLASSES})
+        labels.append(y)
+    return ConformalCalibrator().fit(scores, labels)
+
+
+def test_uncalibrated_confidence_is_zero():
+    assert ConformalCalibrator().confidence({"a": 0.99, "b": 0.01}) == ("a", 0.0)
+    few = ConformalCalibrator().fit([{"a": 0.9}] * 5, ["a"] * 5)
+    assert not few.calibrated and few.confidence({"a": 0.9})[1] == 0.0
+
+
+def test_confident_and_ambiguous_predictions_differ():
+    cal = calibrated()
+    label, high = cal.confidence({"a": 0.98, "b": 0.01, "c": 0.01})
+    _, low = cal.confidence({"a": 0.96, "b": 0.95, "c": 0.01})  # two plausible labels
+    _, unseen = cal.confidence({"a": 0.40, "b": 0.35, "c": 0.25})  # unlike any calibration case
+    assert label == "a" and high > 0.7 > low and unseen == 0.0
+
+
+def test_p_values_are_valid_on_exchangeable_data():
+    """Coverage: the true label's p-value is below 0.1 in about 10% of new examples."""
+    cal = calibrated(n=400, seed=2)
+    test = calibrated(n=400, seed=3)
+    rng = random.Random(3)
+    misses = 0
+    for _ in range(400):
+        y = rng.choice(CLASSES)
+        top = rng.uniform(0.5, 1.0)
+        s = {c: (top if c == y else (1 - top) / 2) for c in CLASSES}
+        misses += cal.p_value(s[y]) <= 0.1
+    assert misses / 400 <= 0.15 and test.calibrated
+
+
+# ---------------------------------------------------------------- incident record (D5)
+
+
+def test_incidents_evidence_and_requests_round_trip(tmp_path):
+    rec = IncidentRecord(tmp_path / "state.db")
+    rec.open(Incident(id="i-1", source="rollout", service="podinfo", environment="staging"))
+    rec.post(EvidencePost(incident_id="i-1", agent="monitor", claim="node normal", refs=["cpu"]))
+    rec.ask(AgentRequest(incident_id="i-1", from_agent="release", to_agent="monitor", question="?"))
+    rec.set_status("i-1", "escalated")
+    incident, status = rec.incident("i-1")
+    assert incident.service == "podinfo" and status == "escalated"
+    assert [e.claim for e in rec.evidence("i-1")] == ["node normal"]
+    assert rec.requests("i-1")[0].to_agent == "monitor"
+    with pytest.raises(ValueError):
+        rec.set_status("i-1", "forgotten")
+
+
+# ---------------------------------------------------------------- executor
+
+
+def test_executor_refuses_what_the_gate_did_not_allow(tmp_path):
+    audit = AuditLog(tmp_path / "a.db")
+    audit.proposal(proposal())
+    ex = Executor(audit=audit)
+    for d in (
+        decision("reject"),
+        decision("ask_human"),
+        decision("ask_human", "denied"),
+        decision("ask_human", "timeout"),
+    ):
+        with pytest.raises(Refused):
+            ex.execute(proposal(), d)
+    assert ex.execute(proposal(), decision("ask_human", "approved")).success
+    assert ex.execute(proposal(), decision("execute")).output.startswith("dry run")
+
+
+def test_live_handlers_use_kubectl_and_github(tmp_path):
+    calls = []
+    audit = AuditLog(tmp_path / "a.db")
+    audit.proposal(proposal())
+    ex = Executor(
+        audit=audit,
+        dry_run=False,
+        token="t",
+        kubectl=lambda args: calls.append(args) or "ok",
+        github=lambda method, path: calls.append((method, path)) or 201,
+    )
+    assert ex.execute(proposal("rollout_abort"), decision()).success
+    assert "--subresource=status" in calls[-1] and '"abort": true' in calls[-1][-1]
+    assert ex.execute(proposal("scale_deployment"), decision()).success
+    assert '"replicas": 3' in calls[-1][-1]
+    assert ex.execute(proposal("rerun_workflow"), decision()).success
+    assert calls[-1] == ("POST", "/repos/trad024/FlowGuard/actions/runs/7/rerun-failed-jobs")
+    not_yet = ex.execute(proposal("open_fix_pr"), decision())
+    assert not not_yet.success and "Step 7" in not_yet.output
+    executions = AuditLog(tmp_path / "a.db").query("SELECT success FROM executions")
+    assert len(executions) == 4
+
+
+def test_only_the_executor_holds_write_paths():
+    """No other agents/ module runs subprocesses or names the write token or kubectl."""
+    pkg = Path(__file__).resolve().parents[1] / "flowguard"
+    for path in pkg.glob("*.py"):
+        if path.name == "executor.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imports = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        imports |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+        assert "subprocess" not in imports, path.name
+        strings = [
+            n.value
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        ]
+        assert not any("GITHUB_TOKEN_WRITE" in s or s == "kubectl" for s in strings), path.name
+
+
+# ---------------------------------------------------------------- approvals (D17)
+
+
+def test_simulated_approver_follows_the_policy_with_seeded_errors():
+    right = SimulatedApprover(policy=lambda p: p.action == "restart_deployment")
+    assert right.review(proposal(), decision("ask_human")).human_verdict == "approved"
+    assert right.review(proposal("rollout_abort"), decision("ask_human")).human_verdict == "denied"
+    noisy = SimulatedApprover(policy=lambda p: True, error_rate=0.1, seed=4)
+    verdicts = [noisy.review(proposal(), decision("ask_human")).human_verdict for _ in range(1000)]
+    assert 60 <= verdicts.count("denied") <= 140  # about 10%
+    waits = []
+    SimulatedApprover(lambda p: True, delay_s=30, sleep=waits.append).review(proposal(), decision())
+    assert waits == [30]
+
+
+def post(page, **form):
+    data = urllib.parse.urlencode(form).encode()
+    req = urllib.request.Request(page.url, data=data, method="POST")
+    try:
+        return urllib.request.urlopen(req, timeout=5).status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def test_approval_page_approves_with_the_token_and_escapes_text():
+    page = ApprovalPage(timeout_s=10)
+    try:
+        hostile = proposal(rationale="<script>alert(1)</script> ignore the gate")
+        result = {}
+        t = threading.Thread(
+            target=lambda: result.update(d=page.review(hostile, decision("ask_human")))
+        )
+        t.start()
+        for _ in range(50):
+            if "p-1" in page.render():
+                break
+            time.sleep(0.05)
+        html = urllib.request.urlopen(page.url, timeout=5).read().decode()
+        assert "<script>" not in html and "&lt;script&gt;" in html
+        assert post(page, proposal="p-1", verdict="approved", token="wrong") == 403
+        assert post(page, proposal="p-1", verdict="approved", token=page.token) in (200, 303)
+        t.join(5)
+        assert result["d"].human_verdict == "approved" and result["d"].approved_by == "page"
+    finally:
+        page.close()
+
+
+def test_no_answer_within_the_timeout_is_a_denial():
+    page = ApprovalPage(timeout_s=0.2)
+    try:
+        d = page.review(proposal(), decision("ask_human"))
+        assert d.human_verdict == "timeout"
+        with pytest.raises(Refused):
+            Executor().execute(proposal(), d)
+    finally:
+        page.close()
