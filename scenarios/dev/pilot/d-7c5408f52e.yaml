@@ -1,0 +1,19 @@
+id: d-7c5408f52e
+family: release
+description: 'dev pilot: none'
+environment: staging
+fault:
+  kind: none
+  delivery: config
+intensity: 1
+ground_truth:
+  bad_release: false
+  expected_l0: promote
+node_stress:
+  cpu_workers: 5
+timing:
+  warmup_s: 30
+  observe_s: 600
+  cooldown_s: 20
+load:
+  rate: 10

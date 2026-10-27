@@ -48,6 +48,8 @@ ENV_FILE = ROOT / ".env"
 OUT = ROOT / "scenarios" / "heldout"
 SEED_VAR = "FLOWGUARD_HELDOUT_SEED"
 FREEZE_TAG = "eval-freeze"
+PILOT = ROOT / "scenarios" / "dev" / "pilot"
+PILOT_SEED = "dev-pilot-20261027"  # public: the pilot is dev data, never the held-out set
 
 # The frozen L0 thresholds (docs/blueprint-v2.md, "L0 canary baseline"), for expected_l0 only
 L0_MAX_5XX = 0.01
@@ -197,6 +199,53 @@ def scenario(seed: str, family: str, index: int, cfg: dict, prereg: dict | None 
         if key in cfg:
             spec[key] = dict(cfg[key])
     return spec
+
+
+def pilot_specs(prereg: dict, seed: str, per_cell: int) -> list[dict]:
+    """A stratified dev pilot (public seed, never the held-out one): `per_cell` release and
+    runtime scenarios per kind and intensity band, good releases half under node stress, and
+    `per_cell` bad releases under stress. Same ranges as the held-out draw; ids d-<hex>."""
+    cells = []
+    for family in ("release", "runtime"):
+        cfg = prereg["families"][family]
+        for kind in sorted(cfg["kinds"]):
+            bands = (cfg.get("bands") or {}).get(kind)
+            for band in sorted(bands) if bands else [None]:
+                n = per_cell * (2 if band is None else 1)
+                cells += [(family, kind, band, i, band is None and i % 2 == 1) for i in range(n)]
+        if family == "release":
+            bad = [k for k in sorted(cfg["kinds"]) if k != "none"]
+            cells += [(family, bad[i % len(bad)], "above", 100 + i, True) for i in range(per_cell)]
+    specs = []
+    for family, kind, band, i, stressed in cells:
+        cfg = prereg["families"][family]
+        rng = stream(seed, f"pilot:{family}:{kind}:{band}:{i}")
+        dists = cfg["bands"][kind][band]["params"] if band else {}
+        params = {name: draw(dist, rng) for name, dist in dists.items()}
+        if "effective_error_rate" in params:
+            effective = params.pop("effective_error_rate")
+            params["error_rate"] = round(min(1.0, effective / params["pods_fraction"]), 4)
+        fault = {"kind": kind, "delivery": cfg["delivery"], **params}
+        label = f"pilot:{family}:{kind}:{band}:{i}"
+        spec = {
+            "id": "d-" + hmac.new(seed.encode(), label.encode(), "sha256").hexdigest()[:10],
+            "family": family,
+            "description": f"dev pilot: {kind}" + (f", {band} band" if band else ""),
+            "environment": "staging",
+            "fault": fault,
+            "intensity": 1,
+            "ground_truth": ground_truth(family, fault, band),
+        }
+        if stressed:
+            spec["node_stress"] = {"cpu_workers": draw(cfg["node_stress"]["cpu_workers"], rng)}
+        for key in ("timing", "load"):
+            if key in cfg:
+                spec[key] = dict(cfg[key])
+        specs.append(spec)
+    for s in specs:
+        if errors := runner.validate_spec(s):
+            raise SystemExit(f"{s['id']}: {errors}")
+    return specs
 
 
 def generate(prereg: dict, seed: str) -> list[dict]:
@@ -385,6 +434,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("verify-seed", help="check the seed in .env against the committed hash")
     gen = sub.add_parser("generate", help="write the held-out specs (Step 11 only)")
     gen.add_argument("--confirm-step-11", action="store_true")
+    pil = sub.add_parser("dev-pilot", help="write the stratified dev pilot to scenarios/dev/pilot/")
+    pil.add_argument("--seed", default=PILOT_SEED)
+    pil.add_argument("--per-cell", type=int, default=2)
     args = parser.parse_args(argv)
 
     if args.cmd == "commit-seed":
@@ -397,6 +449,15 @@ def main(argv: list[str] | None = None) -> int:
         print("seed matches the committed hash")
         return 0
     prereg = yaml.safe_load(PREREG.read_text(encoding="utf-8"))
+    if args.cmd == "dev-pilot":
+        PILOT.mkdir(parents=True, exist_ok=True)
+        specs = pilot_specs(prereg, args.seed, args.per_cell)
+        for s in specs:
+            (PILOT / f"{s['id']}.yaml").write_text(
+                yaml.safe_dump(s, sort_keys=False), encoding="utf-8", newline="\n"
+            )
+        print(f"{len(specs)} dev pilot specs written to {PILOT.relative_to(ROOT).as_posix()}/")
+        return 0
     if prereg.get("status") != "frozen":
         raise SystemExit("the pre-registration is not frozen")
     if not args.confirm_step_11:

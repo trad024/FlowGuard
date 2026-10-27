@@ -1,0 +1,21 @@
+id: d-ed49507628
+family: release
+description: 'dev pilot: latency, above band'
+environment: staging
+fault:
+  kind: latency
+  delivery: config
+  latency_ms: 967
+  jitter_ms: 27
+  fraction: 0.1453
+intensity: 1
+ground_truth:
+  bad_release: true
+  expected_l0: abort
+  band: above
+timing:
+  warmup_s: 30
+  observe_s: 600
+  cooldown_s: 20
+load:
+  rate: 10

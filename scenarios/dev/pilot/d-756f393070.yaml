@@ -1,0 +1,21 @@
+id: d-756f393070
+family: release
+description: 'dev pilot: latency, below band'
+environment: staging
+fault:
+  kind: latency
+  delivery: config
+  latency_ms: 196
+  jitter_ms: 8
+  fraction: 0.0379
+intensity: 1
+ground_truth:
+  bad_release: true
+  expected_l0: promote
+  band: below
+timing:
+  warmup_s: 30
+  observe_s: 600
+  cooldown_s: 20
+load:
+  rate: 10

@@ -1,0 +1,19 @@
+id: d-614c2e1791
+family: release
+description: 'dev pilot: http_errors, below band'
+environment: staging
+fault:
+  kind: http_errors
+  delivery: config
+  error_rate: 0.0042
+intensity: 1
+ground_truth:
+  bad_release: true
+  expected_l0: promote
+  band: below
+timing:
+  warmup_s: 30
+  observe_s: 600
+  cooldown_s: 20
+load:
+  rate: 10

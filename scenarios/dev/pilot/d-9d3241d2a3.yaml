@@ -1,0 +1,21 @@
+id: d-9d3241d2a3
+family: runtime
+description: 'dev pilot: latency_spike, below band'
+environment: staging
+fault:
+  kind: latency_spike
+  delivery: runtime
+  latency_ms: 359
+  fraction: 0.7083
+  pods_fraction: 0.2364
+intensity: 1
+ground_truth:
+  incident: true
+  expected_l0: detect
+  band: below
+timing:
+  warmup_s: 60
+  incident_s: 300
+  cooldown_s: 60
+load:
+  rate: 10

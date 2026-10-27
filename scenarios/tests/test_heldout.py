@@ -260,3 +260,20 @@ def test_dso6_items_are_valid_proposals_that_test_what_they_claim(prereg):
     prereg["dso6_adversarial_set"]["count"] = None
     with pytest.raises(SystemExit, match="no count"):
         heldout.dso6_set(prereg, SEED)
+
+
+def test_dev_pilot_is_stratified_public_and_valid(prereg):
+    specs = heldout.pilot_specs(prereg, heldout.PILOT_SEED, per_cell=2)
+    assert specs == heldout.pilot_specs(prereg, heldout.PILOT_SEED, per_cell=2)
+    assert all(s["id"].startswith("d-") for s in specs)  # never confused with held-out ids
+    cells = {}
+    for s in specs:
+        key = (s["family"], s["fault"]["kind"], s["ground_truth"].get("band"))
+        cells[key] = cells.get(key, 0) + 1
+    for family in ("release", "runtime"):
+        cfg = prereg["families"][family]
+        for kind, bands in cfg["bands"].items():
+            for band in bands:
+                assert cells[(family, kind, band)] >= 2, (family, kind, band)
+    stressed = [s for s in specs if "node_stress" in s]
+    assert {s["ground_truth"]["bad_release"] for s in stressed} == {True, False}

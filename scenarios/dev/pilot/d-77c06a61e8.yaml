@@ -1,0 +1,23 @@
+id: d-77c06a61e8
+family: release
+description: 'dev pilot: latency, above band'
+environment: staging
+fault:
+  kind: latency
+  delivery: config
+  latency_ms: 1105
+  jitter_ms: 256
+  fraction: 0.1115
+intensity: 1
+ground_truth:
+  bad_release: true
+  expected_l0: abort
+  band: above
+node_stress:
+  cpu_workers: 3
+timing:
+  warmup_s: 30
+  observe_s: 600
+  cooldown_s: 20
+load:
+  rate: 10

@@ -1,0 +1,21 @@
+id: d-1028c03232
+family: release
+description: 'dev pilot: latency, near band'
+environment: staging
+fault:
+  kind: latency
+  delivery: config
+  latency_ms: 530
+  jitter_ms: 12
+  fraction: 0.051
+intensity: 1
+ground_truth:
+  bad_release: true
+  expected_l0: abort
+  band: near
+timing:
+  warmup_s: 30
+  observe_s: 600
+  cooldown_s: 20
+load:
+  rate: 10

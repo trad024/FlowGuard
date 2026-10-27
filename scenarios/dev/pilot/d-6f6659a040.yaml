@@ -1,0 +1,21 @@
+id: d-6f6659a040
+family: runtime
+description: 'dev pilot: latency_spike, near band'
+environment: staging
+fault:
+  kind: latency_spike
+  delivery: runtime
+  latency_ms: 894
+  fraction: 0.5992
+  pods_fraction: 0.3275
+intensity: 1
+ground_truth:
+  incident: true
+  expected_l0: detect
+  band: near
+timing:
+  warmup_s: 60
+  incident_s: 300
+  cooldown_s: 60
+load:
+  rate: 10

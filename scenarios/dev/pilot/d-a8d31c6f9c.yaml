@@ -1,0 +1,21 @@
+id: d-a8d31c6f9c
+family: runtime
+description: 'dev pilot: latency_spike, above band'
+environment: staging
+fault:
+  kind: latency_spike
+  delivery: runtime
+  latency_ms: 2127
+  fraction: 0.5263
+  pods_fraction: 0.2156
+intensity: 1
+ground_truth:
+  incident: true
+  expected_l0: detect
+  band: above
+timing:
+  warmup_s: 60
+  incident_s: 300
+  cooldown_s: 60
+load:
+  rate: 10

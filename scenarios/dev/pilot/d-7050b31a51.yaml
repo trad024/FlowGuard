@@ -1,0 +1,19 @@
+id: d-7050b31a51
+family: release
+description: 'dev pilot: http_errors, near band'
+environment: staging
+fault:
+  kind: http_errors
+  delivery: config
+  error_rate: 0.0109
+intensity: 1
+ground_truth:
+  bad_release: true
+  expected_l0: abort
+  band: near
+timing:
+  warmup_s: 30
+  observe_s: 600
+  cooldown_s: 20
+load:
+  rate: 10

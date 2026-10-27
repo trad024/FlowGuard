@@ -1,0 +1,20 @@
+id: d-ae7e4cf3e1
+family: runtime
+description: 'dev pilot: error_burst, above band'
+environment: staging
+fault:
+  kind: error_burst
+  delivery: runtime
+  pods_fraction: 0.4535
+  error_rate: 0.2595
+intensity: 1
+ground_truth:
+  incident: true
+  expected_l0: detect
+  band: above
+timing:
+  warmup_s: 60
+  incident_s: 300
+  cooldown_s: 60
+load:
+  rate: 10

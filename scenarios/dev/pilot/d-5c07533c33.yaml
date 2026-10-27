@@ -1,0 +1,20 @@
+id: d-5c07533c33
+family: runtime
+description: 'dev pilot: memory_leak, near band'
+environment: staging
+fault:
+  kind: memory_leak
+  delivery: runtime
+  leak_kb_per_s: 142
+  pods_fraction: 0.1053
+intensity: 1
+ground_truth:
+  incident: true
+  expected_l0: detect
+  band: near
+timing:
+  warmup_s: 60
+  incident_s: 300
+  cooldown_s: 60
+load:
+  rate: 10

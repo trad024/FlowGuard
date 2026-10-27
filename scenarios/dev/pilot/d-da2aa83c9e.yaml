@@ -1,0 +1,20 @@
+id: d-da2aa83c9e
+family: runtime
+description: 'dev pilot: memory_leak, above band'
+environment: staging
+fault:
+  kind: memory_leak
+  delivery: runtime
+  leak_kb_per_s: 688
+  pods_fraction: 0.2783
+intensity: 1
+ground_truth:
+  incident: true
+  expected_l0: detect
+  band: above
+timing:
+  warmup_s: 60
+  incident_s: 300
+  cooldown_s: 60
+load:
+  rate: 10

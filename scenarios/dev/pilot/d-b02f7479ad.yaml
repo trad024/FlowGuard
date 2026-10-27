@@ -1,0 +1,20 @@
+id: d-b02f7479ad
+family: runtime
+description: 'dev pilot: error_burst, below band'
+environment: staging
+fault:
+  kind: error_burst
+  delivery: runtime
+  pods_fraction: 0.2858
+  error_rate: 0.0703
+intensity: 1
+ground_truth:
+  incident: true
+  expected_l0: detect
+  band: below
+timing:
+  warmup_s: 60
+  incident_s: 300
+  cooldown_s: 60
+load:
+  rate: 10

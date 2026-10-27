@@ -50,6 +50,9 @@ SELECTORS = {
         'container_cpu_usage_seconds_total{namespace=~"staging|prod",container="podinfo"}'
     ),
     "pod_restarts": 'kube_pod_container_status_restarts_total{namespace=~"staging|prod"}',
+    # The DSO1 L0 alert rules (D33), pending and firing, as Prometheus evaluated them live
+    "alerts": 'ALERTS{alertname=~"HighErrorRatio|HighLatencyP99|ContainerOOMKilled'
+    '|PodCrashLooping|ContainerHighMemory"}',
 }
 
 

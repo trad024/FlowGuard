@@ -1,0 +1,21 @@
+id: d-3a3a94e742
+family: release
+description: 'dev pilot: http_errors, above band'
+environment: staging
+fault:
+  kind: http_errors
+  delivery: config
+  error_rate: 0.0386
+intensity: 1
+ground_truth:
+  bad_release: true
+  expected_l0: abort
+  band: above
+node_stress:
+  cpu_workers: 6
+timing:
+  warmup_s: 30
+  observe_s: 600
+  cooldown_s: 20
+load:
+  rate: 10
