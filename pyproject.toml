@@ -27,6 +27,9 @@ include = ["flowguard*"]
 testpaths = ["agents/tests", "evaluation/tests", "ci/tests", "scenarios/tests"]
 pythonpath = ["agents", "evaluation", "ci", "scenarios"]
 addopts = "-q"
+markers = [
+    "integration: needs the cluster, Docker or the network; skipped unless FLOWGUARD_INTEGRATION=1",
+]
 
 [tool.ruff]
 line-length = 100

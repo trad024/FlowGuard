@@ -289,7 +289,9 @@ def test_config_release_keeps_the_injection_out_of_the_audit_log(monkeypatch, st
     monkeypatch.setattr(runner.deployer, "create_release_settings", create)
     monkeypatch.setattr(runner, "patch_template", lambda *a: patches.append(a))
     monkeypatch.setattr(runner, "wait_outcome", lambda *a: "aborted")
+    monkeypatch.setattr(runner, "retry_rollout", lambda ns: retries.append(ns))
     monkeypatch.setattr(runner.time, "sleep", lambda s: None)
+    retries = []
 
     class Load:
         def start(self, label):
@@ -311,6 +313,7 @@ def test_config_release_keeps_the_injection_out_of_the_audit_log(monkeypatch, st
     assert release[3] == runner.env_from("podinfo-release-00000001")
     assert restore[3] is None  # the stable template had no release Secret
     assert secrets == [runner.release_settings(fault)]
+    assert retries == ["staging"]  # the aborted restore was retried once
 
     audit = list(r.audit.events())
     # release, then the restore (aborted, retried once)
