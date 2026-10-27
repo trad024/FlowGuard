@@ -130,6 +130,19 @@ def record_prometheus(out: Path, start: datetime, end: datetime, base: str = PRO
     return summary
 
 
+class _TokenStaysOnHost(urllib.request.HTTPRedirectHandler):
+    """GitHub answers a job-log request with a redirect to log storage on another host, which
+    rejects (401) a forwarded API token and must not see it: drop it when the host changes."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None:
+            old_host = urllib.parse.urlparse(req.full_url).netloc
+            if urllib.parse.urlparse(newurl).netloc != old_host:
+                new.remove_header("Authorization")
+        return new
+
+
 class GitHubReader:
     """Read-only access to CI runs; job logs need a token allowed to read them."""
 
@@ -152,7 +165,8 @@ class GitHubReader:
             req = urllib.request.Request(
                 url, headers={"User-Agent": "flowguard-recorder", **self.headers()}
             )
-            with urllib.request.urlopen(req, timeout=60) as r:
+            opener = urllib.request.build_opener(_TokenStaysOnHost)
+            with opener.open(req, timeout=60) as r:
                 return r.read().decode("utf-8", errors="replace"), None
         except urllib.error.HTTPError as exc:
             reason = exc.read()[:200].decode(errors="replace")

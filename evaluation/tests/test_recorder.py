@@ -36,7 +36,17 @@ class Fake(BaseHTTPRequestHandler):
             series = {"metric": {"pod": "podinfo-h1-a"}, "values": [[1, "3"], [16, "5"]]}
             return self.reply(200, {"status": "success", "data": {"result": [series]}})
         if url.path.endswith("/logs"):
-            return self.reply(403, {"message": "Must have admin rights to Repository."})
+            if not self.headers.get("Authorization"):
+                return self.reply(403, {"message": "Must have admin rights to Repository."})
+            # Like GitHub: a redirect to log storage on another host, which rejects the token
+            self.send_response(302)
+            self.send_header("Location", f"http://localhost:{self.server.server_address[1]}/blob")
+            self.end_headers()
+            return None
+        if url.path == "/blob":
+            if self.headers.get("Authorization"):
+                return self.reply(401, {"message": "unexpected Authorization header"})
+            return self.reply(200, b"2026-10-27T10:00:00Z ##[group]Run go test ./...\n")
         if url.path.endswith("/annotations"):
             return self.reply(200, [{"title": "scan-counts", "message": "trivy_high=0"}])
         if url.path.endswith("/jobs"):
@@ -97,6 +107,12 @@ def test_prometheus_samples_are_raw_over_the_whole_window(server, tmp_path):
 def test_prometheus_errors_are_recorded_not_raised(tmp_path):
     summary = recorder.record_prometheus(tmp_path, START, END, "http://127.0.0.1:9")
     assert all("error" in v for v in summary.values())
+
+
+def test_job_logs_follow_the_redirect_without_the_token(server):
+    gh = recorder.GitHubReader("trad024/FlowGuard", token="read-token", api=server)
+    text, why = gh.job_log(5)
+    assert why is None and "Run go test" in text
 
 
 def test_ci_metadata_is_saved_and_unreadable_logs_are_marked(server, tmp_path):
