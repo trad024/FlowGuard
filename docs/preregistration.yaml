@@ -37,7 +37,7 @@ smallest_effect:
   H1: {metric: DSO1 recall, difference: +10 percentage points, levels: [L0, L1]}
   H2: {metric: DSO2 macro-F1, difference: +0.10, levels: [regex, L3]}
   H3: {metric: LogChunks localization hit rate, difference: +10 percentage points, levels: [L2, L3],
-       note: proposed with D32, to confirm; the hallucination rate (secondary) keeps -10 points}
+       note: confirmed (D35); the hallucination rate (secondary) keeps -10 points}
   H4: {metric: wrong decisions, difference: -50% relative, levels: [L3, L4]}
 
 # ------------------------------------------------------------------ scenario families
