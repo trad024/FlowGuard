@@ -186,3 +186,77 @@ def test_bands_agree_with_the_frozen_l0_rule(prereg):
         if s["family"] == "release" and band in ("below", "above"):
             expected = "promote" if band == "below" else "abort"
             assert s["ground_truth"]["expected_l0"] == expected, (band, s["fault"])
+
+
+# ---------------------------------------------------------------- DSO4, DSO5, DSO6 generators
+
+
+def test_dso4_security_items_draw_from_the_frozen_pool(prereg):
+    prereg["families"]["security"]["count"] = 60
+    pool = prereg["dso4_dependency_pool"]
+    vulnerable = {(e["module"], e["version"]) for e in pool["vulnerable"]}
+    controls = {(e["module"], e["version"]) for e in pool["low_severity_controls"]}
+    drawn = {"vulnerable_dependency": set(), "low_severity_finding": set()}
+    for s in heldout.generate(prereg, SEED):
+        if s["fault"]["kind"] in drawn:
+            drawn[s["fault"]["kind"]].add((s["fault"]["module"], s["fault"]["version"]))
+    assert drawn["vulnerable_dependency"] and drawn["vulnerable_dependency"] <= vulnerable
+    assert drawn["low_severity_finding"] and drawn["low_severity_finding"] <= controls
+
+
+def test_dso5_sequence_is_seeded_and_points_at_real_files(prereg):
+    prereg["dso5_commit_sequence"]["count"] = 80
+    files, modules = heldout.tracked_files(), heldout.go_modules()
+    seq = heldout.dso5_sequence(prereg, SEED, files, modules)
+    assert seq == heldout.dso5_sequence(prereg, SEED, files, modules)
+    assert seq != heldout.dso5_sequence(prereg, "cd" * 32, files, modules)
+    kinds = {s["change_type"] for s in seq}
+    assert kinds == set(prereg["dso5_commit_sequence"]["change_types"])
+    for s in seq:
+        if "file" in s:
+            assert s["file"] in files
+        if s["change_type"] == "docs_only":
+            assert not s["file"].startswith("app/")
+        if s["change_type"] == "dependency_bump":
+            assert s["module"] in modules
+        if s["change_type"] == "failing":
+            assert s["template"] in prereg["families"]["ci"]["templates"]
+    prereg["dso5_commit_sequence"]["count"] = None
+    with pytest.raises(SystemExit, match="no count"):
+        heldout.dso5_sequence(prereg, SEED, files, modules)
+
+
+def test_dso6_items_are_valid_proposals_that_test_what_they_claim(prereg):
+    from flowguard.catalog import CATALOG
+    from flowguard.contracts import ActionProposal, RiskTier
+
+    prereg["dso6_adversarial_set"]["count"] = 120
+    items = heldout.dso6_set(prereg, SEED)
+    assert items == heldout.dso6_set(prereg, SEED)
+    assert {i["category"] for i in items} == set(prereg["dso6_adversarial_set"]["categories"])
+    for item in items:
+        for p in item.get("proposals", []):
+            ActionProposal(**p)  # the contract accepts it
+        c, props = item["category"], item.get("proposals", [])
+        if c == "prohibited_action":
+            assert CATALOG[props[0]["action"]].tier == RiskTier.PROHIBITED
+        if c == "out_of_catalog_action":
+            assert props[0]["action"] not in CATALOG
+        if c == "high_risk_without_approval":
+            assert CATALOG[props[0]["action"]].tier == RiskTier.HIGH
+        if c == "medium_in_prod":
+            assert CATALOG[props[0]["action"]].tier == RiskTier.MEDIUM
+            assert props[0]["environment"] == "prod"
+        if c == "loop_limit":
+            assert len(props) > CATALOG[props[0]["action"]].max_per_hour
+            assert len({(p["action"], p["target"]) for p in props}) == 1
+        if c == "conflicting_proposals":
+            assert {p["action"] for p in props} == {"rollout_promote", "rollout_abort"}
+            assert len({p["incident_id"] for p in props}) == 1
+        if c.startswith("injection_in_"):
+            text = item["input"]["text"]
+            assert "{action}" not in text
+            assert any(a in text for a, e in CATALOG.items() if e.tier == RiskTier.PROHIBITED)
+    prereg["dso6_adversarial_set"]["count"] = None
+    with pytest.raises(SystemExit, match="no count"):
+        heldout.dso6_set(prereg, SEED)
