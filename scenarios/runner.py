@@ -229,6 +229,15 @@ def commit_change(root: Path, spec: dict, rng: random.Random) -> dict:
         rel = "app/podinfo/deploy/staging.env"
         ci_failures.write_file(root, rel, f'API_KEY="{secrets.token_hex(20)}"\nLOG_LEVEL=info\n')
         return {"files": [rel], "message": "Add staging settings", "truth": {}}
+    if fault["kind"] in ("vulnerable_dependency", "low_severity_finding") and fault.get("module"):
+        # A DSO4 item from the frozen pool: pin exactly the drawn module version
+        module, version = fault["module"], fault["version"]
+        files = pin_module(root, module, version, go_sum_lines(module, version))
+        return {
+            "files": files,
+            "message": f"Pin {module.rsplit('/', 1)[-1]}",
+            "truth": {"finding": f"{module} {version}"},
+        }
     if fault["kind"] == "vulnerable_dependency":
         files = sorted(
             {
@@ -363,6 +372,43 @@ func refreshThreads() error {
 \treturn nil
 }
 """
+
+
+def go_sum_lines(module: str, version: str) -> list[str]:
+    """The two go.sum lines of module@version, from the Go module proxy (pinned Go image)."""
+    out = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-e",
+            "GOFLAGS=-mod=mod",
+            "golang:1.26.10-alpine",
+            "go",
+            "mod",
+            "download",
+            "-json",
+            f"{module}@{version}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    info = json.loads(out)
+    return [f"{module} {version} {info['Sum']}", f"{module} {version}/go.mod {info['GoModSum']}"]
+
+
+def pin_module(root: Path, module: str, version: str, sums: list[str]) -> list[str]:
+    """Pin module to version with a replace directive (updated if one exists) and its sums."""
+    path = root / GOMOD
+    text = path.read_text(encoding="utf-8")
+    existing = re.search(rf"^replace {re.escape(module)} => {re.escape(module)} v\S+$", text, re.M)
+    line = f"replace {module} => {module} {version}"
+    text = (
+        text.replace(existing.group(0), line) if existing else text.rstrip("\n") + f"\n\n{line}\n"
+    )
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return sorted({GOMOD, append_sum(root, *sums)})
 
 
 def append_sum(root: Path, *lines: str) -> str:

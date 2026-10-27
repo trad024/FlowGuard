@@ -445,3 +445,31 @@ def test_corpus_runs_the_jobs_in_app_ci_order():
     assert corpus.jobs_for(ci_failures.ALL_VARIANTS["code-05"]) == ["build", "unit"]
     lint = ci_failures.ALL_VARIANTS["code-06.v2"]
     assert corpus.jobs_for(lint) == ["build", "unit", "optional (lint)"]
+
+
+@pytest.mark.parametrize(
+    ("module", "version", "replaced"),
+    [("golang.org/x/text", "v0.19.0", True), ("google.golang.org/grpc", "v1.67.1", False)],
+)
+def test_dso4_items_pin_the_drawn_module_version(checkout, monkeypatch, module, version, replaced):
+    sums = [f"{module} {version} h1:aaa=", f"{module} {version}/go.mod h1:bbb="]
+    monkeypatch.setattr(runner, "go_sum_lines", lambda m, v: sums)
+    s = spec(
+        family="security",
+        fault={
+            "kind": "vulnerable_dependency",
+            "delivery": "commit",
+            "module": module,
+            "version": version,
+        },
+        ground_truth={"bad_release": True, "expected_l0": "block"},
+    )
+    change = runner.commit_change(checkout, s, random.Random("r-1"))
+    gomod = (checkout / runner.GOMOD).read_text(encoding="utf-8")
+    assert f"replace {module} => {module} {version}" in gomod
+    assert gomod.count(f"replace {module} =>") == 1  # an existing directive is updated
+    assert all(line in (checkout / runner.GOSUM).read_text(encoding="utf-8") for line in sums)
+    assert change["message"] == f"Pin {module.rsplit('/', 1)[-1]}"
+    assert change["truth"]["finding"] == f"{module} {version}"
+    if replaced:
+        assert "golang.org/x/text => golang.org/x/text v0.42.0" not in gomod
