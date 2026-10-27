@@ -35,11 +35,32 @@ def done(truth: groundtruth.GroundTruthDB) -> set[str]:
         return {r[0] for r in db.execute("SELECT spec_id FROM runs WHERE valid = 1")}
 
 
+def healthy(env: str = "staging") -> bool:
+    """Staging Healthy and stable; if not, one retry of its canary with load."""
+    cluster = deployer.Cluster(env)
+    status = cluster.rollout().get("status", {})
+    if status.get("phase") == "Healthy" and status.get("stableRS") == status.get("currentPodHash"):
+        return True
+    image = deployer.container(cluster.rollout())["image"]
+    load = deployer.LoadGenerator(env)
+    load.start(f"heal-{runner.new_run_id()}")
+    try:
+        runner.retry_rollout(env)
+        outcome = runner.wait_outcome(cluster, image, 900)
+    finally:
+        load.stop()
+    print(json.dumps({"heal": outcome}), flush=True)
+    return outcome == "promoted"
+
+
 def run_scenarios(specs: list[Path]) -> None:
     truth = groundtruth.GroundTruthDB.open()
     for path in specs:
         spec = runner.load_spec(path)
         if spec["id"] in done(truth):
+            continue
+        if not healthy():
+            print(json.dumps({"skipped": spec["id"], "reason": "staging not healthy"}), flush=True)
             continue
         print(json.dumps({"start": spec["id"], "at": recorder.iso(datetime.now(UTC))}), flush=True)
         try:
