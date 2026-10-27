@@ -187,14 +187,22 @@ def test_host_sleep_is_detected_in_the_load_log(tmp_path):
     ]
     log.write_text("\n".join(rows), encoding="utf-8")
     assert runner.suspend_gaps([log]) == []
-    # A request in flight over a one-hour sleep, then a gap in the log
+    # Requests in flight over a one-hour sleep (lines carry the start time), then the next
+    # request after the wake: one episode
     rows += [
+        '{"ts":"2026-10-27T12:52:15.100Z","status":200,"latency_ms":3629570.5}',
         '{"ts":"2026-10-27T12:52:15.000Z","status":200,"latency_ms":3629606.7}',
         '{"ts":"2026-10-27T13:53:00.000Z","status":200,"latency_ms":20}',
+        # later, the load generator stops for two minutes
+        '{"ts":"2026-10-27T13:53:30.000Z","status":200,"latency_ms":20}',
+        '{"ts":"2026-10-27T13:55:30.000Z","status":200,"latency_ms":20}',
     ]
     log.write_text("\n".join(rows), encoding="utf-8")
     gaps = runner.suspend_gaps([log, tmp_path / "missing.jsonl"])
-    assert [g["at"] for g in gaps] == ["2026-10-27T12:52:15.000Z", "2026-10-27T13:53:00.000Z"]
+    assert gaps == [
+        {"from": "2026-10-27T12:52:15Z", "to": "2026-10-27T13:53:00Z"},
+        {"from": "2026-10-27T13:53:30Z", "to": "2026-10-27T13:55:30Z"},
+    ]
 
 
 def test_an_aborted_restore_is_retried_once_with_live_load(monkeypatch, tmp_path):

@@ -14,7 +14,7 @@ Injected faults (D19) answer with the pod's hostname, so failed requests are att
 
 | File | Content |
 | --- | --- |
-| `manifest.json` | window, git commit, Prometheus selectors, per-source counts, the spec and what L0 did |
+| `manifest.json` | window, git commit, Prometheus selectors, per-source counts, the spec, what L0 did, and `valid` (false when the host slept during the run; such runs are not scored) |
 | `ground_truth.json` | the scenario's ground truth |
 | `prometheus/<name>.json` | raw samples (a `selector[window]` query, not resampled) for request counters, latency buckets and sums, `up`, CPU, memory, restarts |
 | `loadgen.jsonl` | per-request lines inside the window |
@@ -34,14 +34,15 @@ jobs, steps and annotations.
 ## Audit metrics (step 4a)
 
 `py -m flowguard.audit_metrics [--scenario <run id>]` (with `agents` on `PYTHONPATH`):
-deployment outcomes and time to promotion per environment, security decisions, unapproved
-high-risk executions (must stay 0), approvals per incident.
+deployment outcomes and time to promotion per environment, security decisions (once per
+distinct commit and decision), executions while the gate required a human without an approval,
+whatever the tier (DSO6, must stay 0), executions after a reject, approvals per incident.
 
 ## External datasets (D14, step 4a)
 
 ```powershell
 py evaluation\datasets.py download                  # LogChunks, MD5-verified, extracted
-py evaluation\datasets.py download --with-logsieve  # also LogSieve Data.zip (1 GB, verified)
+py evaluation\datasets.py download --with-logsieve  # LogSieve Data.zip (1 GB): not used, see below
 py evaluation\datasets.py sample                    # the 150-log sample (seed 20261026)
 py evaluation\datasets.py sheet                     # the blank labelling sheet
 ```
@@ -49,4 +50,5 @@ py evaluation\datasets.py sheet                     # the blank labelling sheet
 Raw files stay in the gitignored `datasets/raw/`. Committed: `datasets/logchunks-sample-150.csv`
 (identifiers and SHA-256, no log text) and `datasets/labelling/` (blank sheet and guide).
 LogSieve's `Data.zip` holds raw GitHub Actions run logs (111,172 files, 9 GB unpacked, not
-extracted); the line-labelled logs D14 refers to were not found in it.
+extracted); the line-labelled logs D14 refers to were not found in it, so it was deleted and
+LogSieve is not used unless a small labels file is identified (D14).

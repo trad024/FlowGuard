@@ -37,7 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import yaml
@@ -340,7 +340,8 @@ def retry_rollout(namespace: str) -> None:
 def suspend_gaps(loadgen_files: list[Path], threshold_s: float = 60) -> list[dict]:
     """Periods when the host was asleep: no request for `threshold_s`, or a request that took
     that long. Load and metrics both stop then, so L0 sees no data and the run is not valid."""
-    gaps = []
+    gap = timedelta(seconds=threshold_s)
+    episodes: list[list[datetime]] = []  # [from, to]; one sleep stalls many requests at once
     for path in loadgen_files:
         if not Path(path).is_file():
             continue
@@ -348,15 +349,22 @@ def suspend_gaps(loadgen_files: list[Path], threshold_s: float = 60) -> list[dic
         for line in Path(path).read_text(encoding="utf-8").splitlines():
             try:
                 row = json.loads(line)
-                ts = datetime.fromisoformat(row["ts"].replace("Z", "+00:00"))
+                ts = datetime.fromisoformat(row["ts"].replace("Z", "+00:00"))  # request start
             except (ValueError, KeyError):
                 continue
-            stalled = (row.get("latency_ms") or 0) / 1000 >= threshold_s
-            if stalled or (last and (ts - last).total_seconds() >= threshold_s):
-                after = recorder.iso(last) if last else None
-                gaps.append({"file": Path(path).name, "at": row["ts"], "after": after})
-            last = ts
-    return gaps
+            done = ts + timedelta(milliseconds=row.get("latency_ms") or 0)
+            if done - ts >= gap:
+                span = [ts, done]
+            elif last and ts - last >= gap:
+                span = [last, ts]
+            else:
+                span = None
+            if span and episodes and span[0] <= episodes[-1][1]:
+                episodes[-1][1] = max(episodes[-1][1], span[1])
+            elif span:
+                episodes.append(span)
+            last = max(last, ts) if last else ts
+    return [{"from": recorder.iso(a), "to": recorder.iso(b)} for a, b in episodes]
 
 
 def stable_pods(namespace: str, stable_hash: str) -> list[dict]:
