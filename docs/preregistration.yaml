@@ -284,7 +284,7 @@ comparisons:                     # paired: same scenarios, seeds and order at ev
   H4: {levels: [L3, L4], test: exact McNemar on wrong / right decisions}
   H5: {levels: [L5 settings], test: none; Wilson interval per setting, the constraint is a count}
 time_metrics: paired bootstrap intervals, 10000 resamples (MTTD, time to rollback, durations)
-multiplicity: Holm correction across the primary tests of H1 to H4   # proposal, to confirm
+multiplicity: Holm correction across the primary tests of H1 to H4 (D31); secondary and per-band results uncorrected, labelled as such
 per_band: every release and runtime result is also reported per intensity band (descriptive)
 
 # ------------------------------------------------------------------ execution
