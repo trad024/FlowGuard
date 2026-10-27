@@ -117,12 +117,12 @@ are excluded from scoring.
 | release-errors-0005 | config | promote (known L0 miss) | promoted |
 | release-latency-800 | config | abort | aborted |
 | release-latency-300-tail | config | abort | aborted |
-| release-commit-errors-10 | commit | abort | aborted (82 s) |
+| release-commit-errors-10 | commit | abort | aborted (82 s); rerun 2026-10-27 as the D30 code defect: CI green, gate allow, aborted in 102 s, canary 10/128 5xx (7.8%), stable 0/891 |
 | release-good-node-stress | config, 6 CPU workers | promote | promoted (see note) |
 | security-leaked-secret | commit | block | blocked (gitleaks=1) |
 | security-vulnerable-dependency | commit | block | blocked (trivy_high=4) |
 | security-low-severity-finding | commit | promote | allowed (trivy_high=0), promoted |
-| ci-code, -dependency, -environment, -flaky-test, -infrastructure | commit | ci_failure | failed in the expected job (2026-10-26, before the template rework) |
+| ci-code, -dependency, -environment, -flaky-test, -infrastructure | commit | ci_failure | rerun 2026-10-27 with templates code-06, dependency-06, environment-04, flaky_test-01, infrastructure-01: all failed, with the expected error in the failing job's log; code-06 failed in unit instead of lint (go test runs vet's printf check), fixed and rerun: fails in lint. 33 downloaded job logs scan clean |
 | runtime-error-burst | runtime, 30% of pods | detect | 28.6% 5xx on the 3 target pods, 0% on the others |
 | runtime-latency-spike | runtime | detect | mean 436 ms during the incident, 29 ms outside |
 | runtime-memory-leak | runtime, 512 KB/s on 2 pods | detect | both pods OOMKilled (exit 137) and restarted twice: a crash loop |
