@@ -124,6 +124,11 @@ def validate_spec(spec) -> list[str]:
         template = ci_failures.TEMPLATES.get(fault["template"])
         if family != "ci" or template is None or template.root_cause != fault.get("kind"):
             errors.append("fault.template must name a template of the ci family's fault.kind")
+    through_ci = family == "release" and fault.get("delivery") == "commit"
+    if through_ci and (
+        fault.get("kind") != "http_errors" or not float(fault.get("error_rate") or 0) > 0
+    ):
+        errors.append("a release through CI is an http_errors defect with error_rate > 0")
     if "node_stress" in spec and family != "release":
         errors.append("node_stress is only for the release family")
     if spec.get("environment", "staging") != "staging":
@@ -269,19 +274,95 @@ def commit_change(root: Path, spec: dict, rng: random.Random) -> dict:
             "message": "Pin websocket",
             "truth": {"finding": "github.com/gorilla/websocket v1.5.0, MODERATE only"},
         }
-    # release family through CI: the fault is on by default in podinfo's code
-    rel = "app/podinfo/cmd/podinfo/main.go"
+    # release family through CI: an ordinary code defect (D30), no fault setting in the diff
+    if fault.get("kind") != "http_errors":
+        raise ValueError("a release through CI supports the http_errors kind only")
+    interval, rate = refresh_interval(float(fault["error_rate"]), spec)
+    rel = "app/podinfo/pkg/api/http/info.go"
     text = (root / rel).read_text(encoding="utf-8")
-    for flag, value in (
-        ("fault-error-rate", fault.get("error_rate", 0)),
-        ("fault-latency-ms", fault.get("latency_ms", 0)),
-        ("fault-jitter-ms", fault.get("jitter_ms", 0)),
+    for old, new in (
+        ('\t"net/http"\n', '\t"fmt"\n\t"net/http"\n'),
+        (
+            '\t"runtime"\n\t"strconv"\n',
+            '\t"os"\n\t"runtime"\n\t"strconv"\n\t"strings"\n\t"sync/atomic"\n\t"time"\n',
+        ),
+        ("\tdefer span.End()\n\n\tdata := RuntimeResponse{", INFO_REFRESH_CALL),
     ):
-        text, n = re.subn(rf'(fs\.\w+\("{flag}", )[^,]+,', rf"\g<1>{value},", text, count=1)
-        if n != 1:
-            raise ValueError(f"main.go: flag {flag} not found")
+        if text.count(old) != 1:
+            raise ValueError(f"{rel}: unexpected source, cannot apply the change")
+        text = text.replace(old, new)
+    text += INFO_REFRESH_FUNC.replace("{interval}", str(interval))
     (root / rel).write_text(text, encoding="utf-8", newline="\n")
-    return {"files": [rel], "message": "Tune request handling defaults", "truth": {}}
+    return {
+        "files": [rel],
+        "message": "Refresh runtime counters periodically",
+        "truth": {
+            "defect": {"file": rel, "refresh_interval_s": interval, "expected_5xx_share": rate}
+        },
+    }
+
+
+REPLICAS = 10  # podinfo's Rollout; the Service spreads the load evenly over the pods
+MIN_REFRESH_S = 5  # longer than podinfo's unit tests run, so they never trigger the defect
+
+
+def refresh_interval(error_rate: float, spec: dict) -> tuple[int, float]:
+    """Seconds between failing refreshes for about `error_rate` of the canary's requests, and
+    the share it really gives: each pod fails one request per interval."""
+    per_pod_rps = float((spec.get("load") or {}).get("rate", 10)) / REPLICAS
+    interval = max(MIN_REFRESH_S, round(1 / (error_rate * per_pod_rps)))
+    return interval, round(1 / (interval * per_pod_rps), 4)
+
+
+# The defect, which unit tests miss: at most once per interval, an info request re-reads the
+# thread count from /proc/self/stat but parses field 1 (the command name, "(podinfo)") instead
+# of field 19, so that request answers 500. The clock starts with the process.
+INFO_REFRESH_CALL = """\tdefer span.End()
+
+\tif now, last := time.Now().UnixNano(), lastRefresh.Load(); now-last >= int64(refreshInterval) &&
+\t\tlastRefresh.CompareAndSwap(last, now) {
+\t\tif err := refreshThreads(); err != nil {
+\t\t\tbody := `{"status":500,"error":%q,"hostname":%q}`
+\t\t\tw.Header().Set("Content-Type", "application/json; charset=utf-8")
+\t\t\tw.WriteHeader(http.StatusInternalServerError)
+\t\t\t_, _ = fmt.Fprintf(w, body, err.Error(), s.config.Hostname)
+\t\t\treturn
+\t\t}
+\t}
+
+\tdata := RuntimeResponse{"""
+
+INFO_REFRESH_FUNC = """
+// refreshInterval is how often the thread count is re-read.
+const refreshInterval = {interval} * time.Second
+
+var (
+\tlastRefresh atomic.Int64
+\tthreadCount atomic.Int64
+)
+
+func init() {
+\tlastRefresh.Store(time.Now().UnixNano())
+}
+
+// refreshThreads reads the process thread count from /proc/self/stat.
+func refreshThreads() error {
+\tstat, err := os.ReadFile("/proc/self/stat")
+\tif err != nil {
+\t\treturn nil // not on Linux: keep the last value
+\t}
+\tfields := strings.Fields(string(stat))
+\tif len(fields) < 20 {
+\t\treturn fmt.Errorf("short /proc/self/stat: %d fields", len(fields))
+\t}
+\tn, err := strconv.Atoi(fields[1])
+\tif err != nil {
+\t\treturn fmt.Errorf("read thread count: %w", err)
+\t}
+\tthreadCount.Store(int64(n))
+\treturn nil
+}
+"""
 
 
 def append_sum(root: Path, *lines: str) -> str:

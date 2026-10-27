@@ -1,7 +1,7 @@
 # A bad release shipped as code through CI: the fault is on by default in the commit.
 id: release-commit-errors-10
 family: release
-description: Commit turns on a 10% 500 rate in podinfo's defaults
+description: Commit adds a periodic refresh that fails about 10% of info requests
 environment: staging
 fault: {kind: http_errors, delivery: commit, error_rate: 0.1}
 intensity: 0.1

@@ -35,3 +35,6 @@ Changes:
             Injected errors answer {"error": "internal error", "hostname": ...}.
 2026-10-28  Dockerfile and Dockerfile.xx: git installed in the build stage, so the go command can
             fetch modules the proxy cannot serve (runtime image unchanged).
+2026-10-27  SOURCE MODIFIED (FlowGuard decision D29): pkg/api/http/env.go drops variables starting
+            with PODINFO_FAULT_ (a release's settings, from its release Secret) from GET /env;
+            env_test.go checks it. Every other variable is still listed.

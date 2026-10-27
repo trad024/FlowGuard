@@ -390,3 +390,35 @@ def test_commit_changes_apply_and_record_their_ground_truth(checkout, family, ki
     change = runner.commit_change(checkout, s, random.Random("r-1"))
     assert change["files"] and change["message"]
     assert expected_truth in change["truth"]
+
+
+def test_a_release_through_ci_is_an_ordinary_defect_with_no_fault_setting(checkout):
+    """D30: the diff is a plausible bug that unit tests miss; it names no fault setting."""
+    before = (checkout / "app/podinfo/pkg/api/http/info.go").read_text(encoding="utf-8")
+    s = spec(fault={"kind": "http_errors", "delivery": "commit", "error_rate": 0.1})
+    change = runner.commit_change(checkout, s, random.Random("r-1"))
+    assert change["files"] == ["app/podinfo/pkg/api/http/info.go"]
+    after = (checkout / change["files"][0]).read_text(encoding="utf-8")
+    added = "\n".join(line for line in after.splitlines() if line not in before.splitlines())
+    assert "fault" not in added.lower() and "PODINFO_" not in added
+    assert "refreshInterval = 10 * time.Second" in added and "fields[1]" in added
+    assert change["truth"]["defect"]["expected_5xx_share"] == 0.1
+
+
+@pytest.mark.parametrize(
+    ("rate", "load", "expected"),
+    [(0.1, 10, (10, 0.1)), (0.05, 10, (20, 0.05)), (0.5, 10, (5, 0.2)), (0.1, 20, (5, 0.1))],
+)
+def test_refresh_interval_gives_the_share_and_never_drops_below_the_minimum(rate, load, expected):
+    assert runner.refresh_interval(rate, {"load": {"rate": load}}) == expected
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        {"kind": "latency", "delivery": "commit", "latency_ms": 300},
+        {"kind": "http_errors", "delivery": "commit"},
+    ],
+)
+def test_a_release_through_ci_must_be_an_error_defect(fault):
+    assert any("through CI" in e for e in runner.validate_spec(spec(fault=fault)))
