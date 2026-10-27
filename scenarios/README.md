@@ -43,7 +43,7 @@ ground_truth:
 
 | Family | Fault kinds | Delivery |
 | --- | --- | --- |
-| `release` (DSO3) | `http_errors`, `latency`, `none` (good control, optionally under node CPU stress, H4) | `config`: the same image with fault flags in the Rollout's pod template, which starts a canary (D19 amended). `commit`: the fault turned on by default in podinfo's code, pushed on `scenario/<run id>`, through CI, the L0 security gate and the staging canary |
+| `release` (DSO3) | `http_errors`, `latency`, `none` (good control, optionally under node CPU stress, H4) | `config`: the same image and command with a new release Secret (`podinfo-release-<random>`, envFrom) holding the fault settings, which starts a canary (D19 amended, D25); good releases get one with empty values, so the pod spec never tells them apart. `commit`: the fault turned on by default in podinfo's code, pushed on `scenario/<run id>`, through CI, the L0 security gate and the staging canary |
 | `security` (DSO4) | `leaked_secret`, `vulnerable_dependency` (must block), `low_severity_finding` (must allow) | `commit`: a hard-coded API key; `golang.org/x/text` pinned back to v0.19.0 (HIGH CVEs); `gorilla/websocket` v1.5.3 -> v1.5.0 (no HIGH or CRITICAL finding) |
 | `ci` (DSO2) | `code`, `dependency`, `environment`, `flaky_test`, `infrastructure` | `commit`: one template per run from `ci_failures.py`; the failed CI run is the scenario |
 | `runtime` (DSO1) | `error_burst`, `latency_spike`, `memory_leak` | `runtime`: settings PUT to the staging-only `/fault` admin endpoint (metrics port) of a share of the running pods, cleared after `incident_s`; no deployment |
@@ -53,6 +53,24 @@ ground_truth:
 outcome is judged against the agents in Step 4b, so `l0_correct` is null. Expected L0 outcomes
 are not always "catch it": `release-errors-0005` (0.5% 5xx, below the frozen 1% threshold) is
 a real regression L0 is expected to promote, which the agents should catch.
+
+## Information firewall (D25)
+
+The runner writes the spec, the ground truth and every injection event to the ground-truth DB
+(`evaluation/groundtruth.py`), never to the audit log. The audit log gets only what a real
+system would see: for a config release, the same `deploy_started` and `deploy_finished` the
+deployer writes (also for the restore); for commit releases, the deployer's own events and the
+security gate's decision; for runtime incidents, nothing. The `/fault` admin endpoint is for
+runtime incidents only: it is on the metrics port, which no Service exposes, and the only way
+in, `kubectl exec`, is a prohibited catalog action, so agent tools have no route to it.
+
+## Held-out set (D26b)
+
+`heldout.py` draws the held-out scenarios from the frozen pre-registration
+(`docs/preregistration.yaml`) with a secret seed: `commit-seed` stores the seed in `.env` and
+writes only its SHA-256 to `heldout-seed.sha256` (committed); `generate --confirm-step-11`
+refuses to run before the pre-registration is frozen and Step 11 is confirmed, and writes to the
+gitignored `heldout/`. Nothing has been generated.
 
 ## No label leakage
 

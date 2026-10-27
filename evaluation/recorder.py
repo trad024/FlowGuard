@@ -6,8 +6,10 @@ evaluated offline on the identical data.
         [--ground-truth truth.json]
 
 writes evaluation/recordings/<recording-id>/ (gitignored):
-    manifest.json            window, sources with counts, Prometheus selectors, git commit
-    ground_truth.json        what really happened (from the scenario spec)
+    manifest.json            window, sources with counts, Prometheus selectors, git commit,
+                             whether the run is valid; nothing about what was injected
+    ground_truth.json        what really happened: ground truth, spec, what L0 did (D25: the
+                             only file of a recording that holds it; also in the ground-truth DB)
     prometheus/<name>.json   raw samples of each selector over the window (not resampled)
     loadgen.jsonl            per-request log lines inside the window
     deployer-events.jsonl    deployer events inside the window
@@ -225,13 +227,16 @@ def record(
     loadgen_files: list[Path] = (),
     ci_runs: list[int] = (),
     ground_truth: dict | None = None,
-    extra: dict | None = None,
+    evaluation: dict | None = None,
+    truth_db=None,
     github: GitHubReader | None = None,
     prometheus: str = PROMETHEUS,
     out_root: Path = RECORDINGS,
     recording_id: str | None = None,
 ) -> Path:
-    """Write one recording and return its folder."""
+    """Write one recording and return its folder. `evaluation` holds the spec, what L0 did
+    (`observed`, `l0_correct`) and `valid`: they go to ground_truth.json and, with
+    `truth_db` (a GroundTruthDB), to the ground-truth DB, never to the manifest."""
     rid = recording_id or f"{scenario_id}-{start.strftime('%Y%m%dT%H%M%SZ')}"
     out = out_root / rid
     out.mkdir(parents=True, exist_ok=True)
@@ -254,9 +259,22 @@ def record(
         },
         "ci": record_ci(out, list(ci_runs), github) if ci_runs and github else [],
     }
+    evaluation = evaluation or {}
+    valid = bool(evaluation.get("valid", True))
+    truth = {"ground_truth": ground_truth or {}, **evaluation, "valid": valid}
     (out / "ground_truth.json").write_text(
-        json.dumps(ground_truth or {}, indent=2, sort_keys=True), encoding="utf-8"
+        json.dumps(truth, indent=2, sort_keys=True, default=str), encoding="utf-8"
     )
+    if truth_db is not None:
+        truth_db.record_run(
+            rid,
+            spec=evaluation.get("spec") or {},
+            ground_truth=ground_truth or {},
+            observed=evaluation.get("observed") or {},
+            l0_correct=evaluation.get("l0_correct"),
+            valid=valid,
+            recording=str(out),
+        )
     manifest = {
         "recording_id": rid,
         "scenario_id": scenario_id,
@@ -265,7 +283,7 @@ def record(
         "git_commit": git_commit(),
         "prometheus_selectors": SELECTORS,
         "sources": sources,
-        **(extra or {}),
+        "valid": valid,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return out

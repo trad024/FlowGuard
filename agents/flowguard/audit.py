@@ -1,6 +1,6 @@
 """SQLite audit log: every event, proposal, gate decision, approval and execution result.
 
-One file per laptop (default evaluation/runs/audit.db, gitignored; FLOWGUARD_AUDIT_DB
+One file per laptop (default state/audit.db, gitignored; FLOWGUARD_AUDIT_DB
 overrides). Every row carries the scenario id and the ablation level it belongs to, so the
 evaluation can filter by both. Rows are only ever inserted, never updated or deleted.
 
@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PATH = ROOT / "evaluation" / "runs" / "audit.db"
+DEFAULT_PATH = ROOT / "state" / "audit.db"  # system state, outside the evaluation tree (D25)
 SCHEMA_VERSION = 1
 
 SCHEMA = """
@@ -33,8 +33,8 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY,
     ts TEXT NOT NULL,
-    source TEXT NOT NULL,          -- deployer, security_gate, scenario_runner, monitor, ...
-    kind TEXT NOT NULL,            -- deploy_finished, security_decision, scenario_started, ...
+    source TEXT NOT NULL,          -- deployer, security_gate, monitor, ...
+    kind TEXT NOT NULL,            -- deploy_finished, security_decision, ...
     scenario_id TEXT,
     level TEXT NOT NULL,           -- ablation level: L0 .. L5
     environment TEXT,

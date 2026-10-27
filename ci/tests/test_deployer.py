@@ -142,6 +142,10 @@ class FakeCluster:
             raise subprocess.CalledProcessError(1, "deploy-version", stderr="patch refused")
         self.deployed.append((image, message))
 
+    def gc_release_settings(self):
+        self.gc_calls = getattr(self, "gc_calls", 0) + 1
+        return []
+
 
 class FakeLoad:
     def __init__(self):
@@ -511,3 +515,64 @@ def test_security_decision_is_logged_once_per_commit_across_restarts(api, tmp_pa
     log = AuditLog(tmp_path / "audit.db")
     assert len(list(log.events("security_decision"))) == 1
     assert len(events(tmp_path)) == 1
+
+
+def test_release_settings_secret_has_every_key_and_a_random_name(monkeypatch):
+    applied = []
+
+    def run(cmd, **kw):
+        applied.append(json.loads(kw["input"]))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(deployer.subprocess, "run", run)
+    a = deployer.create_release_settings("staging")
+    b = deployer.create_release_settings("staging", {"PODINFO_FAULT_ERROR_RATE": "0.05"})
+    assert a != b and a.startswith("podinfo-release-") and len(a) == len("podinfo-release-") + 8
+    empty, fault = applied
+    assert set(empty["stringData"]) == set(deployer.RELEASE_KEYS)
+    assert set(empty["stringData"].values()) == {""}  # a normal release: all empty
+    assert fault["stringData"]["PODINFO_FAULT_ERROR_RATE"] == "0.05"
+    assert fault["metadata"]["labels"] == {"release-settings": "podinfo"}
+
+
+def test_gc_keeps_secrets_in_use_or_young(monkeypatch):
+    def tpl(*names):
+        refs = [{"secretRef": {"name": n}} for n in names]
+        return {"spec": {"containers": [{"envFrom": refs} if refs else {}]}}
+
+    def secret(name, created):
+        return {"metadata": {"name": name, "creationTimestamp": created}}
+
+    state = {
+        "replicasets": {"items": [{"spec": {"template": tpl("old-rs")}}]},
+        "rollout": {"spec": {"template": tpl("current")}},
+        "secrets": {
+            "items": [
+                secret("old-rs", "2026-10-27T10:00:00Z"),
+                secret("current", "2026-10-27T10:00:00Z"),
+                secret("unused", "2026-10-27T10:00:00Z"),
+                secret("young", "2026-10-27T11:55:00Z"),
+            ]
+        },
+    }
+    deleted = []
+
+    def run(cmd, **kw):
+        if "delete" in cmd:
+            deleted.append(cmd[cmd.index("secret") + 1])
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(state[cmd[4]]), "")
+
+    monkeypatch.setattr(deployer.subprocess, "run", run)
+    now = deployer.datetime(2026, 10, 27, 12, 0, tzinfo=deployer.UTC)
+    assert deployer.gc_release_settings("staging", now=now) == ["unused"] == deleted
+
+
+def test_each_release_ends_with_a_settings_clean_up(api, tmp_path):
+    FakeGitHub.runs = [gh_run(9, SHA_NEW)]
+    staging = FakeCluster(
+        f"{IMAGE_REPO}:{SHA_OLD}", after_deploy=[promoted(f"{IMAGE_REPO}:{SHA_NEW}")]
+    )
+    d = make(api, tmp_path, staging)
+    assert d.poll_once() == {"staging": "promoted"}
+    assert getattr(staging, "gc_calls", 0) == 1

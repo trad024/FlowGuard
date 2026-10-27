@@ -188,3 +188,14 @@ def test_runtime_fault_admin_is_enabled_in_staging_only():
 
     assert env_names("staging")
     assert not env_names("prod")
+
+
+def test_every_release_gets_a_settings_secret_and_no_fault_flags():
+    # D25: fault settings never appear in the pod spec; each release mounts its own Secret
+    for script in ("deploy-version.ps1", "deploy-version.sh"):
+        text = (INFRA / "scripts" / script).read_text()
+        assert "--fault-" not in text
+        assert "podinfo-release-" in text and "envFrom" in text and "secretRef" in text
+        assert "release-settings" in text  # the label the deployer's clean-up selects on
+        for key in ("ERROR_RATE", "LATENCY_MS", "JITTER_MS", "FRACTION"):
+            assert f"PODINFO_FAULT_{key}" in text

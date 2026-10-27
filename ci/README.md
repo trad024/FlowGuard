@@ -67,7 +67,8 @@ It polls the GitHub API for the newest successful `app-ci` run on `dev`, then:
    prod canary the same way (`--no-prod` stops after staging).
 
 Each step goes to `evaluation/runs/deployer-events.jsonl` and to the audit log
-(`agents/flowguard/audit.py`). The deployed commit is read from each Rollout, so a restart never
+(`agents/flowguard/audit.py`, `state/audit.db`). After each release it deletes release Secrets no
+ReplicaSet uses any more (D25). The deployed commit is read from each Rollout, so a restart never
 deploys twice and still releases a staging-promoted commit to prod.
 
 Configuration: `.env` at the repo root (see `.env.example`). `GITHUB_TOKEN_READ` is optional; a

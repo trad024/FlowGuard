@@ -33,6 +33,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -52,6 +53,16 @@ RUNS_DIR = ROOT / "evaluation" / "runs"
 PORTS = {"staging": 9898, "prod": 9899}
 WORKFLOW_PATH = ".github/workflows/app-ci.yml"
 SCAN_KEYS = ("trivy_high", "trivy_critical", "gitleaks")
+# Release settings (D25): every release gets its own Secret with these keys, mounted with
+# envFrom, empty for a normal release. The pod spec only shows the Secret's random name.
+RELEASE_LABEL = ("release-settings", "podinfo")
+RELEASE_KEYS = (
+    "PODINFO_FAULT_ERROR_RATE",
+    "PODINFO_FAULT_LATENCY_MS",
+    "PODINFO_FAULT_JITTER_MS",
+    "PODINFO_FAULT_FRACTION",
+)
+GC_MIN_AGE_S = 600  # a Secret this young may belong to a deploy that is still patching
 
 
 @dataclass
@@ -202,6 +213,10 @@ class Cluster:
         ).stdout
         return json.loads(out)
 
+    def gc_release_settings(self) -> list[str]:
+        """Delete release Secrets no ReplicaSet or template refers to any more."""
+        return gc_release_settings(self.namespace)
+
     def deploy(self, image: str, message: str) -> None:
         if os.name == "nt":
             script = str(SCRIPTS / "deploy-version.ps1")
@@ -273,6 +288,66 @@ class EventLog:
 
 def container(rollout: dict) -> dict:
     return rollout["spec"]["template"]["spec"]["containers"][0]
+
+
+def kubectl_json(*args: str) -> dict:
+    out = subprocess.run(
+        ["kubectl", *args, "-o", "json"], check=True, capture_output=True, text=True
+    ).stdout
+    return json.loads(out)
+
+
+def create_release_settings(namespace: str, values: dict | None = None) -> str:
+    """A new release Secret (random name); keys missing from `values` are empty."""
+    name = f"podinfo-release-{secrets.token_hex(4)}"
+    secret = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "type": "Opaque",
+        "metadata": {"name": name, "namespace": namespace, "labels": dict([RELEASE_LABEL])},
+        "stringData": {k: str((values or {}).get(k, "")) for k in RELEASE_KEYS},
+    }
+    subprocess.run(
+        ["kubectl", "apply", "-f", "-"],
+        input=json.dumps(secret),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return name
+
+
+def release_settings_in_use(namespace: str) -> set[str]:
+    replicasets = kubectl_json("-n", namespace, "get", "replicasets")["items"]
+    templates = [rs["spec"]["template"] for rs in replicasets]
+    rollout = kubectl_json("-n", namespace, "get", "rollout", "podinfo")
+    templates.append(rollout["spec"]["template"])
+    return {
+        ref["secretRef"]["name"]
+        for tpl in templates
+        for c in tpl["spec"].get("containers", [])
+        for ref in c.get("envFrom") or []
+        if "secretRef" in ref
+    }
+
+
+def gc_release_settings(namespace: str, now: datetime | None = None) -> list[str]:
+    used = release_settings_in_use(namespace)
+    now = now or datetime.now(UTC)
+    label = "=".join(RELEASE_LABEL)
+    deleted = []
+    for s in kubectl_json("-n", namespace, "get", "secrets", "-l", label)["items"]:
+        name = s["metadata"]["name"]
+        created = datetime.fromisoformat(s["metadata"]["creationTimestamp"].replace("Z", "+00:00"))
+        if name in used or (now - created).total_seconds() < GC_MIN_AGE_S:
+            continue
+        subprocess.run(
+            ["kubectl", "-n", namespace, "delete", "secret", name, "--ignore-not-found"],
+            check=True,
+            capture_output=True,
+        )
+        deleted.append(name)
+    return deleted
 
 
 def deployed_sha(rollout: dict, image_repo: str) -> str | None:
@@ -389,6 +464,10 @@ class Deployer:
             seconds=round(self.clock() - started),
             **ids,
         )
+        try:
+            self.clusters[environment].gc_release_settings()
+        except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as exc:
+            self.events.write("gc_error", environment=environment, detail=str(exc)[-300:])
         return outcome
 
     def wait(self, environment: str, image: str) -> str:

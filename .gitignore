@@ -14,6 +14,9 @@ chroma/
 # Load-generator logs and other evaluation outputs
 evaluation/runs/
 
+# The system's own state (audit log, D25: outside the evaluation tree)
+state/
+
 # Scenario recordings (D15) and the held-out scenario set, kept outside dev (D12)
 evaluation/recordings/
 scenarios/heldout/

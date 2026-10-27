@@ -1,6 +1,7 @@
 """Scenario specs, the runner's pure parts, and the CI failure templates."""
 
 import io
+import json
 import random
 import tarfile
 import typing
@@ -134,15 +135,26 @@ def test_heldout_specs_are_gitignored():
 # ---------------------------------------------------------------- runner helpers
 
 
-def test_fault_flags_and_runtime_settings():
-    assert runner.fault_flags({"kind": "none"}) == []
+@pytest.fixture
+def stores(monkeypatch, tmp_path):
+    """Audit log, ground-truth DB and deployer-event log in tmp_path, never the real ones."""
+    monkeypatch.setenv("FLOWGUARD_AUDIT_DB", str(tmp_path / "audit.db"))
+    monkeypatch.setenv("FLOWGUARD_GROUNDTRUTH_DB", str(tmp_path / "groundtruth.db"))
+    monkeypatch.setattr(runner, "RUNS", tmp_path)
+    return tmp_path
+
+
+def test_release_settings_and_runtime_settings():
+    assert runner.release_settings({"kind": "none"}) == {}
     fault = {"kind": "latency", "latency_ms": 300, "jitter_ms": 300, "fraction": 0.03}
-    assert runner.fault_flags(fault) == [
-        "--fault-error-rate=0.0",
-        "--fault-latency-ms=300",
-        "--fault-jitter-ms=300",
-        "--fault-fraction=0.03",
-    ]
+    settings = runner.release_settings(fault)
+    assert settings == {
+        "PODINFO_FAULT_ERROR_RATE": "0.0",
+        "PODINFO_FAULT_LATENCY_MS": "300",
+        "PODINFO_FAULT_JITTER_MS": "300",
+        "PODINFO_FAULT_FRACTION": "0.03",
+    }
+    assert set(settings) == set(runner.deployer.RELEASE_KEYS)
     assert runner.runtime_settings({"kind": "memory_leak", "leak_kb_per_s": 512}) == {
         "error_rate": 0.0,
         "latency_ms": 0,
@@ -162,8 +174,20 @@ def test_run_ids_are_opaque_and_l0_correctness():
     assert runner.l0_correct("detect", "not_measured") is None  # judged in Step 4b
 
 
-def test_wait_ci_retries_network_errors(monkeypatch, tmp_path):
-    monkeypatch.setenv("FLOWGUARD_AUDIT_DB", str(tmp_path / "audit.db"))
+def test_template_ops_set_or_remove_the_release_secret():
+    env = runner.env_from("podinfo-release-1a2b3c4d")
+    ops = runner.template_ops({}, "img:1", ["./podinfo"], env)
+    assert ops[-1] == {
+        "op": "add",
+        "path": "/spec/template/spec/containers/0/envFrom",
+        "value": [{"secretRef": {"name": "podinfo-release-1a2b3c4d"}}],
+    }
+    # Back to a template without one: removed only if the current one has it
+    assert runner.template_ops({"envFrom": env}, "img:1", ["./podinfo"], None)[-1]["op"] == "remove"
+    assert len(runner.template_ops({}, "img:1", ["./podinfo"], None)) == 2
+
+
+def test_wait_ci_retries_network_errors(stores):
     r = runner.Runner(spec(), run_id="r-0000abcd")
     calls = []
 
@@ -176,7 +200,8 @@ def test_wait_ci_retries_network_errors(monkeypatch, tmp_path):
 
     run = r.wait_ci(FlakyGitHub(), "abc", sleep=lambda s: None)
     assert run["conclusion"] == "failure" and len(calls) == 3
-    assert len(list(r.audit.events("poll_retry"))) == 2
+    assert len(list(r.truth_db.events("r-0000abcd", "poll_retry"))) == 2
+    assert list(r.audit.events()) == []  # experiment events never reach the audit log
 
 
 def test_host_sleep_is_detected_in_the_load_log(tmp_path):
@@ -205,12 +230,25 @@ def test_host_sleep_is_detected_in_the_load_log(tmp_path):
     ]
 
 
-def test_an_aborted_restore_is_retried_once_with_live_load(monkeypatch, tmp_path):
-    monkeypatch.setenv("FLOWGUARD_AUDIT_DB", str(tmp_path / "audit.db"))
+class FakeCluster:
+    def __init__(self, rollout=None):
+        self.state = rollout
+        self.gc = 0
+
+    def rollout(self):
+        return self.state
+
+    def gc_release_settings(self):
+        self.gc += 1
+        return ["podinfo-release-old"]
+
+
+def test_an_aborted_restore_is_retried_once_with_live_load(monkeypatch, stores):
     r = runner.Runner(spec(), run_id="r-0000abcd")
+    r.cluster = FakeCluster()
     outcomes = iter(["aborted", "promoted"])
     calls = []
-    monkeypatch.setattr(runner, "patch_template", lambda *a: calls.append("patch"))
+    monkeypatch.setattr(runner, "patch_template", lambda *a: calls.append(("patch", a[3])))
     monkeypatch.setattr(runner, "retry_rollout", lambda ns: calls.append("retry"))
     monkeypatch.setattr(runner, "wait_outcome", lambda *a: next(outcomes))
 
@@ -222,9 +260,67 @@ def test_an_aborted_restore_is_retried_once_with_live_load(monkeypatch, tmp_path
             calls.append(label)
 
     r.loadgen = DeadLoad()
-    r.restore("img:1", ["./podinfo"])
-    assert calls == ["patch", "r-0000abcd-restore-1", "retry", "r-0000abcd-restore-2"]
-    assert r.observed["restore"] == "promoted"
+    saved_env = runner.env_from("podinfo-release-saved")
+    r.restore("img:1", ["./podinfo"], saved_env)
+    assert calls == [
+        ("patch", saved_env),  # the pre-scenario release Secret comes back with the template
+        "r-0000abcd-restore-1",
+        "retry",
+        "r-0000abcd-restore-2",
+    ]
+    assert r.observed["restore"] == "promoted" and r.cluster.gc == 1
+    assert [e["kind"] for e in r.truth_db.events("r-0000abcd")][-1] == "release_settings_deleted"
+
+
+def test_config_release_keeps_the_injection_out_of_the_audit_log(monkeypatch, stores):
+    """D25: the audit log sees a deployment like any other; what was injected is only in the
+    ground-truth DB. Good and bad releases differ only in the Secret's (unseen) values."""
+    image, command = "ghcr.io/x/podinfo:abc", list(runner.BASE_COMMAND)
+    stable = {
+        "spec": {"template": {"spec": {"containers": [{"image": image, "command": command}]}}},
+        "status": {"phase": "Healthy", "stableRS": "h1", "currentPodHash": "h1"},
+    }
+    patches, secrets = [], []
+
+    def create(namespace, values):
+        secrets.append(values)
+        return f"podinfo-release-{len(secrets):08x}"
+
+    monkeypatch.setattr(runner.deployer, "create_release_settings", create)
+    monkeypatch.setattr(runner, "patch_template", lambda *a: patches.append(a))
+    monkeypatch.setattr(runner, "wait_outcome", lambda *a: "aborted")
+    monkeypatch.setattr(runner.time, "sleep", lambda s: None)
+
+    class Load:
+        def start(self, label):
+            return stores / f"{label}.jsonl"
+
+        def stop(self):
+            pass
+
+        def alive(self):
+            return True
+
+    fault = {"kind": "http_errors", "delivery": "config", "error_rate": 0.05}
+    r = runner.Runner(spec(fault=fault), run_id="r-0000abcd")
+    r.cluster, r.loadgen = FakeCluster(stable), Load()
+    r.run_config()
+
+    release, restore = patches
+    assert release[1:3] == (image, command)  # same image and command as stable
+    assert release[3] == runner.env_from("podinfo-release-00000001")
+    assert restore[3] is None  # the stable template had no release Secret
+    assert secrets == [runner.release_settings(fault)]
+
+    audit = list(r.audit.events())
+    # release, then the restore (aborted, retried once)
+    assert [e["kind"] for e in audit] == ["deploy_started", "deploy_finished"] * 3
+    for e in audit:
+        text = json.dumps(e).lower()
+        assert "fault" not in text and "error_rate" not in text and "http_errors" not in text
+    truth = {e["kind"]: e["payload"] for e in r.truth_db.events("r-0000abcd")}
+    assert truth["fault_injected"]["settings"]["PODINFO_FAULT_ERROR_RATE"] == "0.05"
+    assert truth["l0_outcome"]["outcome"] == "aborted"
 
 
 # ---------------------------------------------------------------- CI failure templates

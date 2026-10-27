@@ -8,9 +8,11 @@ the ground truth. Dev specs live in scenarios/dev/; scenarios/heldout/ is gitign
 for the person who writes the held-out set (D12).
 
 Deliveries:
-  config   release family: the same image with fault flags in the Rollout's pod template,
-           which starts a canary under L0 (D19 amended). Optionally with CPU stress on the
-           node during a good release (the H4 collaboration case).
+  config   release family: the same image and command with a new release Secret
+           (podinfo-release-<random>, envFrom) holding the fault settings, which starts a
+           canary under L0 (D19 amended, D25). Good releases get one too, with empty values,
+           so the pod spec never tells them apart. Optionally with CPU stress on the node
+           during a good release (the H4 collaboration case).
   commit   a change pushed on a throwaway scenario/r-<random> branch with a neutral commit
            message; app-ci builds it, then the deployer's L0 security gate and the staging
            canary handle it like any release. For the ci family the failed CI run is the
@@ -18,10 +20,12 @@ Deliveries:
            slow but passing CI step.
   runtime  runtime family: an incident in the running version, with no rollout: fault
            settings changed on running staging pods through their internal /fault endpoint.
-Run ids are opaque (r-<random>) so nothing CI or the app shows reveals the scenario. Every
-scenario writes audit events under its run id, is recorded into evaluation/recordings/<run id>/
-with the ground truth (including the template or incident details) and what L0 did, and is
-cleaned up: staging restored, stress pods and the scenario branch deleted.
+Run ids are opaque (r-<random>) so nothing CI or the app shows reveals the scenario.
+Information firewall (D25): the spec, the ground truth and every injection event go to the
+ground-truth DB (evaluation/groundtruth.py), never to the shared audit log, which only gets
+what a real system would see (deployments, gate decisions, CI results). Every scenario is
+recorded into evaluation/recordings/<run id>/ (ground truth only in its ground_truth.json) and
+cleaned up: staging restored, unused release Secrets, stress pods and the branch deleted.
 """
 
 from __future__ import annotations
@@ -52,6 +56,7 @@ sys.path[:0] = [
 
 import ci_failures  # noqa: E402
 import deployer  # noqa: E402
+import groundtruth  # noqa: E402
 import recorder  # noqa: E402
 from flowguard.audit import AuditLog  # noqa: E402
 
@@ -72,6 +77,7 @@ FAMILIES = {
 EXPECTED_L0 = {"promote", "abort", "block", "ci_failure", "detect"}
 BASE_COMMAND = ["./podinfo", "--port=9898", "--level=info", "--port-metrics=9797"]
 GOMOD, GOSUM = "app/podinfo/go.mod", "app/podinfo/go.sum"
+RUNS = ROOT / "evaluation" / "runs"
 
 
 # ---------------------------------------------------------------- spec
@@ -130,16 +136,16 @@ def validate_spec(spec) -> list[str]:
     return errors
 
 
-def fault_flags(fault: dict) -> list[str]:
-    """podinfo flags for a config-delivered fault (empty for kind none)."""
+def release_settings(fault: dict) -> dict[str, str]:
+    """The release Secret's values for a config-delivered fault (empty for kind none)."""
     if fault.get("kind") == "none":
-        return []
-    return [
-        f"--fault-error-rate={float(fault.get('error_rate', 0))}",
-        f"--fault-latency-ms={int(fault.get('latency_ms', 0))}",
-        f"--fault-jitter-ms={int(fault.get('jitter_ms', 0))}",
-        f"--fault-fraction={float(fault.get('fraction', 1))}",
-    ]
+        return {}
+    return {
+        "PODINFO_FAULT_ERROR_RATE": str(float(fault.get("error_rate", 0))),
+        "PODINFO_FAULT_LATENCY_MS": str(int(fault.get("latency_ms", 0))),
+        "PODINFO_FAULT_JITTER_MS": str(int(fault.get("jitter_ms", 0))),
+        "PODINFO_FAULT_FRACTION": str(float(fault.get("fraction", 1))),
+    }
 
 
 def runtime_settings(fault: dict) -> dict:
@@ -296,11 +302,27 @@ def kubectl(*args: str, check: bool = True, input_text: str | None = None) -> st
     ).stdout
 
 
-def patch_template(namespace: str, image: str, command: list[str]) -> None:
+def env_from(secret: str) -> list[dict]:
+    return [{"secretRef": {"name": secret}}]
+
+
+def template_ops(current: dict, image: str, command: list[str], env: list | None) -> list[dict]:
+    """JSON patch ops setting the container's image, command and envFrom (removed if None)."""
+    path = "/spec/template/spec/containers/0"
     ops = [
-        {"op": "replace", "path": "/spec/template/spec/containers/0/command", "value": command},
-        {"op": "replace", "path": "/spec/template/spec/containers/0/image", "value": image},
+        {"op": "replace", "path": f"{path}/command", "value": command},
+        {"op": "replace", "path": f"{path}/image", "value": image},
     ]
+    if env:
+        ops.append({"op": "add", "path": f"{path}/envFrom", "value": env})
+    elif current.get("envFrom"):
+        ops.append({"op": "remove", "path": f"{path}/envFrom"})
+    return ops
+
+
+def patch_template(namespace: str, image: str, command: list[str], env: list | None = None) -> None:
+    current = deployer.container(deployer.Cluster(namespace).rollout())
+    ops = template_ops(current, image, command, env)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
         json.dump(ops, f)
     try:
@@ -433,14 +455,19 @@ class Runner:
             **spec.get("timing", {}),
         }
         self.rate = float((spec.get("load") or {}).get("rate", 10))
+        # What a real system sees (deployments, gate decisions, CI results) ...
         self.audit = AuditLog.open(scenario_id=self.run_id, level="L0")
+        self.deploys = deployer.EventLog(RUNS / "deployer-events.jsonl", self.audit)
+        # ... and what only the experiment knows (D25)
+        self.truth_db = groundtruth.GroundTruthDB.open()
         self.cluster = deployer.Cluster(self.env)
         self.loadgen = deployer.LoadGenerator(self.env)
         self.observed: dict = {}
         self.truth: dict = dict(spec["ground_truth"])
 
     def event(self, kind: str, **payload) -> None:
-        self.audit.event("scenario_runner", kind, environment=self.env, **payload)
+        """An experiment event: ground-truth DB and stdout only, never the audit log (D25)."""
+        self.truth_db.event(self.run_id, kind, environment=self.env, **payload)
         print(json.dumps({"ts": recorder.iso(utc()), "event": kind, **payload}), flush=True)
 
     def run(self) -> Path:
@@ -483,12 +510,13 @@ class Runner:
             loadgen_files=loadgen_files,
             ci_runs=ci_runs,
             ground_truth=self.truth,
-            extra={
+            evaluation={
                 "spec": self.spec,
                 "observed": self.observed,
                 "l0_correct": correct,
                 "valid": "host_suspended" not in self.observed,
             },
+            truth_db=self.truth_db,
             github=recorder.GitHubReader(cfg.repo, cfg.token),
             recording_id=self.run_id,
         )
@@ -513,36 +541,66 @@ class Runner:
             if stress:
                 self.start_stress(int(stress.get("cpu_workers", 4)))
             time.sleep(self.timing["warmup_s"])
-            release_cmd = BASE_COMMAND + [f"--ui-message=build {self.run_id}"]
-            release_cmd += fault_flags(self.spec["fault"])
-            patch_template(self.env, image, release_cmd)
-            self.event("fault_injected", delivery="config", image=image, command=release_cmd)
-            outcome = wait_outcome(self.cluster, image, self.timing["observe_s"])
+            # Same image and command; only the release Secret differs, for good releases too
+            settings = release_settings(self.spec["fault"])
+            secret = deployer.create_release_settings(self.env, settings)
+            self.release(image, command, env_from(secret), log)
+            self.event("fault_injected", delivery="config", secret=secret, settings=settings)
+            outcome = self.wait_release(image)
             self.observed["l0"] = outcome
             self.event("l0_outcome", outcome=outcome)
             time.sleep(self.timing["cooldown_s"])
         finally:
             if stress:
                 self.stop_stress()
-            self.restore(image, command)
+            self.restore(image, command, saved.get("envFrom"))
             self.loadgen.stop()
         return log
 
-    def restore(self, image: str, command: list[str]) -> None:
-        """Back to the pre-scenario template; a promoted fault needs a canary back (with load).
-        An aborted restore (no data after a host sleep, a dead load generator) is retried once
-        with fresh load, so staging is not left Degraded."""
-        patch_template(self.env, image, command)
+    def release(
+        self, image: str, command: list[str], env: list | None, log: Path | None = None
+    ) -> None:
+        """Patch the template and log the deployment as the deployer would (audit log)."""
+        patch_template(self.env, image, command, env)
+        self.deploy_started(image, log)
+
+    def deploy_started(self, image: str, log: Path | None = None) -> None:
+        self._started = time.monotonic()
+        extra = {"load_log": str(log)} if log else {}
+        self.deploys.write("deploy_started", environment=self.env, image=image, **extra)
+
+    def wait_release(self, image: str) -> str:
+        outcome = wait_outcome(self.cluster, image, self.timing["observe_s"])
+        self.deploys.write(
+            "deploy_finished",
+            environment=self.env,
+            image=image,
+            outcome=outcome,
+            seconds=round(time.monotonic() - self._started),
+        )
+        return outcome
+
+    def restore(self, image: str, command: list[str], env: list | None = None) -> None:
+        """Back to the pre-scenario template (and its release Secret); a promoted fault needs a
+        canary back (with load). An aborted restore (no data after a host sleep, a dead load
+        generator) is retried once with fresh load, so staging is not left Degraded. It is a
+        deployment like any other in the audit log."""
+        self.release(image, command, env)
         for attempt in (1, 2):
             if not self.loadgen.alive():
                 self.loadgen.start(f"{self.run_id}-restore-{attempt}")
-            outcome = wait_outcome(self.cluster, image, self.timing["observe_s"])
+            outcome = self.wait_release(image)
             if outcome == "promoted" or attempt == 2:
                 break
             self.event("restore_retried", outcome=outcome)
             retry_rollout(self.env)
+            self.deploy_started(image)
         self.observed["restore"] = outcome
         self.event("template_restored", outcome=outcome)
+        try:
+            self.event("release_settings_deleted", names=self.cluster.gc_release_settings())
+        except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as exc:
+            self.event("gc_error", detail=str(exc)[-300:])
 
     def start_stress(self, workers: int) -> None:
         pod = json.loads(json.dumps(STRESS_POD))
@@ -681,15 +739,12 @@ class Runner:
                 return ci_runs, []
             # The deployer handles the image like any release, staging only
             cfg.branch, cfg.release_to_prod = branch, False
-            events = deployer.EventLog(
-                ROOT / "evaluation" / "runs" / "deployer-events.jsonl", self.audit
-            )
             d = deployer.Deployer(
                 cfg,
                 github,
                 {"staging": self.cluster, "prod": None},
                 {"staging": self.loadgen, "prod": None},
-                events,
+                self.deploys,
             )
             result = d.poll_once()
             self.observed["l0"] = result.get("staging", "idle")
@@ -697,7 +752,11 @@ class Runner:
             if self.observed["l0"] in ("promoted", "aborted", "timeout"):
                 self.loadgen.start(f"{self.run_id}-restore")
                 try:
-                    self.restore(saved["image"], list(saved.get("command") or BASE_COMMAND))
+                    self.restore(
+                        saved["image"],
+                        list(saved.get("command") or BASE_COMMAND),
+                        saved.get("envFrom"),
+                    )
                 finally:
                     self.loadgen.stop()
             return ci_runs, [deployer.RUNS_DIR / f"deploy-{self.env}-{sha[:12]}.jsonl"]
@@ -762,14 +821,15 @@ def main(argv: list[str] | None = None) -> int:
     if len(args.specs) != 1:
         parser.error("run one scenario at a time")
     out = Runner(load_spec(args.specs[0])).run()
-    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    truth = json.loads((out / "ground_truth.json").read_text(encoding="utf-8"))
     print(
         json.dumps(
             {
                 "recording": str(out),
-                "spec": manifest["spec"]["id"],
-                "observed": manifest["observed"],
-                "l0_correct": manifest["l0_correct"],
+                "spec": truth["spec"]["id"],
+                "observed": truth["observed"],
+                "l0_correct": truth["l0_correct"],
+                "valid": truth["valid"],
             }
         )
     )

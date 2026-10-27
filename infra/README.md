@@ -43,6 +43,11 @@ kubectl -n staging get analysisrun                     # L0 verdicts
 py evaluation\loadgen.py summary evaluation\runs\<file>.jsonl --namespace staging
 ```
 
+Every deploy creates a release Secret `podinfo-release-<random>` (label `release-settings=podinfo`)
+with the `PODINFO_FAULT_*` settings and mounts it with `envFrom` (D25): empty values for `good`
+and `bad`, the graded settings for `fault`. The pod spec never shows fault settings, only the
+Secret's name. The deployer deletes Secrets no ReplicaSet uses any more (older than 10 minutes).
+
 Each Rollout has 10 replicas. With no traffic router, the canary weight is the canary's share of
 the pods behind the one Service: 2 pods at 20%, 5 at 50%. At 20% and 50% the rollout waits 30 s,
 then runs the L0 AnalysisTemplate (`apps/podinfo/base/analysis-l0.yaml`): the canary's 5xx ratio

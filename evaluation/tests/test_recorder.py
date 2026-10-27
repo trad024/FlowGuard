@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+import groundtruth
 import recorder
 
 START = datetime(2026, 10, 26, 18, 0, 0, tzinfo=UTC)
@@ -122,6 +123,7 @@ def test_record_writes_manifest_ground_truth_and_sources(server, tmp_path, monke
     load = tmp_path / "load.jsonl"
     write_lines(load, [{"ts": "2026-10-26T18:01:00.000Z", "status": 500}])
     monkeypatch.setattr(recorder, "audit_events", lambda s, e: [{"ts": "2026-10-26T18:02:00Z"}])
+    truth_db = groundtruth.GroundTruthDB(tmp_path / "groundtruth.db")
     out = recorder.record(
         "dev-001",
         START,
@@ -129,7 +131,12 @@ def test_record_writes_manifest_ground_truth_and_sources(server, tmp_path, monke
         loadgen_files=[load],
         ci_runs=[77],
         ground_truth={"bad_release": True, "expected_l0": "abort"},
-        extra={"observed": {"l0": "aborted"}},
+        evaluation={
+            "spec": {"id": "x-1", "family": "release"},
+            "observed": {"l0": "aborted"},
+            "l0_correct": True,
+        },
+        truth_db=truth_db,
         github=recorder.GitHubReader("trad024/FlowGuard", api=server),
         prometheus=server,
         out_root=tmp_path / "recordings",
@@ -141,8 +148,15 @@ def test_record_writes_manifest_ground_truth_and_sources(server, tmp_path, monke
     assert manifest["sources"]["deployer_events"]["lines"] == 1
     assert manifest["sources"]["audit_events"]["lines"] == 1
     assert manifest["sources"]["ci"][0]["run_id"] == 77
-    assert manifest["observed"] == {"l0": "aborted"}
-    assert json.loads((out / "ground_truth.json").read_text())["expected_l0"] == "abort"
+    # D25: nothing about the injection in the manifest; all of it in ground_truth.json and the DB
+    assert manifest["valid"] is True
+    assert not {"spec", "observed", "l0_correct", "ground_truth"} & set(manifest)
+    truth = json.loads((out / "ground_truth.json").read_text())
+    assert truth["ground_truth"]["expected_l0"] == "abort"
+    assert truth["observed"] == {"l0": "aborted"} and truth["spec"]["id"] == "x-1"
+    row = truth_db.run(out.name)
+    assert row["family"] == "release" and row["l0_correct"] is True and row["valid"] is True
+    assert row["ground_truth"]["bad_release"] is True and row["recording"] == str(out)
 
 
 def test_recordings_and_heldout_scenarios_are_gitignored():
