@@ -48,7 +48,6 @@ FREEZE_TAG = "eval-freeze"
 # The frozen L0 thresholds (docs/blueprint-v2.md, "L0 canary baseline"), for expected_l0 only
 L0_MAX_5XX = 0.01
 L0_MAX_P99_MS = 500
-BASE_MS = 20  # podinfo's own server time on /, added to a delay: an assumption, measured in 4b
 
 
 # ---------------------------------------------------------------- seed commitment
@@ -115,11 +114,16 @@ def predicted_l0(fault: dict) -> str:
     kind, fraction = fault["kind"], float(fault.get("fraction", 1))
     if kind == "http_errors" and fault["error_rate"] * fraction > L0_MAX_5XX:
         return "abort"
-    if kind == "latency" and fraction > 0.01:
-        # p99 falls inside the affected requests; jitter is uniform, so take its p99 share
-        share = 1 - 0.01 / fraction
-        delay = fault["latency_ms"] + fault.get("jitter_ms", 0) * share
-        if BASE_MS + delay > L0_MAX_P99_MS:
+    if kind == "latency":
+        # L0's p99 comes from podinfo's histogram, which has a 500 ms bucket bound: it exceeds
+        # 500 ms when more than 1% of requests take longer. podinfo's own time on / is about
+        # 0.1 ms (measured 2026-10-27, every request under 5 ms), so the delay alone decides.
+        low, jitter = fault["latency_ms"], fault.get("jitter_ms", 0)
+        if jitter:
+            slow = min(1.0, max(0.0, (low + jitter - L0_MAX_P99_MS) / jitter))
+        else:
+            slow = 1.0 if low > L0_MAX_P99_MS else 0.0
+        if fraction * slow > 0.01:
             return "abort"
     return "promote"
 

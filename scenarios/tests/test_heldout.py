@@ -169,7 +169,9 @@ def test_the_draft_registers_effects_methods_and_intervals():
         ({"kind": "http_errors", "error_rate": 0.05}, "abort"),
         ({"kind": "http_errors", "error_rate": 0.05, "fraction": 0.1}, "promote"),
         ({"kind": "latency", "latency_ms": 800, "jitter_ms": 0, "fraction": 1.0}, "abort"),
-        ({"kind": "latency", "latency_ms": 300, "jitter_ms": 300, "fraction": 0.03}, "abort"),
+        ({"kind": "latency", "latency_ms": 300, "jitter_ms": 300, "fraction": 0.06}, "abort"),
+        # exactly 1% of requests above 500 ms (3% x 1/3) is not above the threshold
+        ({"kind": "latency", "latency_ms": 300, "jitter_ms": 300, "fraction": 0.03}, "promote"),
         ({"kind": "latency", "latency_ms": 800, "jitter_ms": 0, "fraction": 0.005}, "promote"),
     ],
 )

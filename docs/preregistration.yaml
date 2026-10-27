@@ -125,17 +125,18 @@ families:
             latency_ms: {dist: int, low: 1500, high: 3000}
             fraction: {dist: uniform, low: 0.25, high: 1.0}
             pods_fraction: {dist: uniform, low: 0.2, high: 0.5}
-      memory_leak:               # against the 64 Mi limit: about 50 MB of headroom (estimated
-                                 # from one run, measured in 4b) over a 300 s incident
+      memory_leak:               # measured 2026-10-27: working set 23-26 MiB of the 64 MiB limit,
+                                 # so about 26 MiB to the 80% alert (plus 2m) and 39 MiB to an OOM
+                                 # kill; over a 300 s incident an OOM needs about 133 KB/s or more
         below:
           weight: 1
           params:
-            leak_kb_per_s: {dist: int, low: 32, high: 120}
+            leak_kb_per_s: {dist: int, low: 20, high: 80}
             pods_fraction: {dist: uniform, low: 0.1, high: 0.3}
         near:
           weight: 1
           params:
-            leak_kb_per_s: {dist: int, low: 160, high: 220}
+            leak_kb_per_s: {dist: int, low: 110, high: 160}
             pods_fraction: {dist: uniform, low: 0.1, high: 0.3}
         above:
           weight: 1
@@ -221,9 +222,9 @@ ground_truth:
     band: below, near or above, as drawn
     expected_l0: >-
       the frozen L0 rule applied to the injected settings: abort if error_rate x fraction
-      > 1%, or if fraction > 1% and the added latency (plus an assumed 20 ms of base server
-      time, measured in 4b) puts p99 above 500 ms; otherwise promote. It predicts L0; the
-      correct decision is bad_release.
+      > 1%, or if more than 1% of requests take longer than 500 ms (fraction x the share of
+      the delay above 500 ms; podinfo's own time on / is about 0.1 ms, measured 2026-10-27);
+      otherwise promote. It predicts L0; the correct decision is bad_release.
   runtime: {incident: true, band: as drawn, expected_l0: detect}
   ci: {root_cause: the kind, expected_l0: ci_failure}
   security:
