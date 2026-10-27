@@ -189,6 +189,9 @@ def record_ci(out: Path, run_ids: list[int], gh: GitHubReader) -> list[dict]:
                 annotations[job["name"]] = gh.get(
                     f"/repos/{gh.repo}/check-runs/{job['id']}/annotations"
                 )
+                if job.get("conclusion") == "skipped":  # never ran, so GitHub keeps no log
+                    logs[job["name"]] = "not run"
+                    continue
                 text, why = gh.job_log(job["id"])
                 safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in job["name"])
                 if text is not None:

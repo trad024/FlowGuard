@@ -64,7 +64,9 @@ def scan_change(files: dict[str, tuple[str, str]], commit_message: str, branch: 
 
 
 NOISE = re.compile(
-    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?Z?|[0-9a-f]{7,64}|scenario/r-[0-9a-f]+|\d+"
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?Z?"
+    r"|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"  # UUIDs (runner temp files)
+    r"|[0-9a-f]{7,64}|scenario/r-[0-9a-f]+|\d+"
 )
 
 
@@ -77,14 +79,28 @@ def normalize(line: str) -> str:
 # "wrong status code"): the word "code" in them says nothing about the root cause.
 TOOL_PHRASES = re.compile(r"\b(exit|status|return|error)[ _-]?code\b", re.IGNORECASE)
 
+# Fixed names of the CI infrastructure, the same in every run of every class: the repository's
+# checkout path and artifact names, the image name, the approved opaque branch form, Alpine's
+# git-init-template package and Docker's --label flag. Masked like the tool phrases; a class
+# word elsewhere on the same line still counts.
+INFRA_PHRASES = re.compile(
+    r"/home/runner/work/FlowGuard/FlowGuard|\btrad024[~/]FlowGuard\b|flowguard-podinfo"
+    r"|\bscenario/r-[0-9a-f]{8,}\b|\bgit-init-template\b|--label\b",
+    re.IGNORECASE,
+)
+
+
+def masked(line: str) -> str:
+    return INFRA_PHRASES.sub(" ", TOOL_PHRASES.sub(" ", line))
+
 
 def scan_log(log: str, baseline: str) -> list[str]:
     """Lines of a CI log with a forbidden word that a normal run's log does not have, after
-    masking the tool phrases above."""
+    masking the tool and infrastructure phrases above."""
     known = {normalize(line) for line in baseline.splitlines()}
     problems = []
     for line in log.splitlines():
-        found = hits(TOOL_PHRASES.sub(" ", line))
+        found = hits(masked(line))
         if found and normalize(line) not in known:
             problems.append(f"{line.strip()[:160]!r}: {sorted(found)}")
     return problems

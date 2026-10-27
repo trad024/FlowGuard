@@ -104,6 +104,13 @@ def check(src: Path, job: str, tag: str, toolchain: str = "local") -> tuple[int,
     raise ValueError(job)
 
 
+def earlier_jobs(job: str) -> list[str]:
+    """The app-ci jobs that run before `job` and must pass for CI to reach it (the optional
+    jobs run side by side after unit, so none of them comes before another)."""
+    order = ["build", "unit"]
+    return order[: order.index(job)] if job in order else order
+
+
 def verify(template: ci_failures.Template) -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp)
@@ -113,18 +120,24 @@ def verify(template: ci_failures.Template) -> dict:
         tag = f"podinfo-check:{secrets.token_hex(4)}"
         # The toolchain template fails where setup-go downloads Go: GOTOOLCHAIN=auto does that
         toolchain = "auto" if template.id == "environment-05" else "local"
+        # In CI a failure in an earlier job hides the intended one: those jobs must pass
+        earlier = {
+            job: check(src, job, tag, toolchain)[0] for job in earlier_jobs(template.failing_job)
+        }
         attempts = 3 if template.root_cause == "flaky_test" else 1
         results = [check(src, template.failing_job, tag, toolchain) for _ in range(attempts)]
         run(["docker", "rmi", "-f", tag])
     failed = [(code, out) for code, out in results if code != 0]
     output = failed[0][1] if failed else results[-1][1]
     (OUT / f"{template.id}.log").write_text(output, encoding="utf-8")
+    earlier_pass = all(code == 0 for code in earlier.values())
     return {
         "template": template.id,
         "job": template.failing_job,
+        "earlier_jobs": {job: "pass" if code == 0 else "fail" for job, code in earlier.items()},
         "failed_runs": f"{len(failed)}/{attempts}",
         "expected_text_seen": bool(failed) and template.expect in output,
-        "ok": bool(failed) and template.expect in output,
+        "ok": earlier_pass and bool(failed) and template.expect in output,
     }
 
 

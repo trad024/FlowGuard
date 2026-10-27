@@ -128,14 +128,16 @@ CODE = [
         "Log requested delay",
         edits(
             (f"{HTTP}/delay.go", 'import (\n\t"math/rand"\n', 'import (\n\t"fmt"\n\t"math/rand"\n'),
+            # The message is built but never logged: go vet's unusedresult check, which is not
+            # in the subset go test runs, so build and unit pass and only lint fails
             (
                 f"{HTTP}/delay.go",
                 'delay, err := strconv.Atoi(vars["wait"])',
-                's.logger.Debug(fmt.Sprintf("delay %d requested", vars["wait"]))\n'
+                'fmt.Sprintf("delay %s requested", vars["wait"])\n'
                 '\tdelay, err := strconv.Atoi(vars["wait"])',
             ),
         ),
-        "wrong type string",
+        "result of fmt.Sprintf call not used",
     ),
 ]
 

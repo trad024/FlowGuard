@@ -50,7 +50,9 @@ class Fake(BaseHTTPRequestHandler):
         if url.path.endswith("/annotations"):
             return self.reply(200, [{"title": "scan-counts", "message": "trivy_high=0"}])
         if url.path.endswith("/jobs"):
-            return self.reply(200, {"jobs": [{"id": 5, "name": "unit", "conclusion": "failure"}]})
+            jobs = [{"id": 5, "name": "unit", "conclusion": "failure"}]
+            jobs.append({"id": 6, "name": "scans", "conclusion": "skipped"})
+            return self.reply(200, {"jobs": jobs})
         if "/actions/runs/" in url.path:
             return self.reply(
                 200,
@@ -118,7 +120,9 @@ def test_job_logs_follow_the_redirect_without_the_token(server):
 def test_ci_metadata_is_saved_and_unreadable_logs_are_marked(server, tmp_path):
     gh = recorder.GitHubReader("trad024/FlowGuard", token="", api=server)
     (entry,) = recorder.record_ci(tmp_path, [77], gh)
-    assert entry["conclusion"] == "failure" and entry["jobs"] == {"unit": "failure"}
+    assert entry["conclusion"] == "failure"
+    assert entry["jobs"] == {"unit": "failure", "scans": "skipped"}
+    assert entry["logs"]["scans"] == "not run"  # skipped jobs have no log to fetch
     assert entry["logs"]["unit"].startswith("unavailable (HTTP 403")
     assert (tmp_path / "ci" / "77" / "jobs.json").is_file()
     notes = json.loads((tmp_path / "ci" / "77" / "annotations.json").read_text())

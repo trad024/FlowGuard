@@ -180,3 +180,24 @@ def test_captured_logs_do_not_leak(template_id):
 def test_tool_phrases_are_masked_but_class_words_still_count():
     assert leakage.scan_log("ERROR: exit code: 1\nwrong status code: got 200", "") == []
     assert leakage.scan_log("code generation failed", "")  # "code" on its own still counts
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "git config --unset includeif.gitdir:/home/runner/work/FlowGuard/FlowGuard/.git.path",
+        "Uploading artifact: trad024~FlowGuard~CZWQSM.dockerbuild",
+        "Switched to a new branch 'scenario/r-8265b602'",
+        "#12 0.710 (12/12) Installing git-init-template (2.54.0-r0)",
+        "docker buildx build --label org.opencontainers.image.revision=abc"
+        " -t ghcr.io/trad024/flowguard-podinfo:abc",
+    ],
+)
+def test_ci_infrastructure_names_are_masked(line):
+    assert leakage.scan_log(line, "") == []
+
+
+def test_class_words_next_to_infrastructure_names_still_count():
+    line = "/home/runner/work/FlowGuard/FlowGuard/app/flaky_cache_test.go:12: timeout"
+    assert leakage.scan_log(line, "")
+    assert leakage.scan_log("Switched to a new branch 'scenario/ci-code-01'", "")  # not opaque
