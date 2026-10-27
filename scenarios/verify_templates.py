@@ -139,12 +139,18 @@ def main(argv: list[str]) -> int:
     ids = argv or list(ci_failures.TEMPLATES)
     if not argv:
         baselines()
-    summary = []
+    # Results are merged into summary.json after each template, so a partial run is kept
+    path = OUT / "summary.json"
+    results = {r["template"]: r for r in json.loads(path.read_text())} if path.is_file() else {}
     for tid in ids:
         result = verify(ci_failures.TEMPLATES[tid])
-        summary.append(result)
+        results[tid] = result
+        path.write_text(
+            json.dumps(sorted(results.values(), key=lambda r: r["template"]), indent=2),
+            encoding="utf-8",
+        )
         print(json.dumps(result), flush=True)
-    (OUT / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    summary = list(results.values())
     bad = [r["template"] for r in summary if not r["ok"]]
     print(f"{len(summary) - len(bad)}/{len(summary)} templates behave as expected; failing: {bad}")
     shutil.rmtree(Path(tempfile.gettempdir()) / "podinfo-check", ignore_errors=True)
