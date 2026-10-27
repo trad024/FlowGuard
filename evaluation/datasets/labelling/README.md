@@ -1,9 +1,11 @@
 # Labelling the LogChunks sample (D14)
 
-Two team members label the same 150 logs (`../logchunks-sample-150.csv`) **independently**: each
-fills their own copy of `logchunks-labels-blank.csv` without seeing the other's answers.
-Agreement is reported as Cohen's kappa; a third member resolves every disagreement. The
-completed sheets and the kappa are Step 4b.
+One labeller labels all 150 logs (`../logchunks-sample-150.csv`) in a copy of
+`logchunks-labels-blank.csv` (D26a). At least 7 days after finishing, `evaluation/relabel.py`
+writes a blind sheet for a seeded random 50, in a shuffled order and without the first answers;
+the labeller fills it without looking at the first pass. The intra-rater Cohen's kappa, and the
+comparison of the evidence lines with LogChunks' own labelled chunks, are Step 4b. If a second
+labeller becomes available, they label the same 50.
 
 The raw logs are not in git. Get them with `py evaluation\datasets.py download`; each sample
 row's `log_path` is relative to `evaluation/datasets/raw/LogChunks/logs/`, and `log_sha256`

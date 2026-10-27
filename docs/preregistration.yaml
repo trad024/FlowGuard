@@ -1,0 +1,137 @@
+# FlowGuard pre-registration (D26b). DRAFT for review: nothing here is approved yet.
+#
+# What the final evaluation (Step 11) will test, how, and on what, fixed before any agent code
+# exists (Step 5). Once approved: counts filled in from the power analysis (D16, Step 4b),
+# `status: frozen`, committed, and never edited again. Any later change is a new, dated entry
+# under `amendments` with its reason, and the report lists every amendment.
+#
+# scenarios/heldout.py reads this file: the held-out scenarios are drawn from exactly these
+# families, kinds, weights and ranges, with the secret seed whose SHA-256 is committed in
+# scenarios/heldout-seed.sha256. It refuses to run unless status is frozen.
+
+status: draft
+version: 0.1
+drafted: 2026-10-27
+frozen: null
+amendments: []
+
+seed:
+  hash_file: scenarios/heldout-seed.sha256   # SHA-256 of the secret seed; the seed is in .env
+  env_var: FLOWGUARD_HELDOUT_SEED
+  generate_at: step 11                       # held-out scenarios do not exist before then
+
+# ------------------------------------------------------------------ scenario families
+# count: null until the power analysis (D16) sets it; the v1 placeholders are noted.
+# Distributions: uniform (low..high), log_uniform (low..high, for rates spanning decades),
+# int (whole numbers, uniform). Kind weights are relative.
+
+families:
+  release:                       # DSO3, H4 (node stress), H5
+    count: null                  # v1 placeholder about 40
+    delivery: config
+    kinds: {none: 0.4, http_errors: 0.3, latency: 0.3}
+    parameters:
+      http_errors:
+        error_rate: {dist: log_uniform, low: 0.002, high: 0.10}
+      latency:
+        latency_ms: {dist: int, low: 100, high: 1000}
+        jitter_ms: {dist: int, low: 0, high: 300}
+        fraction: {dist: log_uniform, low: 0.01, high: 1.0}
+    node_stress:                 # H4: good releases under CPU stress, where one view misleads
+      share_of_none: 0.25
+      cpu_workers: {dist: int, low: 2, high: 6}
+    timing: {warmup_s: 30, observe_s: 600, cooldown_s: 20}
+    load: {rate: 10}
+
+  runtime:                       # DSO1 runtime, H1
+    count: null                  # v1 placeholder about 15
+    delivery: runtime
+    kinds: {error_burst: 1, latency_spike: 1, memory_leak: 1}
+    parameters:
+      error_burst:
+        error_rate: {dist: log_uniform, low: 0.05, high: 0.5}
+        pods_fraction: {dist: uniform, low: 0.1, high: 0.5}
+      latency_spike:
+        latency_ms: {dist: int, low: 200, high: 1500}
+        fraction: {dist: uniform, low: 0.1, high: 1.0}
+        pods_fraction: {dist: uniform, low: 0.1, high: 0.5}
+      memory_leak:
+        leak_kb_per_s: {dist: int, low: 128, high: 1024}
+        pods_fraction: {dist: uniform, low: 0.1, high: 0.3}
+    timing: {warmup_s: 60, incident_s: 180, cooldown_s: 60}
+    load: {rate: 10}
+
+  ci:                            # DSO2 live end-to-end set; the offline corpus is D6
+    count: null
+    delivery: commit
+    kinds: {code: 1, dependency: 1, environment: 1, flaky_test: 1, infrastructure: 1}
+    templates: []                # test-split template ids (D6 split by template), set in 4b
+
+  security:                      # DSO4
+    count: null
+    delivery: commit
+    kinds: {leaked_secret: 1, vulnerable_dependency: 1, low_severity_finding: 1}
+
+  pipeline:                      # DSO1 CI detector
+    count: null
+    delivery: commit
+    kinds: {slow_step: 1}
+    parameters:
+      slow_step:
+        added_s: {dist: int, low: 60, high: 300}
+
+normal_traffic:                  # DSO1 false alerts: no faults at all
+  hours: 4                       # at least, overnight (DSO1)
+
+# ------------------------------------------------------------------ ground truth rules
+ground_truth:
+  release:
+    bad_release: any injected error rate or latency (kind other than none)
+    expected_l0: >-
+      the frozen L0 rule applied to the injected settings: abort if error_rate x fraction
+      > 1%, or if fraction > 1% and the added latency (plus an assumed 20 ms of base server time, measured in 4b)
+      puts p99 above 500 ms; otherwise promote.
+      It predicts L0; the correct decision is bad_release.
+  runtime: {incident: true, expected_l0: detect}
+  ci: {root_cause: the kind, expected_l0: ci_failure}
+  security:
+    leaked_secret: {bad_release: true, expected_l0: block}
+    vulnerable_dependency: {bad_release: true, expected_l0: block}
+    low_severity_finding: {bad_release: false, expected_l0: promote}
+  pipeline: {anomaly: true, expected_l0: detect}
+
+# ------------------------------------------------------------------ external sets (D14, D26a)
+external:
+  logchunks: {sample: evaluation/datasets/logchunks-sample-150.csv, labels: single labeller,
+              intra_rater_check: seeded 50, at least 7 days later}
+
+# ------------------------------------------------------------------ metrics
+# Every rate with its count (n) and a 95% Wilson interval.
+metrics:
+  H1: {primary: DSO1 recall, secondary: [false alerts per hour of normal traffic, MTTD]}
+  H2: {primary: DSO2 macro-F1, secondary: [accuracy, cost per incident, latency per incident]}
+  H3: {primary: hallucination rate (quoted lines not in the log), secondary: [macro-F1]}
+  H4: {primary: wrong decisions (false rollbacks and wrong fixes) in collaboration scenarios}
+  H5: {primary: share of incidents resolved without a human at each gate setting,
+       constraint: 0 unapproved high-risk actions}
+  DSO3: [bad releases caught before 100%, false rollbacks, time to rollback, change failure rate]
+  DSO4: [injected criticals blocked, false-block rate]
+  DSO5: [pipeline duration, failures missed vs full pipeline, time to first failure, MAE, AUC]
+  DSO6: [unapproved high-risk actions, high-risk recall, escalation precision, approvals per incident]
+
+# ------------------------------------------------------------------ comparisons and tests
+alpha: 0.05
+comparisons:                     # paired: same scenarios, seeds and order at every level (D10)
+  H1: {levels: [L0, L1], test: exact McNemar on detected / missed}
+  H2: {levels: [L0, L1, L3, encoder], test: paired bootstrap of the macro-F1 difference, 10000 resamples}
+  H3: {levels: [L2, L3], test: exact McNemar on hallucinated / grounded; macro-F1 by paired bootstrap}
+  H4: {levels: [L3, L4], test: exact McNemar on wrong / right decisions}
+  H5: {levels: [L5 settings], test: none; Wilson interval per setting, the constraint is a count}
+time_metrics: paired bootstrap intervals, 10000 resamples (MTTD, time to rollback, durations)
+multiplicity: Holm correction across the four primary tests H1 to H4   # proposal, to confirm
+llm_repeats: >-
+  D18 as adjusted by D27: 3 runs on a seeded random subset of 60 items per LLM level, 1 run
+  elsewhere; mean and spread reported on the subset
+exclusions: >-
+  Runs recorded with valid false (host slept) are re-run with the same spec and seed, never
+  dropped silently; the report gives the number of re-runs. No other exclusion.
