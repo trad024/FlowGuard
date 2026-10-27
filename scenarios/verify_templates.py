@@ -70,6 +70,12 @@ def go(src: Path, script: str, toolchain: str = "local") -> tuple[int, str]:
             "/src",
             "-e",
             f"GOTOOLCHAIN={toolchain}",
+            # Shared module and build caches, like setup-go's cache in CI: go still checks every
+            # cached module against go.sum, so dependency faults are not hidden
+            "-v",
+            "flowguard-gomod:/go/pkg/mod",
+            "-v",
+            "flowguard-gobuild:/root/.cache/go-build",
             GO_IMAGE,
             "sh",
             "-c",
