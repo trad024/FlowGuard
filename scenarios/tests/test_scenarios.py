@@ -473,3 +473,63 @@ def test_dso4_items_pin_the_drawn_module_version(checkout, monkeypatch, module, 
     assert change["truth"]["finding"] == f"{module} {version}"
     if replaced:
         assert "golang.org/x/text => golang.org/x/text v0.42.0" not in gomod
+
+
+# ---------------------------------------------------------------- D50: quiet alerts first
+
+
+class Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+
+
+def test_a_scenario_waits_until_no_l0_alert_fired_for_two_minutes():
+    clock, asked = Clock(), []
+
+    def firing(seconds):
+        asked.append(seconds)
+        return ["ContainerOOMKilled"] if clock.t < 100 else []
+
+    still = runner.wait_alerts_quiet(firing, sleep=clock.sleep, clock=clock)
+    assert still == [] and clock.t >= 100
+    assert runner.QUIET_S == 120 and set(asked) == {120}
+
+
+def test_alerts_that_never_clear_mark_the_run_invalid(monkeypatch, stores):
+    clock = Clock()
+    still = runner.wait_alerts_quiet(
+        lambda s: ["HighErrorRatio"], timeout_s=300, sleep=clock.sleep, clock=clock
+    )
+    assert still == ["HighErrorRatio"] and 300 <= clock.t < 320
+    r = runner.Runner(spec(), run_id="r-0000abcd")
+    monkeypatch.setattr(r, "wait_quiet", lambda: ["HighErrorRatio"])
+    monkeypatch.setattr(r, "run_config", lambda: pytest.fail("a fault was injected"))
+    recorded = {}
+    monkeypatch.setattr(runner.recorder, "record", lambda *a, **kw: recorded.update(kw))
+    monkeypatch.setattr(
+        runner.deployer, "load_config", lambda p: type("C", (), {"repo": "", "token": ""})
+    )
+    r.run()
+    assert recorded["evaluation"]["valid"] is False
+    assert recorded["evaluation"]["observed"]["alerts_not_quiet"] == ["HighErrorRatio"]
+    kinds = [e["kind"] for e in r.truth_db.events("r-0000abcd")]
+    assert "alerts_not_quiet" in kinds and "fault_injected" not in kinds
+
+
+def test_branch_only_families_do_not_wait_for_cluster_alerts(monkeypatch, stores):
+    r = runner.Runner(
+        spec(family="ci", fault={"kind": "code", "delivery": "commit"}), run_id="r-0000abcd"
+    )
+    monkeypatch.setattr(r, "wait_quiet", lambda: pytest.fail("a ci run waited for the cluster"))
+    monkeypatch.setattr(r, "run_commit", lambda: ([], []))
+    monkeypatch.setattr(runner.recorder, "record", lambda *a, **kw: kw)
+    monkeypatch.setattr(
+        runner.deployer, "load_config", lambda p: type("C", (), {"repo": "", "token": ""})
+    )
+    assert r.run()["evaluation"]["valid"] is True

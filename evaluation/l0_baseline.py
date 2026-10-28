@@ -80,18 +80,37 @@ def firing(recording: Path) -> list[tuple[str, float]]:
     )
 
 
+def alerts_recorded(recording: Path) -> bool:
+    """False for recordings made before the L0 alert states were recorded (D50)."""
+    return (recording / "prometheus" / "alerts.json").is_file()
+
+
+def leftover(recording: Path, start: float) -> list[str]:
+    """Alerts still firing when the fault was injected: a firing sample in the minute before."""
+    return sorted({name for name, t in firing(recording) if start - 60 <= t <= start})
+
+
 def dso1(all_runs: list[dict]) -> dict:
     by_band: dict[str, list[tuple[bool, float | None]]] = defaultdict(list)
+    excluded, with_leftover, clean = [], [], []
     for r in all_runs:
         if r["family"] != "runtime" or not r["recording"]:
             continue
         incident = r["ground_truth"].get("incident") or {}
-        if not incident.get("start") or not Path(r["recording"]).is_dir():
+        rec = Path(r["recording"])
+        if not incident.get("start") or not rec.is_dir():
+            continue
+        if not alerts_recorded(rec):  # D50: not an L0 miss, nothing was recorded to hit
+            excluded.append(rec.name)
             continue
         start, end = ts(incident["start"]), ts(incident["end"]) + 60  # the cooldown counts
-        hits = [t for _, t in firing(Path(r["recording"])) if start <= t <= end]
+        hits = [t for _, t in firing(rec) if start <= t <= end]
         band = r["ground_truth"].get("band", "dev")
         by_band[band].append((bool(hits), (min(hits) - start) if hits else None))
+        if leftover(rec, start):
+            with_leftover.append(rec.name)
+        else:
+            clean.append(bool(hits))
     all_cases = [c for cases in by_band.values() for c in cases]
     mttd = [m for _, m in all_cases if m is not None]
     normal = [r for r in all_runs if r["family"] == "normal" and r["recording"]]
@@ -105,6 +124,11 @@ def dso1(all_runs: list[dict]) -> dict:
     lo, hi = stats.poisson_exact(episodes)
     return {
         "recall": rate(sum(d for d, _ in all_cases), len(all_cases)),
+        "excluded_no_alert_states": sorted(excluded),
+        "sensitivity_without_leftover_alerts": {
+            "recall": rate(sum(clean), len(clean)),
+            "excluded": sorted(with_leftover),
+        },
         "recall_by_band": {
             b: rate(sum(d for d, _ in c), len(c)) for b, c in sorted(by_band.items())
         },

@@ -28,6 +28,7 @@ import recorder  # noqa: E402
 import runner  # noqa: E402
 
 PILOT = ROOT / "scenarios" / "dev" / "pilot"
+QUIET_ATTEMPTS = 3  # D50: a run started under firing alerts is invalid and retried
 
 
 def done(truth: groundtruth.GroundTruthDB) -> set[str]:
@@ -64,8 +65,14 @@ def run_scenarios(specs: list[Path]) -> None:
             continue
         print(json.dumps({"start": spec["id"], "at": recorder.iso(datetime.now(UTC))}), flush=True)
         try:
-            out = runner.Runner(spec).run()
-            print(json.dumps({"done": spec["id"], "recording": out.name}), flush=True)
+            for attempt in range(1, QUIET_ATTEMPTS + 1):
+                run = runner.Runner(spec)
+                out = run.run()
+                print(json.dumps({"done": spec["id"], "recording": out.name}), flush=True)
+                if "alerts_not_quiet" not in run.observed:
+                    break
+                # D50: recorded as invalid; retried after another quiet wait
+                print(json.dumps({"retry": spec["id"], "attempt": attempt}), flush=True)
         except Exception as exc:  # one failed scenario must not stop the pilot
             print(json.dumps({"failed": spec["id"], "error": str(exc)[:300]}), flush=True)
 

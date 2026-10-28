@@ -41,6 +41,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -470,6 +471,42 @@ def wait_outcome(cluster, image: str, timeout: int, sleep=time.sleep, clock=time
     return "timeout"
 
 
+QUIET_S = 120  # D50: every L0 alert resolved for at least this long before a scenario starts
+QUIET_TIMEOUT_S = 900
+NO_CLUSTER = {"ci", "pipeline"}
+L0_ALERTS = "HighErrorRatio|HighLatencyP99|ContainerOOMKilled|PodCrashLooping|ContainerHighMemory"
+
+
+def firing_within(seconds: int, base: str = recorder.PROMETHEUS) -> list[str]:
+    """L0 alerts that fired at any time in the last `seconds` (Prometheus' own ALERTS series)."""
+    query = (
+        f'max by (alertname) (max_over_time(ALERTS{{alertstate="firing",'
+        f'alertname=~"{L0_ALERTS}"}}[{seconds}s]))'
+    )
+    url = f"{base}/api/v1/query?" + urllib.parse.urlencode({"query": query})
+    result = recorder.http_json(url).get("data", {}).get("result", [])
+    return sorted(r["metric"].get("alertname", "") for r in result)
+
+
+def wait_alerts_quiet(
+    firing=firing_within,
+    quiet_s: int = QUIET_S,
+    timeout_s: int = QUIET_TIMEOUT_S,
+    sleep=time.sleep,
+    clock=time.monotonic,
+) -> list[str]:
+    """Wait until no L0 alert has fired for `quiet_s`; [] when quiet, else the alerts still
+    firing at the timeout."""
+    deadline = clock() + timeout_s
+    while True:
+        names = firing(quiet_s)
+        if not names:
+            return []
+        if clock() >= deadline:
+            return names
+        sleep(15)
+
+
 def retry_rollout(namespace: str) -> None:
     """Clear an abort so the controller runs the canary again (what `rollouts retry` does)."""
     kubectl(
@@ -609,7 +646,12 @@ class Runner:
         loadgen_files: list[Path] = []
         ci_runs: list[int] = []
         try:
-            if delivery == "config":
+            # D50: no fault while an L0 alert from an earlier run may still be firing (the ci
+            # and pipeline families run on branches, without the cluster: D44)
+            if self.spec["family"] not in NO_CLUSTER and (still := self.wait_quiet()):
+                self.observed["alerts_not_quiet"] = still
+                self.event("alerts_not_quiet", alerts=still, quiet_s=QUIET_S)
+            elif delivery == "config":
                 loadgen_files.append(self.run_config())
             elif delivery == "runtime":
                 loadgen_files.append(self.run_runtime())
@@ -622,6 +664,8 @@ class Runner:
                 # The host slept: no load and no metrics for a while, so the outcome says
                 # nothing about L0. The run is kept but must be excluded from scoring.
                 self.observed["host_suspended"] = gaps
+                correct = None
+            if "alerts_not_quiet" in self.observed:
                 correct = None
             self.event(
                 "scenario_finished",
@@ -641,12 +685,15 @@ class Runner:
                 "spec": self.spec,
                 "observed": self.observed,
                 "l0_correct": correct,
-                "valid": "host_suspended" not in self.observed,
+                "valid": not {"host_suspended", "alerts_not_quiet"} & set(self.observed),
             },
             truth_db=self.truth_db,
             github=recorder.GitHubReader(cfg.repo, cfg.token),
             recording_id=self.run_id,
         )
+
+    def wait_quiet(self) -> list[str]:
+        return wait_alerts_quiet()
 
     # ------------------------------------------------------------ config delivery
 
