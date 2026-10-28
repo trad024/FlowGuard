@@ -1,0 +1,83 @@
+{
+  "train_commits": 18,
+  "validation_commits": 12,
+  "train_jobs": 108,
+  "validation_jobs": 72,
+  "train_failures": 4,
+  "validation_failures": 3,
+  "duration_mae_s": 8.56640422878383,
+  "failure_auc": 0.7705314009661836,
+  "per_job": {
+    "build": {
+      "n": 12,
+      "failures": 1,
+      "mae_s": 15.208690278155045,
+      "auc": 1.0
+    },
+    "unit": {
+      "n": 11,
+      "failures": 1,
+      "mae_s": 11.096657774674044,
+      "auc": 0.9
+    },
+    "scans": {
+      "n": 9,
+      "failures": 0,
+      "mae_s": 4.617900828702143,
+      "auc": null
+    },
+    "lint": {
+      "n": 10,
+      "failures": 0,
+      "mae_s": 5.62832670206745,
+      "auc": null
+    },
+    "integration": {
+      "n": 10,
+      "failures": 1,
+      "mae_s": 6.124554033558689,
+      "auc": 0.0
+    },
+    "sbom": {
+      "n": 10,
+      "failures": 0,
+      "mae_s": 2.4767861035582093,
+      "auc": null
+    },
+    "multiarch": {
+      "n": 10,
+      "failures": 0,
+      "mae_s": 12.835580976299784,
+      "auc": null
+    }
+  },
+  "shap_reference_rows_per_model": 3,
+  "dev_validation_projection": {
+    "n_commits": 8,
+    "comparable_complete_runs": 8,
+    "excluded_incomplete_runs": 0,
+    "baseline_job_seconds": 1038.0,
+    "optimizer_job_seconds": 1036.0,
+    "projected_saving_fraction": 0.0019267822736030828,
+    "observed_failures": 0,
+    "observed_failures_skipped": 0,
+    "optional_failure_order_cases": 0,
+    "baseline_optional_seconds_to_failure": null,
+    "optimizer_optional_seconds_to_failure": null,
+    "limitation": "Execution-time sum projection, not measured wall-clock saving; unobserved jobs excluded"
+  },
+  "all_validation_projection": {
+    "n_commits": 12,
+    "comparable_complete_runs": 9,
+    "excluded_incomplete_runs": 3,
+    "baseline_job_seconds": 1248.0,
+    "optimizer_job_seconds": 1380.0,
+    "projected_saving_fraction": -0.10576923076923077,
+    "observed_failures": 3,
+    "observed_failures_skipped": 0,
+    "optional_failure_order_cases": 0,
+    "baseline_optional_seconds_to_failure": null,
+    "optimizer_optional_seconds_to_failure": null,
+    "limitation": "Execution-time sum projection, not measured wall-clock saving; unobserved jobs excluded"
+  }
+}

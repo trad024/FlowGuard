@@ -16,9 +16,10 @@ def test_catalog_has_the_four_optional_jobs_of_d2_and_nothing_mandatory():
     assert not {"build", "unit", "scans", "trivy", "gitleaks", "push"} & set(CATALOG["jobs"])
 
 
-def test_committed_stub_model_runs_every_optional_job_in_order():
+def test_committed_model_runs_every_optional_job_when_previous_security_unknown():
     p = plan.make_plan("optimizer", ["docs/x.md"], CATALOG, plan.MODEL_FILE)
-    assert (p.model, p.run, p.warnings) == ("stub-run-all", ORDER, [])
+    assert (p.model, p.run) == ("app-ci-lightgbm-dev-v1", ORDER)
+    assert p.warnings == ["previous security status unknown; ran all"]
 
 
 @pytest.mark.parametrize(

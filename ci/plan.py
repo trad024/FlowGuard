@@ -1,8 +1,8 @@
 """CI plan job: decides which optional jobs run and in what order (D1, D2).
 
 Two modes:
-  optimizer  read the model file committed in the repo (ci/optimizer/model.json). Until the
-             Step 10 model exists it is a stub that runs every optional job in the fixed order.
+  optimizer  read the portable LightGBM duration/failure model in ci/optimizer/model.json;
+             apply P2, conservatively skip optional jobs and order by failure/second.
   baseline   the DSO5 baseline: the fixed order, each job filtered by its standard path rules
              from ci/optional-jobs.json.
 
@@ -27,6 +27,7 @@ import argparse
 import fnmatch
 import json
 import sys
+from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -45,6 +46,7 @@ class Plan:
     skipped: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     mode_source: str = "default"
+    predictions: dict = field(default_factory=dict)
 
 
 def resolve_mode(explicit: str | None, branch: str | None) -> tuple[str, str]:
@@ -82,8 +84,14 @@ def baseline_plan(catalog: dict, changed: list[str] | None) -> Plan:
     return plan
 
 
-def optimizer_plan(catalog: dict, model_path: Path) -> Plan:
-    """Apply the committed model. Only the run-all stub exists until Step 10."""
+def optimizer_plan(
+    catalog: dict,
+    model_path: Path,
+    changed: list[str] | None = None,
+    stats: dict | None = None,
+    security_status: str = "unknown",
+) -> Plan:
+    """Read a portable LightGBM policy; every invalid model falls back to running all."""
     everything = list(catalog["order"])
     try:
         model = json.loads(model_path.read_text(encoding="utf-8"))
@@ -93,14 +101,33 @@ def optimizer_plan(catalog: dict, model_path: Path) -> Plan:
         return Plan("optimizer", None, everything, warnings=[f"model unreadable ({exc}); ran all"])
     if policy == "run-all":
         return Plan("optimizer", name, everything)
+    if policy == "lightgbm-json-v1":
+        from optimizer.policy import apply
+
+        try:
+            run, skipped, predictions, warnings = apply(
+                model, catalog, changed, stats, security_status
+            )
+            return Plan(
+                "optimizer", name, run, skipped=skipped, predictions=predictions, warnings=warnings
+            )
+        except (ValueError, KeyError, TypeError, AttributeError, IndexError, OverflowError) as exc:
+            return Plan("optimizer", name, everything, warnings=[f"invalid model ({exc}); ran all"])
     return Plan("optimizer", name, everything, warnings=[f"unknown policy {policy!r}; ran all"])
 
 
-def make_plan(mode: str, changed: list[str] | None, catalog: dict, model_path: Path) -> Plan:
+def make_plan(
+    mode: str,
+    changed: list[str] | None,
+    catalog: dict,
+    model_path: Path,
+    stats: dict | None = None,
+    security_status: str = "unknown",
+) -> Plan:
     if mode == "baseline":
         return baseline_plan(catalog, changed)
     if mode == "optimizer":
-        return optimizer_plan(catalog, model_path)
+        return optimizer_plan(catalog, model_path, changed, stats, security_status)
     raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
 
 
@@ -116,6 +143,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--branch", help="branch name, for the scenario/<mode>/* rule")
     parser.add_argument("--changed-files", type=Path, help="one changed path per line")
     parser.add_argument("--all-changed", action="store_true", help="changes unknown: all")
+    parser.add_argument("--diff-stats", type=Path, help="git diff --numstat output")
+    parser.add_argument(
+        "--security-status", choices=("clean", "flagged", "unknown"), default="unknown"
+    )
     parser.add_argument("--model", type=Path, default=MODEL_FILE)
     parser.add_argument("--jobs", type=Path, default=JOBS_FILE)
     parser.add_argument("--github-output", type=Path, help="append outputs for later jobs")
@@ -124,7 +155,13 @@ def main(argv: list[str] | None = None) -> int:
     catalog = load_catalog(args.jobs)
     changed = read_changed(args.changed_files, args.all_changed)
     mode, source = resolve_mode(args.mode, args.branch)
-    plan = make_plan(mode, changed, catalog, args.model)
+    stats = None
+    if args.diff_stats:
+        from optimizer.features import parse_numstat
+
+        with suppress(OSError):  # unknown size disables predictive skipping
+            stats = parse_numstat(args.diff_stats.read_text(encoding="utf-8"))
+    plan = make_plan(mode, changed, catalog, args.model, stats, args.security_status)
     plan.mode_source = source
     print(json.dumps(asdict(plan), indent=2))
     for warning in plan.warnings:
