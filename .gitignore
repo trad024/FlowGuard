@@ -9,6 +9,8 @@ dist/
 .env
 *.db
 mlruns/
+*.safetensors
+encoder-weights.zip
 chroma/
 
 # Load-generator logs and other evaluation outputs
