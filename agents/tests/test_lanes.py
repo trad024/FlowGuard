@@ -1,4 +1,4 @@
-"""LLM lanes (D40, D41): discovery from .env, one lane per organization, seeded assignment,
+"""LLM lanes (D41): discovery from .env, one lane per organization, seeded assignment,
 lane recorded per call. No network: probes are fakes and the API a local server."""
 
 import json
@@ -18,6 +18,28 @@ def test_candidates_skip_empty_and_duplicate_keys(tmp_path):
     assert [lane.name for lane in found] == ["GROQ_KEY_1", "GROQ_KEY_2"]
     assert notes == ["GROQ_KEY_10 has the same value as GROQ_KEY_1: skipped"]
     assert "aaa" not in repr(found)  # keys never appear in a repr
+
+
+def test_the_project_leads_key_is_a_candidate_after_the_groq_keys(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("LLM_API_KEY=ccc\nGROQ_KEY_1=aaa\nGROQ_KEY_2=bbb\n", encoding="utf-8")
+    found, _ = lanes.candidates(lanes.read_env(env))
+    assert [lane.name for lane in found] == ["GROQ_KEY_1", "GROQ_KEY_2", "LLM_API_KEY"]
+    env.write_text("LLM_API_KEY=aaa\nGROQ_KEY_1=aaa\n", encoding="utf-8")
+    found, notes = lanes.candidates(lanes.read_env(env))
+    assert [lane.name for lane in found] == ["GROQ_KEY_1"]
+    assert notes == ["LLM_API_KEY has the same value as GROQ_KEY_1: skipped"]
+
+
+def test_the_project_leads_account_counts_once_when_it_shares_an_organization():
+    found = [
+        lanes.Lane("GROQ_KEY_1", "groq", "k1"),
+        lanes.Lane("GROQ_KEY_2", "groq", "k2"),
+        lanes.Lane("LLM_API_KEY", "groq", "k9"),
+    ]
+    keep, report = lanes.independent(found, Orgs({"k1": "a", "k2": "b", "k9": "b"}))
+    assert [lane.name for lane in keep] == ["GROQ_KEY_1", "GROQ_KEY_2"]
+    assert report["LLM_API_KEY"]["organization_shared_with"] == ["GROQ_KEY_2", "LLM_API_KEY"]
 
 
 class Orgs:
@@ -80,31 +102,25 @@ class Fake(BaseHTTPRequestHandler):
         pass
 
 
-def test_each_call_records_lane_provider_and_backend(tmp_path):
+def test_each_call_records_lane_and_provider(tmp_path):
     Fake.bodies = []
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         c = llm.LLMClient(
             api_key="secret-key",
-            settings=llm.Settings(model="openai/gpt-oss-120b:free"),
             cache_dir=tmp_path / "cache",
             ledger=tmp_path / "usage.json",
             api=f"http://127.0.0.1:{httpd.server_address[1]}/v1",
             audit=AuditLog(tmp_path / "audit.db"),
-            lane="OPENROUTER",
-            provider="openrouter",
+            lane="GROQ_KEY_2",
         )
         out = c.complete([{"role": "user", "content": "x"}])
-        assert (out["lane"], out["provider"], out["backend"]) == (
-            "OPENROUTER",
-            "openrouter",
-            "SomeBackend",
-        )
-        assert Fake.bodies[0]["reasoning"] == {"effort": "low"}
-        assert "reasoning_effort" not in Fake.bodies[0]
+        assert (out["lane"], out["provider"]) == ("GROQ_KEY_2", "groq")
+        assert Fake.bodies[0]["reasoning_effort"] == "low"
         (event,) = c.audit.events("llm_call")
-        assert event["payload"]["lane"] == "OPENROUTER"
+        assert event["payload"]["lane"] == "GROQ_KEY_2"
+        assert event["payload"]["provider"] == "groq"
         assert "secret-key" not in repr(c)
     finally:
         httpd.shutdown()

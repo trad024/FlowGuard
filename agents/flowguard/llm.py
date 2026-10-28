@@ -9,11 +9,11 @@
   day, so the client keeps its own ledger of tokens per UTC day (from each response's usage) and
   stops at 90% of the configured daily limit; a run is resumable, as finished calls are cached.
   A 429 is retried after its retry-after delay.
-- Lanes (D40, D41): a client is one lane, one person's or provider's account (`lane`, e.g.
-  GROQ_KEY_1) with its own token ledger; every call records its lane, provider and, for
-  OpenRouter, the backend that served it. The cache is shared: the key covers the model and
-  settings, not the lane, so lanes with identical pinned settings reuse each other's answers
-  and a different model never does. See flowguard.lanes for discovery and assignment.
+- Lanes (D41): a client is one lane, one person's Groq account (`lane`, e.g. GROQ_KEY_1)
+  with its own token ledger; every call records its lane and provider. The cache is shared:
+  the key covers the model and settings, not the lane, so lanes with identical pinned settings
+  reuse each other's answers and a different model never does.
+  See flowguard.lanes for discovery and assignment.
 
 Standard library only. Default state: state/llm-cache/ and state/llm-usage.json (gitignored).
 """
@@ -33,7 +33,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 STATE = ROOT / "state"
 API = "https://api.groq.com/openai/v1/chat/completions"
-OPENROUTER_API = "https://openrouter.ai/api/v1/chat/completions"
 RATE_HEADERS = (
     "x-ratelimit-limit-requests",  # requests per day
     "x-ratelimit-remaining-requests",
@@ -68,7 +67,7 @@ class LLMClient:
     audit: object | None = None  # a flowguard.audit.AuditLog, if calls should be logged
     sleep: object = time.sleep
     lane: str = "default"
-    provider: str = "groq"  # or "openrouter" (development only, D40)
+    provider: str = "groq"  # the only provider (D46 dropped OpenRouter)
 
     def __post_init__(self):
         if self.lane != "default" and self.ledger == STATE / "llm-usage.json":
@@ -116,8 +115,6 @@ class LLMClient:
             "max_tokens": self.settings.max_tokens,
             "response_format": {"type": "json_object"},
         }
-        if self.provider == "openrouter":
-            body["reasoning"] = {"effort": body.pop("reasoning_effort")}
         req = urllib.request.Request(
             self.api,
             data=json.dumps(body).encode(),
@@ -146,7 +143,6 @@ class LLMClient:
             "rate": rate,
             "lane": self.lane,
             "provider": self.provider,
-            "backend": data.get("provider"),  # OpenRouter's serving backend; None on Groq
         }
         self._spend(int(usage.get("total_tokens", 0)))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -162,7 +158,6 @@ class LLMClient:
                 cache_key=k,
                 lane=self.lane,
                 provider=self.provider,
-                backend=result["backend"],
                 **{
                     f"tokens_{n}": usage.get(f"{n}_tokens")
                     for n in ("prompt", "completion", "total")

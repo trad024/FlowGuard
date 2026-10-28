@@ -1,7 +1,9 @@
-"""LLM lanes (D40, D41): team members' own Groq accounts, run in parallel with identical settings.
+"""LLM lanes (D41): team members' own Groq accounts, run in parallel with identical settings.
 
-A lane is one GROQ_KEY_n from .env, i.e. one person's free-tier account. `.env` is re-read at
-the start of every run, so a key added later becomes a lane without a restart. Before use:
+A lane is one GROQ_KEY_n from .env, i.e. one person's free-tier account, or LLM_API_KEY, the
+project lead's own account, considered last so that it never displaces a GROQ_KEY_n. `.env` is
+re-read at the start of every run, so a key added later becomes a lane without a restart.
+Before use:
 
 - identical values count once, and keys Groq rejects (401) are dropped;
 - keys of one organization share its quota, so they count as one lane. `independent` calls
@@ -51,11 +53,14 @@ def read_env(path: Path = ENV_PATH) -> dict[str, str]:
 
 
 def candidates(env: dict[str, str]) -> tuple[list[Lane], list[str]]:
-    """GROQ_KEY_n with a value, by n; a value already seen is noted and skipped."""
+    """GROQ_KEY_n with a value, by n, then LLM_API_KEY; a value already seen is noted and
+    skipped. Two keys of one account with different values are grouped by `independent`."""
     names = sorted(
         (k for k in env if k.startswith("GROQ_KEY_") and k[9:].isdigit() and env[k]),
         key=lambda k: int(k[9:]),
     )
+    if env.get("LLM_API_KEY"):
+        names.append("LLM_API_KEY")
     lanes, notes, seen = [], [], {}
     for name in names:
         if env[name] in seen:

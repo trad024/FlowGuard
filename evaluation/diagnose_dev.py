@@ -3,7 +3,6 @@
     python evaluation/diagnose_dev.py run --level L2      # resumable: answers are cached
     python evaluation/diagnose_dev.py score --level L2
     python evaluation/diagnose_dev.py run --level L2 --repeat 2        # D28 repeat key
-    python evaluation/diagnose_dev.py run --level L2 --provider openrouter --splits validation
 
 Never runs test templates or LogChunks: those wait for Step 11 (D6, D32); `items()` refuses
 them. .env is re-read at every start, so new GROQ_KEY_n lanes are picked up; the number of
@@ -35,7 +34,6 @@ SPLIT = ROOT / "evaluation" / "datasets" / "corpus-split.json"
 OUT = ROOT / "evaluation" / "runs" / "diagnose-dev"
 LANE_SEED = "lanes-20261028"
 DEV_SPLITS = ("train", "validation")
-OPENROUTER_MODEL = "openai/gpt-oss-120b:free"
 
 
 def items(split: dict, splits=DEV_SPLITS) -> list[dict]:
@@ -73,44 +71,32 @@ def ready_lanes() -> list[lanes.Lane]:
     return keep
 
 
-def tag(level: str, repeat: int | None = None, provider: str = "groq") -> str:
-    """The result set's name: one model and provider per set, never mixed (D40, D41)."""
-    return (
-        level + (f"-r{repeat}" if repeat else "") + ("" if provider == "groq" else f"-{provider}")
-    )
+def tag(level: str, repeat: int | None = None) -> str:
+    """The result set's name: one model per set, never mixed (D41)."""
+    return level + (f"-r{repeat}" if repeat else "")
 
 
-def openrouter_lane() -> lanes.Lane:
-    key = lanes.read_env().get("OPENROUTER_API_KEY", "")
-    if not key:
-        raise SystemExit("no OPENROUTER_API_KEY in .env")
-    return lanes.Lane("OPENROUTER", "openrouter", key)
-
-
-def run(level: str, repeat: int | None = None, provider: str = "groq", splits=DEV_SPLITS) -> None:
+def run(level: str, repeat: int | None = None, splits=DEV_SPLITS) -> None:
     if level not in ("L2", "L3"):
         raise SystemExit("only L2 is wired so far; L3 needs retrieval")
     if level == "L3":
         raise SystemExit("L3 retrieval is not built yet")
     todo = items(load_split(), splits)
-    live = ready_lanes() if provider == "groq" else [openrouter_lane()]
+    live = ready_lanes()
     if not live:
         raise SystemExit("no usable lane")
     queues: dict[str, list[dict]] = {lane.name: [] for lane in live}
     for item in todo:
         queues[lanes.assign(item["variant"], live, LANE_SEED).name].append(item)
     OUT.mkdir(parents=True, exist_ok=True)
-    name = tag(level, repeat, provider)
+    name = tag(level, repeat)
     out_path = OUT / f"{name}.jsonl"
     lock = threading.Lock()
     audit = AuditLog.open(level=level)
 
     def work(lane: lanes.Lane) -> None:
-        extra = {}
-        if lane.provider == "openrouter":  # D40: same settings, the free endpoint of the model
-            extra = {"api": llm.OPENROUTER_API, "settings": llm.Settings(model=OPENROUTER_MODEL)}
         client = llm.LLMClient(
-            api_key=lane.key, lane=lane.name, provider=lane.provider, audit=audit, **extra
+            api_key=lane.key, lane=lane.name, provider=lane.provider, audit=audit
         )
         for item in queues[lane.name]:
             log = item["log"].read_text(encoding="utf-8", errors="replace")
@@ -132,7 +118,6 @@ def run(level: str, repeat: int | None = None, provider: str = "groq", splits=DE
                 "level": level,
                 "lane": res["lane"],
                 "provider": res["provider"],
-                "backend": res.get("backend"),
                 "model": res.get("model"),
                 "repeat": repeat,
                 "cached": res["cached"],
@@ -188,13 +173,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("cmd", choices=["run", "score"])
     parser.add_argument("--level", default="L2")
     parser.add_argument("--repeat", type=int, choices=[2, 3])
-    parser.add_argument("--provider", default="groq", choices=["groq", "openrouter"])
     parser.add_argument("--splits", nargs="+", default=list(DEV_SPLITS))
     args = parser.parse_args(argv)
     if args.cmd == "run":
-        run(args.level, args.repeat, args.provider, tuple(args.splits))
+        run(args.level, args.repeat, tuple(args.splits))
     else:
-        score(tag(args.level, args.repeat, args.provider))
+        score(tag(args.level, args.repeat))
     return 0
 
 
