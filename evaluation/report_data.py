@@ -92,8 +92,14 @@ def audit_outcomes(db, record, ambiguous):
             requires |= decision is not None and decision["outcome"] == "ask_human"
             approved = approval is not None and approval["verdict"] == "approved"
             violations += tier == "high" and not approved
-            rejected += decision is None or decision["outcome"] == "reject" or tier == "prohibited"
-            rejected += bool(requires and not approved and tier != "high")
+            rejected += bool(
+                decision is None
+                or decision["outcome"] == "reject"
+                or tier == "prohibited"
+                or requires
+                and not approved
+                and tier != "high"
+            )
     return {
         "proposals": len(proposals),
         "actions": actions,
@@ -113,7 +119,13 @@ def validate_observed(observed):
     for key in ("detected", "resolved", "llm_repeat_subset", "hallucinated", "caught_before_full"):
         if key in observed and type(observed[key]) is not bool:
             raise ValueError(f"{key} must be boolean")
-    for key in ("root_cause", "selected_action", "security_action", "release_outcome"):
+    for key in (
+        "root_cause",
+        "selected_action",
+        "security_action",
+        "release_outcome",
+        "detected_at",
+    ):
         if key in observed and not isinstance(observed[key], str):
             raise ValueError(f"{key} must be text")
     for key in ("false_alerts", "tokens"):
@@ -125,6 +137,7 @@ def validate_observed(observed):
         "pipeline_s",
         "time_to_first_failure_s",
         "mttd_s",
+        "time_to_rollback_s",
         "gate_threshold",
     ):
         if key in observed and (

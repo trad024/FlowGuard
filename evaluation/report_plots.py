@@ -10,7 +10,6 @@ def plots(results, out: Path):
     import matplotlib.pyplot as plt
 
     from report_data import LEVELS
-    from report_metrics import PRIMARY
 
     plt.rcParams.update({"svg.hashsalt": "flowguard-report-v1", "font.size": 10})
     files = []
@@ -29,7 +28,8 @@ def plots(results, out: Path):
         plt.close(fig)
 
     fig, axes = plt.subplots(2, 3, figsize=(13, 7))
-    for axis, metric in zip(axes.flat, PRIMARY, strict=False):
+    primary = results["metadata"]["primary_metrics"]
+    for axis, metric in zip(axes.flat, primary, strict=False):
         for i, level in enumerate(LEVELS):
             item = results["ablation"][level]["primary"][metric]
             if item["estimate"] is not None:
@@ -48,7 +48,8 @@ def plots(results, out: Path):
                 )
         axis.set(xticks=range(6), xticklabels=LEVELS, ylim=(-0.05, 1.15), title=metric)
         axis.grid(axis="y", alpha=0.2)
-    axes.flat[-1].axis("off")
+    for axis in list(axes.flat)[len(primary) :]:
+        axis.axis("off")
     save(fig, "ablation")
 
     fig, axis = plt.subplots(figsize=(8, 5))

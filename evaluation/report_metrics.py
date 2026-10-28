@@ -27,10 +27,11 @@ LEVEL_METHODS = {
 
 
 def primary_method(record):
-    return diagnosis(record) is None or record["method"] in (
-        "default",
-        LEVEL_METHODS[record["level"]],
-    )
+    if record["method"] in METHODS:
+        return record["method"] == LEVEL_METHODS[record["level"]]
+    if record["truth"]["ground_truth"].get("root_cause") in CLASSES:
+        return record["method"] == "default"
+    return True
 
 
 def proportion(values):
@@ -125,6 +126,21 @@ def autonomous(record):
     )
 
 
+def mttd(record):
+    if detected(record) is not True:
+        return None
+    observed = record["observed"]
+    if "mttd_s" in observed:
+        return observed["mttd_s"]
+    incident = record["truth"]["ground_truth"].get("incident")
+    if "detected_at" in observed and isinstance(incident, dict) and incident.get("start"):
+        difference = stamp(observed["detected_at"]) - stamp(incident["start"])
+        if difference < 0:
+            raise ValueError("detection precedes incident start")
+        return difference
+    return None
+
+
 def measurements(records, seed):
     def eligible(fn):
         return [v for r in records if (v := fn(r)) is not None]
@@ -217,25 +233,17 @@ def measurements(records, seed):
             if r["truth"]["ground_truth"].get("critical") is True
         ]
     )
-    for name in ("latency_s", "cost_usd", "pipeline_s", "time_to_first_failure_s"):
+    for name in (
+        "latency_s",
+        "cost_usd",
+        "pipeline_s",
+        "time_to_first_failure_s",
+        "time_to_rollback_s",
+    ):
         values = [r["observed"][name] for r in records if name in r["observed"]]
         secondary[name] = stats.bootstrap_interval(values, statistics.median, seed=seed)
-    mttd = []
-    for r in records:
-        if detected(r) is True:
-            if "mttd_s" in r["observed"]:
-                mttd.append(r["observed"]["mttd_s"])
-            elif "detected_at" in r["observed"] and isinstance(
-                r["truth"]["ground_truth"].get("incident"), dict
-            ):
-                difference = stamp(r["observed"]["detected_at"]) - stamp(
-                    r["truth"]["ground_truth"]["incident"]["start"]
-                )
-                if difference < 0:
-                    raise ValueError("detection precedes incident start")
-                mttd.append(difference)
     secondary["mttd_s"] = {
-        **stats.bootstrap_interval(mttd, statistics.median, seed=seed),
+        **stats.bootstrap_interval(eligible(mttd), statistics.median, seed=seed),
         "scope": "detected incidents only; misses not imputed",
     }
     return {
@@ -267,7 +275,27 @@ def pairs_for(records, left_level, right_level, fn, setting, methods=None):
     return [groups[left_level][i] for i in shared], [groups[right_level][i] for i in shared]
 
 
-def comparisons(records, setting, seed, alpha):
+def method_pairs(records, left, right, setting):
+    groups = {method: {} for method in (left, right)}
+    for record in records:
+        method = record["method"]
+        if (
+            method not in groups
+            or record["level"] != METHOD_LEVELS[method]
+            or record["setting"] != setting
+            or record["repeat"] != 1
+        ):
+            continue
+        value = diagnosis(record)
+        if value is not None:
+            if record["scenario_id"] in groups[method]:
+                raise ValueError("duplicate scenario in a diagnosis-method cohort")
+            groups[method][record["scenario_id"]] = value
+    common = sorted(groups[left].keys() & groups[right].keys())
+    return [groups[left][key] for key in common], [groups[right][key] for key in common]
+
+
+def comparisons(records, setting, seed, alpha, inference=None):
     tests = {}
     for name, left, right, fn in (
         ("H1_L1_vs_L0", "L1", "L0", detected),
@@ -275,17 +303,53 @@ def comparisons(records, setting, seed, alpha):
         ("H4_L4_vs_L3", "L4", "L3", wrong_decision),
     ):
         a, b = pairs_for(records, left, right, fn, setting)
-        tests[name] = {"test": "exact McNemar", **stats.mcnemar_paired(a, b)}
-    for label, baseline in (("regex", "L0"), ("tfidf_lr", "L1")):
-        a, b = pairs_for(
-            records, "L3", baseline, diagnosis, setting, {"L3": "llm_retrieval", baseline: label}
-        )
+        if name.startswith("H4") and inference and inference["h4_mode"] != "test":
+            tests[name] = {
+                "test": "none; " + inference["h4_mode"],
+                "n": len(a),
+                "p_value": None,
+                "left_only": sum(x and not y for x, y in zip(a, b, strict=True)),
+                "right_only": sum(y and not x for x, y in zip(a, b, strict=True)),
+            }
+        else:
+            tests[name] = {"test": "exact McNemar", **stats.mcnemar_paired(a, b)}
+    for label in ("regex", "tfidf_lr"):
+        a, b = method_pairs(records, "llm_retrieval", label, setting)
         tests[f"H2_L3_vs_{label}"] = {
             "test": "paired bootstrap macro-F1 difference",
             **stats.paired_bootstrap(a, b, macro_f1, seed=seed),
         }
-    corrected = stats.holm({k: v["p_value"] for k, v in tests.items()}, alpha)
-    return {k: {**v, "holm": corrected[k]} for k, v in tests.items()}
+        if inference and not inference["h2_primary"]:
+            tests[f"H2_L3_vs_{label}"].update(
+                test="descriptive paired bootstrap interval; no H2 hypothesis test (D42)",
+                p_value=None,
+            )
+    family = inference["holm_family"] if inference else list(tests)
+    corrected = stats.holm({k: tests[k]["p_value"] for k in family}, alpha)
+    return {
+        k: {**v, "holm": corrected.get(k), "scope": "primary" if k in family else "descriptive"}
+        for k, v in tests.items()
+    }
+
+
+def secondary_comparisons(records, setting, seed, inference):
+    result = {}
+    for name, left, right in (
+        ("encoder_vs_L3", "encoder", "llm_retrieval"),
+        ("encoder_vs_tfidf_lr", "encoder", "tfidf_lr"),
+        ("L3_vs_L2_macro_f1", "llm_retrieval", "llm_zero_shot"),
+    ):
+        a, b = method_pairs(records, left, right, setting)
+        result[name] = stats.paired_bootstrap(a, b, macro_f1, seed=seed)
+        if inference and not inference["h2_primary"]:
+            result[name]["p_value"] = None
+        result[name]["scope"] = "descriptive; outside Holm family"
+    a, b = pairs_for(records, "L3", "L2", lambda r: r["observed"].get("hallucinated"), setting)
+    result["L3_vs_L2_hallucination"] = {
+        **stats.mcnemar_paired(a, b),
+        "scope": "secondary exact McNemar; uncorrected",
+    }
+    return result
 
 
 def llm_variance(records):
@@ -361,7 +425,23 @@ def llm_variance(records):
     return result
 
 
-def analyze(records, *, setting="default", seed=20261028, alpha=0.05):
+def method_measurements(records, method, setting, seed):
+    values = [
+        value
+        for record in records
+        if record["method"] == method
+        and record["repeat"] == 1
+        and record["setting"] == setting
+        and record["level"] == METHOD_LEVELS[method]
+        if (value := diagnosis(record)) is not None
+    ]
+    return {
+        **stats.bootstrap_interval(values, macro_f1, seed=seed),
+        "accuracy": proportion([actual == predicted for actual, predicted in values]),
+    }
+
+
+def analyze(records, *, setting="default", seed=20261028, alpha=0.05, inference=None):
     primary_records = [
         r for r in records if r["repeat"] == 1 and r["setting"] == setting and primary_method(r)
     ]
@@ -385,6 +465,10 @@ def analyze(records, *, setting="default", seed=20261028, alpha=0.05):
         {"family": family, "band": band, "level": level, **measurements(cases, seed)}
         for (family, band, level), cases in sorted(bands.items())
     ]
+    if inference and not inference["h2_primary"]:
+        for row in [*ablation.values(), *by_band]:
+            row["secondary"]["H2_macro_f1"] = row["primary"].pop("H2_macro_f1")
+            row["missing_measurements"].pop("H2_macro_f1")
     curve = []
     l5 = [r for r in records if r["level"] == "L5" and r["repeat"] == 1 and primary_method(r)]
     settings = sorted({r["setting"] for r in l5})
@@ -416,22 +500,10 @@ def analyze(records, *, setting="default", seed=20261028, alpha=0.05):
         "ablation": ablation,
         "per_band": by_band,
         "autonomy_safety": curve,
-        "comparisons": comparisons(records, setting, seed, alpha),
+        "comparisons": comparisons(records, setting, seed, alpha, inference),
+        "secondary_comparisons": secondary_comparisons(records, setting, seed, inference),
         "llm_variance": llm_variance(records),
         "diagnosis_methods": {
-            method: stats.bootstrap_interval(
-                [
-                    v
-                    for r in records
-                    if r["method"] == method
-                    and r["repeat"] == 1
-                    and r["setting"] == setting
-                    and r["level"] == METHOD_LEVELS[method]
-                    if (v := diagnosis(r)) is not None
-                ],
-                macro_f1,
-                seed=seed,
-            )
-            for method in METHODS
+            method: method_measurements(records, method, setting, seed) for method in METHODS
         },
     }

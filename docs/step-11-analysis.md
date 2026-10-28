@@ -64,7 +64,7 @@ Observation fields:
 | `false_alerts` | Number of false alert episodes in a normal-traffic run |
 | `caught_before_full`, `release_outcome` | Bad-release catch and false-rollback scoring |
 | `security_action` | Block/allow/review decision for critical/control scoring |
-| `pipeline_s`, `time_to_first_failure_s`, `latency_s`, `cost_usd` | Nonnegative observed measurements |
+| `pipeline_s`, `time_to_first_failure_s`, `time_to_rollback_s`, `latency_s`, `cost_usd` | Nonnegative observed measurements |
 | `llm_repeat_subset`, `repeat`, `tokens` | Designated repeat-subset membership and run measurements |
 | `gate_threshold` | Numeric threshold associated with one L5 setting |
 
@@ -92,13 +92,22 @@ the explicit method names, preventing a stub regex L1 run being labelled TF-IDF.
   mean of per-item F1. A two-sided null-centred bootstrap tail probability with an add-one
   Monte Carlo correction supplies its p-value. Small/degenerate samples can yield unreliable
   bootstrap intervals or tail probabilities; counts and raw results remain visible.
-- Holm covers **five primary contrasts**: H1, both H2 primary contrasts, H3 and H4. Missing
-  comparisons remain in the family size and are not silently removed to reduce correction.
-  Secondary method, time and per-band results are descriptive and outside that family.
+- The read-only pre-registration selects the Holm family. Version 0.2 retains H1, both H2
+  primary contrasts, H3 and H4 (five tests). Version 0.3 follows D42: H2 is secondary, with
+  bootstrap macro-F1 intervals and Wilson accuracy intervals, not a confirmatory H2 test.
+  Wilson applies to correct/incorrect counts, not macro-F1, which is not a binomial proportion.
+- D44 makes H4 conditional on a **dated development-rate amendment**. Below 10% dev wrong
+  decisions, H4 has counts/Wilson intervals but no test, and Holm covers H1/H3. At 10% or
+  above, Holm covers H1/H3/H4. With the amendment missing, H4's p-value remains null and its
+  slot remains in the conservative family size; the report cannot be marked confirmatory.
+  The tool never chooses H4's mode from held-out outcomes. Missing comparisons retain their
+  slots. Secondary method, time and per-band results remain outside Holm.
 - Pairing uses the intersection of scenario IDs at the selected setting. Only repeat 1
   enters primary metrics. Missing measurements are `n=0`, null estimate and null interval.
 - MTTD is conditional on detection; missed incidents are not given fabricated durations.
-  Paired time comparisons require both methods' measurements on the same scenario.
+  Paired time comparisons require both methods' measurements on the same scenario. MTTD
+  derived from timestamps uses the same function in summaries and paired comparisons.
+  Time to rollback is supported as an observed nonnegative duration.
 - L5 autonomy uses the common scenario intersection across settings. Safety counts retain
   **all observed executions**, including unmatched scenarios, so a violation cannot disappear
   through cohort matching. The output records both matched and total scenario counts.
@@ -108,7 +117,8 @@ the explicit method names, preventing a stub regex L1 run being labelled TF-IDF.
   anomalies, bad releases/security incidents or explicit collaboration cases); normal
   traffic and good-release controls cannot inflate incident-resolution autonomy.
   Approval must precede execution, and its latest prior verdict must be approved; a later
-  approval cannot retroactively authorize a high-risk action.
+  approval cannot retroactively authorize a high-risk action. An execution failing multiple
+  authorization checks counts once in the unsafe-execution count.
 - The repeat-variance table uses only complete designated 1/2/3 triplets. It reports the
   observed subset size against the expected 60, missing triplets, each repeat's metrics,
   repeat means and sample SDs. SD is descriptive variability, not a confidence interval.
@@ -130,3 +140,37 @@ Tests use synthetic schemas only: reference statistical values, pairing and fixe
 Holm's family size, read-only database access, context joins, invalid/missing observations,
 per-band counts, repeat triplets, late-approval safety, null missing data, and end-to-end
 CSV/JSON/PNG/SVG generation. No real held-out database, seed or scenario was opened.
+
+## Pre-registration 0.3 and the H4 amendment handoff
+
+The branch is updated onto `dev` commit `be5e4b2`, including D39?D44, without editing any
+frozen file. The current pre-registration remains draft with no H4 amendment. H2 is shown
+in the five-method descriptive table, including n, macro-F1 bootstrap intervals and accuracy
+Wilson intervals. All three named secondary method contrasts are included; encoder/TF-IDF
+pairing works even though both occupy L1. L3 retrieval is counted at its canonical level,
+so cached L4/L5 copies are not extra diagnosis incidents. Hallucination has the preregistered
+secondary exact McNemar comparison when paired observations are supplied.
+
+The toolkit recognizes the following **proposed machine-readable encoding** for the Step 8
+owner's already-required dated H4 amendment. This is documentation only; no amendment or
+decision-log entry has been written by this branch:
+
+```yaml
+amendments:
+  - date: 2026-10-29
+    reason: Development node-stress wrong-decision rate and H4 count decision after Step 8
+    H4:
+      dev_wrong_rate: 0.09  # illustrative placeholder, not a measured project result
+```
+
+Use the actual measured dev rate and approved date, not the illustrative number. If an
+amendment uses a different encoding, update the adapter explicitly before final inference;
+the tool reports H4 pending instead of guessing from free text or held-out data. Unknown
+pre-registration versions are rejected for explicit review. LogChunks eligibility must be
+exported as `localizable: true` only for fully located targets under D43; the toolkit never
+opens the real LogChunks dataset to infer or inspect targets during development.
+
+The updated base had one boundary test requiring an uncommitted corpus on CI. That test now
+constructs three small synthetic variant folders, including an excluded one, and checks the
+exact selected set. It does not create fake files at the production corpus path. All new
+analysis tests likewise use fake audit and truth databases; no real held-out input is used.

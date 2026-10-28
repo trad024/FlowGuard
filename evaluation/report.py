@@ -20,7 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agents"))
 
 from report_data import load  # noqa: E402
-from report_metrics import PRIMARY, analyze  # noqa: E402
+from report_metrics import analyze  # noqa: E402
+from report_policy import policy  # noqa: E402
 
 
 def write_csv(path, rows, fields):
@@ -61,7 +62,11 @@ def build(
     ]["levels"] != ["L3", "L4"]:
         raise ValueError("unsupported preregistration comparisons")
     joined, coverage = load(audit, truth, replays)
-    result = analyze(joined, setting=setting, seed=seed, alpha=specification["alpha"])
+    inference = policy(specification)
+    result = analyze(
+        joined, setting=setting, seed=seed, alpha=specification["alpha"], inference=inference
+    )
+    primary_metrics = list(result["ablation"]["L0"]["primary"])
     result["metadata"] = {
         "format": 1,
         "synthetic": synthetic,
@@ -80,27 +85,35 @@ def build(
             "replays": hashlib.sha256(Path(replays).read_bytes()).hexdigest() if replays else None,
         },
         "scope": "synthetic demonstration" if synthetic else "offline supplied results",
-        "confirmatory": not synthetic and specification["status"] == "frozen",
+        "confirmatory": (
+            not synthetic
+            and specification["status"] == "frozen"
+            and inference["h4_mode"] != "pending_amendment"
+        ),
         "pairing": "intersection of scenario IDs; repeat 1 only; fixed setting",
-        "holm_family": "H1, both H2 primary contrasts, H3, H4 (five tests); missing tests retained",
+        "holm_family": inference["holm_family"],
+        "primary_metrics": primary_metrics,
+        "analysis_policy": inference,
     }
     result["time_comparisons"] = {}
     import statistics
 
     import stats
-    from report_metrics import pairs_for
+    from report_metrics import mttd, pairs_for
 
-    for name in ("pipeline_s", "mttd_s", "time_to_first_failure_s", "latency_s"):
+    for name in (
+        "pipeline_s",
+        "mttd_s",
+        "time_to_first_failure_s",
+        "latency_s",
+        "time_to_rollback_s",
+    ):
         for level in ("L1", "L2", "L3", "L4", "L5"):
-            from report_metrics import detected
-
             a, b = pairs_for(
                 joined,
                 level,
                 "L0",
-                lambda r, key=name: (
-                    r["observed"].get(key) if key != "mttd_s" or detected(r) is True else None
-                ),
+                lambda r, key=name: mttd(r) if key == "mttd_s" else r["observed"].get(key),
                 setting,
             )
             result["time_comparisons"][f"{name}_{level}_minus_L0"] = {
@@ -114,7 +127,7 @@ def build(
         [
             flatten({"level": level}, metric, values["primary"][metric])
             for level, values in result["ablation"].items()
-            for metric in PRIMARY
+            for metric in primary_metrics
         ],
         columns,
     )
@@ -128,6 +141,15 @@ def build(
             if "n" in value
         ],
         ["family", "band", *columns],
+    )
+    write_csv(
+        out / "diagnosis-methods.csv",
+        [
+            flatten({"method": method}, metric, value)
+            for method, row in result["diagnosis_methods"].items()
+            for metric, value in (("macro_f1", row), ("accuracy", row["accuracy"]))
+        ],
+        ["method", *columns[1:]],
     )
     write_csv(
         out / "autonomy-safety.csv",
@@ -211,8 +233,15 @@ def build(
         + f"Confirmatory: {result['metadata']['confirmatory']}.\n\n"
         + "Missing measurements have n=0 and null estimates/intervals, never fabricated zeros. "
         "Only repeat 1 enters primary tables. LLM variance uses complete 1/2/3 triplets. "
-        "H1–H4 comparisons retain matched scenario pairs; all five primary tests enter Holm. "
-        "Per-band and time comparisons are descriptive. "
+        "Comparisons retain matched scenario pairs; the pre-registration sets the Holm family. "
+        + inference["note"]
+        + ". "
+        + (
+            "H2 is secondary: macro-F1 bootstrap and accuracy Wilson intervals; no H2 test. "
+            if not inference["h2_primary"]
+            else ""
+        )
+        + "Per-band and time comparisons are descriptive. "
         "See results.json for coverage and counts.\n",
         encoding="utf-8",
     )

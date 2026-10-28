@@ -10,9 +10,21 @@ import pytest
 import report
 import stats
 from flowguard.audit import AuditLog
-from report_data import connect, load
+from report_data import audit_outcomes, connect, load
 from report_demo import create
-from report_metrics import analyze, autonomous, detected, llm_variance, macro_f1, measurements
+from report_metrics import (
+    analyze,
+    autonomous,
+    comparisons,
+    detected,
+    llm_variance,
+    macro_f1,
+    measurements,
+    method_pairs,
+    mttd,
+    primary_method,
+)
+from report_policy import policy
 
 
 @pytest.fixture
@@ -191,6 +203,106 @@ def test_pipeline_anomaly_and_incident_only_autonomy_denominators():
     assert autonomous(record) is None
 
 
+def test_preregistration_03_holm_scope_and_h4_use_only_dated_dev_amendment(inputs):
+    specification = {
+        "version": 0.3,
+        "comparisons": {"H2": {"primary": "none"}},
+        "amendments": [],
+    }
+    pending = policy(specification)
+    assert not pending["h2_primary"] and pending["h4_mode"] == "pending_amendment"
+    assert len(pending["holm_family"]) == 3
+    records, _ = load(*inputs)
+    result = comparisons(records, "default", 31, 0.05, pending)
+    assert result["H4_L4_vs_L3"]["n"] == 3
+    assert result["H4_L4_vs_L3"]["p_value"] is None
+    assert result["H2_L3_vs_regex"]["p_value"] is None
+    assert result["H2_L3_vs_regex"]["holm"] is None
+    # Held-out wrong/right outcomes do not decide H4's mode. Only the prior dev amendment can.
+    specification["amendments"] = [{"date": "2026-10-28", "H4": {"dev_wrong_rate": 0.09}}]
+    descriptive = policy(specification)
+    assert descriptive["h4_mode"] == "descriptive" and len(descriptive["holm_family"]) == 2
+    specification["amendments"][0]["H4"]["dev_wrong_rate"] = 0.10
+    assert policy(specification)["h4_mode"] == "test"
+    specification["amendments"][0].pop("date")
+    with pytest.raises(ValueError, match="dated"):
+        policy(specification)
+
+
+def test_encoder_and_tfidf_pair_at_same_level_without_triple_counting_retrieval(inputs):
+    records, _ = load(*inputs)
+    tfidf = [r for r in records if r["method"] == "tfidf_lr" and r["truth"]["family"] == "ci"]
+    records.extend({**r, "method": "encoder"} for r in tfidf)
+    a, b = method_pairs(records, "encoder", "tfidf_lr", "default")
+    assert len(a) == len(b) == 5 and a == b
+    a, b = method_pairs(records, "encoder", "llm_retrieval", "default")
+    assert len(a) == len(b) == 5  # L4/L5 cached copies do not add 10 extra incidents.
+    incomplete = {**tfidf[0], "method": "encoder", "observed": {}}
+    assert not primary_method(incomplete)
+
+
+def test_timestamp_mttd_is_shared_by_summaries_and_paired_comparisons():
+    record = {
+        "truth": {
+            "family": "runtime",
+            "ground_truth": {"incident": {"start": "2026-01-01T00:00:00Z"}},
+        },
+        "observed": {"detected": True, "detected_at": "2026-01-01T00:00:05Z"},
+    }
+    assert mttd(record) == 5
+    record["observed"]["detected"] = False
+    assert mttd(record) is None
+    record["observed"].update(detected=True, detected_at="2025-12-31T23:59:59Z")
+    with pytest.raises(ValueError, match="precedes"):
+        mttd(record)
+
+
+def test_an_unsafe_execution_is_counted_once_even_with_multiple_missing_authorizations(inputs):
+    from flowguard.catalog import AGENT_ACTIONS, CATALOG
+
+    action = next(name for name, entry in CATALOG.items() if str(entry.tier) == "medium")
+    agent = next(agent for agent, actions in AGENT_ACTIONS.items() if action in actions)
+    audit, _ = inputs
+    writer = AuditLog(audit, "synthetic-ci-0", "L5")
+    pid = "synthetic-missing-medium-authorization"
+    writer.proposal(
+        {
+            "id": pid,
+            "incident_id": "fixture",
+            "agent": agent.value,
+            "action": action,
+            "target": "demo",
+            "environment": "prod",
+            "confidence": 0,
+            "rationale": "synthetic",
+            "params": {},
+            "proposed_at": "2026-01-01T00:00:00Z",
+        }
+    )
+    writer.execution(
+        {
+            "proposal_id": pid,
+            "success": True,
+            "validated": True,
+            "finished_at": "2026-01-01T00:00:01Z",
+        }
+    )
+    db = connect(audit)
+    try:
+        result = audit_outcomes(
+            db,
+            {
+                "scenario_id": "synthetic-ci-0",
+                "level": "L5",
+                "proposal_ids": [pid],
+            },
+            False,
+        )
+    finally:
+        db.close()
+    assert result["executions"] == result["other_unsafe_executions"] == 1
+
+
 def test_one_command_writes_all_outputs_from_synthetic_inputs(inputs, tmp_path):
     audit, truth = inputs
     out = tmp_path / "out"
@@ -199,7 +311,9 @@ def test_one_command_writes_all_outputs_from_synthetic_inputs(inputs, tmp_path):
     assert result["metadata"]["bootstrap_resamples"] == 10000
     assert not result["metadata"]["confirmatory"]  # repository preregistration is still draft
     assert len(result["figures"]) == 8
-    assert len((out / "ablation.csv").read_text().splitlines()) == 31
+    assert len((out / "ablation.csv").read_text().splitlines()) == (
+        6 * len(result["metadata"]["primary_metrics"]) + 1
+    )
     for name in result["figures"]:
         path = out / name
         assert path.stat().st_size > 1000
