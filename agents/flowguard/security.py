@@ -1,32 +1,24 @@
-"""Read-only Security policy. Learned scores never override criticals or secrets.
+"""Transparent vulnerability-priority score; critical/secret hard rules always win.
 
-The portable logistic model uses exact interventional linear SHAP in log-odds space.
-Training checks these contributions against shap.LinearExplainer; inference needs only
-the standard library. Inputs are decoded reports, never paths or scanner commands.
+The weighted sum is an explicit policy, not a learned model or calibrated probability.
+Only locally cached, checksummed FIRST EPSS data is read during incident handling.
 """
 
 from __future__ import annotations
 
-import json
 import math
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from flowguard.contracts import AgentName, Finding
+from flowguard.epss import load as load_epss
 
-FEATURES = (
-    "high_runtime",
-    "high_dev",
-    "high_unknown",
-    "medium_runtime",
-    "medium_dev",
-    "medium_unknown",
-    "low",
-    "no_fix",
-    "unknown_fix",
-)
-MODEL = Path(__file__).with_name("security_model.json")
+WEIGHTS = {"cvss": 0.50, "epss": 0.30, "runtime": 0.10, "reachable": 0.05, "no_fix": 0.05}
+THRESHOLD = 0.50
+EPSS = Path(__file__).resolve().parents[2] / "state/epss/current.csv"
+
 COUNT_KEYS = ("trivy_high", "trivy_critical", "gitleaks")
 
 
@@ -36,6 +28,8 @@ class Scan:
     counts: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
     quality_failed: bool = False
+    critical_found: bool = False
+    evidence: list[dict] = field(default_factory=list)
 
 
 def normalize(counts=None, reports=None, annotation=None) -> Scan:
@@ -87,13 +81,16 @@ def normalize(counts=None, reports=None, annotation=None) -> Scan:
             if not isinstance(result, dict):
                 scan.errors.append("invalid Trivy result")
                 continue
-            vulns = result.get("Vulnerabilities") or []
+            vulns = result.get("Vulnerabilities")
+            if vulns is None:
+                vulns = []
             if not isinstance(vulns, list):
                 scan.errors.append("invalid vulnerability list")
                 continue
             for vuln in vulns:
                 try:
                     severity = vuln["Severity"].lower()
+                    scan.critical_found |= severity == "critical"
                     # Image artifacts do not establish whether a package is dev-only.
                     # Only an explicit boolean from the evidence adapter may establish it.
                     runtime = vuln.get("RuntimeDependency")
@@ -101,13 +98,31 @@ def normalize(counts=None, reports=None, annotation=None) -> Scan:
                         scan.errors.append("invalid dependency scope")
                         runtime = None
                     fixed = vuln.get("FixedVersion")
+                    if fixed is not None and not isinstance(fixed, str):
+                        raise ValueError("invalid fixed version")
+                    cvss, cvss_source = cvss_base(vuln.get("CVSS"))
+                    reachable = vuln.get("Reachable")
+                    if reachable is None:
+                        reachable = {"reachable": True, "unreachable": False}.get(
+                            vuln.get("Reachability")
+                        )
+                    if reachable is not None and type(reachable) is not bool:
+                        scan.errors.append("invalid reachability evidence")
+                        reachable = None
+                    scan.evidence.append(
+                        {
+                            "cvss": cvss,
+                            "cvss_source": cvss_source,
+                            "reachable": reachable,
+                        }
+                    )
                     scan.findings.append(
                         Finding(
                             tool="trivy",
                             rule_id=str(vuln.get("VulnerabilityID", "unknown")),
                             severity=severity,
                             runtime_dependency=runtime,
-                            fix_available=bool(fixed) if fixed is not None else None,
+                            fix_available=bool(fixed.strip()) if fixed is not None else None,
                         )
                     )
                 except (KeyError, TypeError, ValueError, AttributeError):
@@ -139,6 +154,8 @@ def normalize(counts=None, reports=None, annotation=None) -> Scan:
                         "MINOR": "low",
                         "INFO": "info",
                     }[issue["severity"]]
+                    scan.critical_found |= severity == "critical"
+                    scan.evidence.append({"cvss": None, "cvss_source": None, "reachable": None})
                     scan.findings.append(
                         Finding(tool="sonarcloud", rule_id=str(issue["rule"]), severity=severity)
                     )
@@ -147,69 +164,82 @@ def normalize(counts=None, reports=None, annotation=None) -> Scan:
     return scan
 
 
-def features(findings: list[Finding]) -> list[float]:
-    values = dict.fromkeys(FEATURES, 0.0)
-    for finding in findings:
-        if finding.tool == "gitleaks":
-            continue
-        if finding.severity in ("high", "medium"):
-            scope = {True: "runtime", False: "dev", None: "unknown"}[finding.runtime_dependency]
-            values[f"{finding.severity}_{scope}"] += 1
-        elif finding.severity == "low":
-            values["low"] += 1
-        if finding.fix_available is False:
-            values["no_fix"] += 1
-        elif finding.fix_available is None:
-            values["unknown_fix"] += 1
-    return [min(10.0, values[name]) for name in FEATURES]
+def cvss_base(raw):
+    """Prefer valid v3/v4 scores; otherwise v2. Take the maximum supplied vendor score."""
+    if raw is None:
+        return None, None
+    if not isinstance(raw, dict):
+        raise ValueError("invalid CVSS data")
+    modern, legacy = [], []
+    for vendor, versions in raw.items():
+        if not isinstance(versions, dict):
+            raise ValueError("invalid CVSS vendor entry")
+        for version in ("V4Score", "V3Score", "V2Score"):
+            if version not in versions:
+                continue
+            value = versions[version]
+            if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 10:
+                raise ValueError("invalid CVSS base score")
+            source = (
+                f"{vendor}:{version}" if re.fullmatch(r"[a-zA-Z0-9_-]{1,32}", vendor) else version
+            )
+            (legacy if version == "V2Score" else modern).append((float(value), source))
+    return max(modern or legacy, default=(None, None))
 
 
-def sigmoid(value: float) -> float:
-    return 1 / (1 + math.exp(-max(-700.0, min(700.0, value))))
-
-
-def score(findings: list[Finding], path: Path = MODEL) -> tuple[float, dict]:
-    model = json.loads(path.read_text(encoding="utf-8"))
-    if (
-        model["format"] != 1
-        or model["type"] != "logistic-shap"
-        or model["features"] != list(FEATURES)
-    ):
-        raise ValueError("unsupported security model")
-    weights, background = model["weights"], model["background_mean"]
-    if len(weights) != len(FEATURES) or len(background) != len(FEATURES):
-        raise ValueError("invalid security model dimensions")
-    numbers = [*weights, *background, model["intercept"], model["threshold"]]
-    if not all(type(v) in (int, float) and math.isfinite(v) for v in numbers):
-        raise ValueError("non-finite security model")
-    if not 0 < model["threshold"] < 1:
-        raise ValueError("invalid threshold")
-    x = features(findings)
-    contributions = {
-        name: w * (v - mean)
-        for name, w, v, mean in zip(FEATURES, weights, x, background, strict=True)
-    }
-    base = model["intercept"] + sum(w * mean for w, mean in zip(weights, background, strict=True))
-    if not all(math.isfinite(v) for v in [base, *contributions.values()]):
-        raise ValueError("security model arithmetic overflow")
-    probability = sigmoid(base + sum(contributions.values()))
-    top = sorted(contributions, key=lambda name: abs(contributions[name]), reverse=True)[:3]
-    return probability, {
-        "method": "interventional_linear_shap",
-        "space": "log_odds",
-        "base_value": base,
-        "values": contributions,
-        "top_features": [{"feature": name, "value": contributions[name]} for name in top],
-        "threshold": model["threshold"],
-        "model": model["model"],
+def score(scan: Scan, snapshot):
+    findings = [finding for finding in scan.findings if finding.tool != "gitleaks"]
+    if len(findings) != len(scan.evidence) or not findings:
+        raise ValueError("incomplete vulnerability score evidence")
+    items = []
+    for finding, evidence in zip(findings, scan.evidence, strict=True):
+        cve = finding.rule_id if re.fullmatch(r"CVE-[0-9]{4}-[0-9]{4,}", finding.rule_id) else None
+        cvss, epss = evidence["cvss"], snapshot.scores.get(cve)
+        missing = [name for name, value in (("cvss", cvss), ("epss", epss)) if value is None]
+        values = {
+            "cvss": cvss / 10 if cvss is not None else 1.0,
+            "epss": epss if epss is not None else 1.0,
+            "runtime": 0.0 if finding.runtime_dependency is False else 1.0,
+            "reachable": 0.0 if evidence["reachable"] is False else 1.0,
+            "no_fix": 0.0 if finding.fix_available is True else 1.0,
+        }
+        contributions = {name: WEIGHTS[name] * value for name, value in values.items()}
+        items.append(
+            {
+                "cve": cve or "unmapped finding",
+                "cvss_base": cvss,
+                "cvss_source": evidence["cvss_source"],
+                "epss_probability": epss,
+                "runtime_dependency": finding.runtime_dependency,
+                "reachable": evidence["reachable"],
+                "fix_available": finding.fix_available,
+                "normalized_values": values,
+                "contributions": contributions,
+                "score": sum(contributions.values()),
+                "missing_required": missing,
+            }
+        )
+    worst = max(items, key=lambda item: item["score"])
+    return worst["score"], {
+        "method": "transparent_weighted_sum",
+        "weights": WEIGHTS,
+        "threshold": THRESHOLD,
+        "aggregate": "maximum finding score",
+        "findings": items,
+        "worst_contributions": worst["contributions"],
+        "missing_required": any(item["missing_required"] for item in items),
+        "epss_date": snapshot.date,
+        "epss_csv_sha256": snapshot.sha256,
+        "epss_model_version": snapshot.model_version,
+        "meaning": "policy priority score; not an exploit or safe-deployment probability",
     }
 
 
 class Security:
     name = AgentName.SECURITY
 
-    def __init__(self, model_path: Path = MODEL):
-        self.model_path = model_path
+    def __init__(self, epss_path: Path | None = None):
+        self.epss_path = epss_path or Path(os.environ.get("FLOWGUARD_EPSS_CSV", EPSS))
 
     def run(self, inp, cfg):
         from flowguard.stubs import AgentOutput, proposal
@@ -219,12 +249,13 @@ class Security:
             inp.params.get("scan_reports"),
             inp.params.get("scan_annotation"),
         )
-        critical = scan.counts.get("trivy_critical", 0) or any(
-            f.severity == "critical" for f in scan.findings
+        critical = (
+            scan.critical_found
+            or scan.counts.get("trivy_critical", 0)
+            or any(f.severity == "critical" for f in scan.findings)
         )
         secret = scan.counts.get("gitleaks", 0) or any(f.tool == "gitleaks" for f in scan.findings)
         params = {}
-        scores = {}
         if secret or critical or scan.quality_failed:
             action = "block_deployment"
             reason = "hard rule: " + (
@@ -234,33 +265,32 @@ class Security:
                 if critical
                 else "quality gate failed"
             )
-            scores = {"block": 1.0, "allow": 0.0}
         elif scan.counts.get("trivy_high", 0) > sum(
             f.tool == "trivy" and f.severity == "high" for f in scan.findings
         ):
             action, reason = "block_deployment", "HIGH summary findings lack complete report detail"
-            scores = {"block": 1.0, "allow": 0.0}
         elif scan.errors:
             action, reason = "request_security_review", "; ".join(scan.errors)
         elif not scan.findings:
             action, reason = "allow_deployment", "no findings in the supplied scan evidence"
-            scores = {"allow": 1.0, "block": 0.0}
         else:
             try:
-                probability, explanation = score(scan.findings, self.model_path)
+                priority, explanation = score(scan, load_epss(self.epss_path))
                 action = (
                     "request_security_review"
-                    if probability >= explanation["threshold"]
+                    if priority >= THRESHOLD or explanation["missing_required"]
                     else "allow_with_findings"
                 )
                 top = ", ".join(
-                    f"{v['feature']}={v['value']:+.3f}" for v in explanation["top_features"]
+                    f"{name}={value:.3f}"
+                    for name, value in explanation["worst_contributions"].items()
                 )
-                reason = f"grey-zone score={probability:.3f}; SHAP log-odds: {top}"
-                params = {"security_score": probability, "shap": explanation}
-                scores = {"review": probability, "allow": 1 - probability}
-            except (OSError, ValueError, KeyError, TypeError, OverflowError):
-                action, reason = "request_security_review", "security model unavailable or invalid"
+                reason = f"transparent priority={priority:.3f}; weighted contributions: {top}"
+                if explanation["missing_required"]:
+                    reason += "; missing CVSS or EPSS requires review"
+                params = {"security_score": priority, "score_explanation": explanation}
+            except (OSError, ValueError, KeyError, TypeError, OverflowError, IndexError):
+                action, reason = "request_security_review", "EPSS snapshot unavailable or invalid"
         # Scanner payloads may contain a secret even in a report labelled redacted. Keep only
         # the executor's run identifiers and our numeric explanation in the proposed action.
         p = proposal(self.name, action, inp, reason)
@@ -268,4 +298,4 @@ class Security:
             **{key: inp.params[key] for key in ("run_id", "commit_sha") if key in inp.params},
             **params,
         }
-        return AgentOutput(proposals=[p], label_scores={p.id: scores} if scores else {})
+        return AgentOutput(proposals=[p])

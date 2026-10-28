@@ -29,9 +29,6 @@ dev = [
 where = ["agents"]
 include = ["flowguard*"]
 
-[tool.setuptools.package-data]
-flowguard = ["security_model.json"]
-
 [tool.pytest.ini_options]
 testpaths = ["agents/tests", "evaluation/tests", "ci/tests", "scenarios/tests"]
 pythonpath = ["agents", "evaluation", "ci", "scenarios"]

@@ -6,6 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 from flowguard.orchestrator import level
+from flowguard.security import Security as ScoredSecurity
 from flowguard.stubs import AgentInput, Security
 
 
@@ -21,7 +22,14 @@ def wilson(success, total):
 
 def main():
     cases = json.loads(Path("ci/security/dev-cases.json").read_text(encoding="utf-8"))
-    result = {"source": "three recorded development security cases", "n": len(cases), "levels": {}}
+    epss = Path("ci/security/epss-sample.csv")
+    result = {
+        "source": "three recorded development security cases",
+        "n": len(cases),
+        "levels": {},
+        "policy": "transparent weighted sum; no learned policy or fitted labels",
+        "epss_provenance": json.loads(epss.with_suffix(".json").read_text(encoding="utf-8")),
+    }
     for name in ("L0", "L1"):
         actions, false_blocks, controls = Counter(), 0, 0
         for case in cases:
@@ -30,7 +38,8 @@ def main():
                 scan_counts=case["counts"],
                 params={"scan_reports": case["reports"], "run_id": case["run_id"]},
             )
-            action = Security().run(inp, level(name)).proposals[0].action
+            agent = Security() if name == "L0" else ScoredSecurity(epss)
+            action = agent.run(inp, level(name)).proposals[0].action
             actions[action] += 1
             if not case["bad_release"]:
                 controls += 1

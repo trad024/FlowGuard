@@ -1,38 +1,47 @@
-"""Security hard rules, evidence handling, model explanations and real gate routing."""
+"""Security hard rules, evidence handling, score explanations and real gate routing."""
 
-import json
-import math
+from pathlib import Path
 
 import pytest
 
 from flowguard.catalog import AGENT_ACTIONS
-from flowguard.contracts import ActionProposal, AgentName, Finding
+from flowguard.contracts import ActionProposal, AgentName
 from flowguard.gate import RiskGate
 from flowguard.orchestrator import level
-from flowguard.security import MODEL, Security, features, normalize, score
+from flowguard.security import WEIGHTS, Security, cvss_base, normalize
 from flowguard.stubs import AgentInput
 from flowguard.stubs import Security as ConfiguredSecurity
+
+SAMPLE = Path(__file__).resolve().parents[2] / "ci/security/epss-sample.csv"
 
 
 def reports(severity=None, runtime=None, fixed="1.2.3", leaks=None):
     vulns = []
     if severity:
-        vulns = [{"Severity": severity, "RuntimeDependency": runtime, "FixedVersion": fixed}]
+        vulns = [
+            {
+                "Severity": severity,
+                "RuntimeDependency": runtime,
+                "FixedVersion": fixed,
+                "VulnerabilityID": "CVE-2026-56851",
+                "CVSS": {"redhat": {"V3Score": 7.5 if severity == "HIGH" else 3.3}},
+            }
+        ]
     return {"trivy": {"Results": [{"Vulnerabilities": vulns}]}, "gitleaks": leaks or []}
 
 
-def run(report=None, counts=None, model=MODEL, **params):
+def run(report=None, counts=None, epss=SAMPLE, **params):
     inp = AgentInput(
         incident_id="i-1",
         scan_counts=counts or {},
         params={"scan_reports": report, **params},
     )
-    return Security(model).run(inp, level("L1"))
+    return Security(epss).run(inp, level("L1"))
 
 
 @pytest.mark.parametrize("fixed", [None, "", "2.0"])
 def test_critical_always_blocks_without_model(tmp_path, fixed):
-    p = run(reports("CRITICAL", fixed=fixed), model=tmp_path / "absent").proposals[0]
+    p = run(reports("CRITICAL", fixed=fixed), epss=tmp_path / "absent").proposals[0]
     assert p.action == "block_deployment" and "hard rule" in p.rationale
 
 
@@ -63,19 +72,21 @@ def test_annotation_and_raw_reports():
     scan = normalize(reports=reports("MEDIUM", False, ""))
     assert not scan.errors and scan.findings[0].runtime_dependency is False
     assert scan.findings[0].fix_available is False
-    assert features(scan.findings)[4] == 1
+    assert scan.evidence[0]["cvss"] == 3.3
 
 
 @pytest.mark.parametrize("severity,scope,fixed", [("HIGH", True, "2"), ("LOW", False, "")])
-def test_grey_zone_scores_and_exact_shap_additivity(severity, scope, fixed):
+def test_grey_zone_transparent_additivity(severity, scope, fixed):
     out = run(reports(severity, scope, fixed))
     p = out.proposals[0]
     assert p.action == ("request_security_review" if severity == "HIGH" else "allow_with_findings")
-    explanation = p.params["shap"]
-    logit = explanation["base_value"] + sum(explanation["values"].values())
-    assert math.isclose(1 / (1 + math.exp(-logit)), p.params["security_score"])
-    assert len(explanation["top_features"]) == 3 and "SHAP" in p.rationale
-    assert math.isclose(sum(out.label_scores[p.id].values()), 1)
+    explanation = p.params["score_explanation"]
+    assert explanation["weights"] == WEIGHTS and sum(WEIGHTS.values()) == pytest.approx(1)
+    assert sum(explanation["worst_contributions"].values()) == pytest.approx(
+        p.params["security_score"]
+    )
+    assert explanation["method"] == "transparent_weighted_sum" and "weighted" in p.rationale
+    assert not out.label_scores  # A policy score is not a calibrated label probability.
     assert ActionProposal.model_validate(p.model_dump()) == p
     assert p.action in AGENT_ACTIONS[AgentName.SECURITY]
 
@@ -109,6 +120,7 @@ def test_sonar_critical_and_malformed_scope_do_not_hide_criticals():
     [
         {"trivy": {"Results": [None]}, "gitleaks": []},
         {"trivy": {"Results": [{"Vulnerabilities": "bad"}]}, "gitleaks": []},
+        {"trivy": {"Results": [{"Vulnerabilities": {}}]}, "gitleaks": []},
         {**reports(), "sonarcloud": {"projectStatus": None}},
         {**reports(), "sonarcloud": {"issues": None}},
     ],
@@ -118,18 +130,55 @@ def test_malformed_reports_request_review(report):
 
 
 @pytest.mark.parametrize("content", ["bad", "{}", '{"format": 2}', "null"])
-def test_model_failure_escalates_without_allowing(tmp_path, content):
-    path = tmp_path / "bad.json"
-    path.write_text(content)
+def test_invalid_snapshot_escalates_without_allowing(tmp_path, content):
+    path = tmp_path / "bad.csv"
+    path.with_suffix(".json").write_text(content)
     assert (
-        run(reports("HIGH", False, ""), model=path).proposals[0].action == "request_security_review"
+        run(reports("HIGH", False, ""), epss=path).proposals[0].action == "request_security_review"
     )
 
 
-def test_nonfinite_model_is_rejected(tmp_path):
-    model = json.loads(MODEL.read_text())
-    model["weights"][0] = float("nan")
-    path = tmp_path / "nan.json"
-    path.write_text(json.dumps(model))
+def test_unknown_cvss_or_epss_forces_review_and_scope_is_not_guessed():
+    report = reports("LOW", False, "2")
+    del report["trivy"]["Results"][0]["Vulnerabilities"][0]["CVSS"]
+    p = run(report).proposals[0]
+    assert p.action == "request_security_review"
+    assert p.params["score_explanation"]["missing_required"]
+    report = reports("LOW", None, "2")
+    v = report["trivy"]["Results"][0]["Vulnerabilities"][0]
+    v["VulnerabilityID"] = "CVE-2099-99999"
+    assert run(report).proposals[0].action == "request_security_review"
+    v["VulnerabilityID"] = "CVE-2026-56851"
+    assert normalize(reports=report).findings[0].runtime_dependency is None
+
+
+def test_reachability_and_dependency_scope_are_explicit_contributions():
+    report = reports("HIGH", True, "2")
+    v = report["trivy"]["Results"][0]["Vulnerabilities"][0]
+    v["Reachability"] = "reachable"
+    original = run(report).proposals[0].params["security_score"]
+    v["Reachability"] = "unreachable"
+    v["RuntimeDependency"] = False
+    p = run(report).proposals[0]
+    assert p.params["security_score"] == pytest.approx(original - 0.15)
+    assert p.action == "allow_with_findings"
+    assert RiskGate().decide(p, confidence=1).outcome == "ask_human"
+
+
+def test_cvss_preference_validation_and_hard_rules_with_bad_context():
+    assert cvss_base({"nvd": {"V2Score": 10}, "redhat": {"V3Score": 7.5}}) == (
+        7.5,
+        "redhat:V3Score",
+    )
     with pytest.raises(ValueError):
-        score([Finding(tool="trivy", rule_id="v", severity="high")], path)
+        cvss_base({"nvd": {"V3Score": float("nan")}})
+    report = reports("CRITICAL")
+    report["trivy"]["Results"][0]["Vulnerabilities"][0]["CVSS"] = "broken"
+    assert run(report).proposals[0].action == "block_deployment"
+
+
+def test_checksum_corruption_escalates(tmp_path):
+    path = tmp_path / "corrupt.csv"
+    path.write_bytes(SAMPLE.read_bytes() + b"\n")
+    path.with_suffix(".json").write_text(SAMPLE.with_suffix(".json").read_text())
+    assert run(reports("LOW", False), epss=path).proposals[0].action == "request_security_review"

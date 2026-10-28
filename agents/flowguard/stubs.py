@@ -87,9 +87,9 @@ class Security:
 
     def run(self, inp: AgentInput, cfg) -> AgentOutput:
         if cfg.ml:
-            from flowguard.security import Security as LearnedSecurity
+            from flowguard.security import Security as ScoredSecurity
 
-            return LearnedSecurity().run(inp, cfg)
+            return ScoredSecurity().run(inp, cfg)
         c = inp.scan_counts
         bad = c.get("trivy_high", 0) + c.get("trivy_critical", 0) + c.get("gitleaks", 0)
         action = "block_deployment" if bad else "allow_deployment"
