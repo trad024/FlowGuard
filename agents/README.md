@@ -10,7 +10,10 @@ fails if it does (D25).
 | `contracts.py` | The objects every component exchanges (events, incidents, proposals, gate decisions, evidence posts, agent requests) |
 | `catalog.py` | The static action catalog: tiers, reversibility, hourly limits, which agent may propose what |
 | `orchestrator.py` | One LangGraph graph for workflows A to D; the ablation level (L0 to L5) is a configuration flag |
-| `stubs.py` | Stub agents with the real interfaces (Steps 6 to 10 replace the logic) |
+| `agent_io.py` | What every agent receives and returns (`AgentInput`, `AgentOutput`) |
+| `monitor.py` | Monitor (Step 6, DSO1): L0 alert rules; L1+ rolling z-score then Isolation Forest (runtime), duration and failure-streak detector (CI); P1 stress answers; proposes no action |
+| `series.py` | Prometheus series to the Monitor's per-namespace and per-pod features, live and in replay; evidence references |
+| `stubs.py` | Stub agents with the real interfaces (Steps 7 to 10 replace the logic); re-exports the real Monitor |
 | `incidents.py` | Shared incident record (D5): incidents, evidence posts, agent requests |
 | `gate.py` | Risk gate: rules 0 to 7, first match wins (D36 and v1), P3 conflicts, v1 risk score |
 | `calibration.py` | Split conformal confidence for the gate (D9) |

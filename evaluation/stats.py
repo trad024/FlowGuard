@@ -4,12 +4,15 @@ wilson(k, n)          95% Wilson score interval for a proportion
 poisson_exact(k)      95% exact (Garwood) interval for a Poisson count
 mcnemar_n(p0, p1)     paired sample size for McNemar's test (Connor 1987), assuming the two
                       levels' outcomes are independent given the item (a conservative choice)
+mcnemar_exact(b, c)   two-sided exact McNemar p-value from the discordant pair counts
+bootstrap_median(d)   95% percentile bootstrap interval for the median of paired differences
 """
 
 from __future__ import annotations
 
 import math
-from statistics import NormalDist
+import random
+from statistics import NormalDist, median
 
 Z = NormalDist()
 
@@ -59,3 +62,23 @@ def mcnemar_n(p0: float, p1: float, alpha: float = 0.05, power: float = 0.8) -> 
     za, zb = Z.inv_cdf(1 - alpha / 2), Z.inv_cdf(power)
     n = (za * math.sqrt(psi) + zb * math.sqrt(psi - delta * delta)) ** 2 / (delta * delta)
     return math.ceil(n)
+
+
+def mcnemar_exact(b: int, c: int) -> float:
+    """b, c: items right only at one level, only at the other. Binomial(b + c, 1/2), two-sided."""
+    n = b + c
+    if n == 0:
+        return 1.0
+    tail = sum(math.comb(n, i) for i in range(min(b, c) + 1)) / 2**n
+    return min(1.0, 2 * tail)
+
+
+def bootstrap_median(
+    diffs: list[float], resamples: int = 10000, seed: int = 20261028, level: float = 0.95
+) -> tuple[float, float] | None:
+    if not diffs:
+        return None
+    rng = random.Random(seed)
+    meds = sorted(median(rng.choices(diffs, k=len(diffs))) for _ in range(resamples))
+    a = (1 - level) / 2
+    return (meds[int(a * resamples)], meds[min(resamples - 1, int((1 - a) * resamples))])

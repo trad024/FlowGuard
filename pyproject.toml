@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.7,<3",
     "langgraph==1.2.15",
     "drain3==0.9.11",
+    "numpy>=2,<3",
     "scikit-learn==1.7.2",
 ]
 

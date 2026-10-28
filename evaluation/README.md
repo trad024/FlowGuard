@@ -48,6 +48,26 @@ deployment outcomes and time to promotion per environment, security decisions (o
 distinct commit and decision), executions while the gate required a human without an approval,
 whatever the tier (DSO6, must stay 0), executions after a reject, approvals per incident.
 
+## DSO1 by replay (D15, step 6)
+
+`monitor_replay.py` runs the Monitor on dev recordings (a folder, or the zip they arrive in;
+held-out paths are refused) at L0 (the frozen alert rules as Prometheus evaluated them, read
+exactly as `l0_baseline.py` reads them) and L1 (L0 plus the runtime detector):
+
+```powershell
+py evaluation\monitor_replay.py fit evaluation\recordings     # writes agents\flowguard\models\monitor.json
+py evaluation\monitor_replay.py score evaluation\recordings   # writes runs\dso1-replay.json
+```
+
+`fit` uses the first half of each normal-traffic recording for the reference profile and the
+Isolation Forest, then tunes a small grid (z threshold, forest quantile, persistence) for L1
+recall on the dev runtime incidents with the detector's own false alerts on that half under 0.5
+per hour; CI bounds come from the successful jobs of non-pipeline runs. `score` gives recall
+(Wilson), median MTTD and false alerts per hour (exact Poisson) per level and per band, scored
+on the normal-traffic half the model never saw, plus the paired L0 vs L1 comparison (exact
+McNemar, bootstrap interval of the MTTD gain). Dev recall is in-sample (the grid was tuned on
+those incidents); H1 is tested on the held-out set at Step 11.
+
 ## External datasets (D14, step 4a)
 
 ```powershell
