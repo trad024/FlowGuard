@@ -129,8 +129,9 @@ demonstrations are never marked confirmatory, regardless of that status.
 
 ## Outputs and verification
 
-Outputs: `results.json`, `ablation.csv` (6 levels × 5 primary metrics), `per-band.csv`,
-`autonomy-safety.csv`, `llm-variance.csv`, and a README describing interpretation. Figures
+Outputs: `results.json`, `ablation.csv` (six levels by the version-specific primary metrics), `per-band.csv`,
+`autonomy-safety.csv`, `llm-variance.csv`, `diagnosis-methods.csv`, and a README describing
+interpretation. Figures
 are `ablation`, `autonomy-vs-safety`, `per-band`, and `llm-variance`, each as PNG and SVG.
 Results include five-method macro-F1 intervals, primary paired tests and Holm adjustment,
 descriptive time comparisons, secondary metrics, input/pre-registration checksums and
@@ -143,7 +144,7 @@ CSV/JSON/PNG/SVG generation. No real held-out database, seed or scenario was ope
 
 ## Pre-registration 0.3 and the H4 amendment handoff
 
-The branch is updated onto `dev` commit `be5e4b2`, including D39?D44, without editing any
+The branch is updated onto `dev` commit `be5e4b2`, including D39-D44, without editing any
 frozen file. The current pre-registration remains draft with no H4 amendment. H2 is shown
 in the five-method descriptive table, including n, macro-F1 bootstrap intervals and accuracy
 Wilson intervals. All three named secondary method contrasts are included; encoder/TF-IDF
