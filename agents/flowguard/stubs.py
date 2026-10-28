@@ -4,8 +4,8 @@ Each agent gets an AgentInput (only what a real system would show it: logs, metr
 counts, changed files, evidence from the incident record) and returns proposals, label scores
 for calibration (D9) and evidence posts. Steps 6 to 10 replace the logic, not the interface.
 
-- Monitor: an incident when an L0 alert fired or (L1+) a z-score above 3; answers P1 requests
-  with node-stress evidence.
+- Monitor: the real agent since Step 6 (`flowguard.monitor`), re-exported here so the
+  orchestrator's Monitor slot uses it.
 - Diagnose: L0 the frozen regex classifier and playbook (D3); L2+ an injected LLM; with
   grounding (L3+) quoted lines that are not in the log are dropped (D8).
 - Release: abort a worse canary; with collaboration (L4+) it first asks Monitor and Diagnose
@@ -20,35 +20,16 @@ from __future__ import annotations
 import json
 import secrets
 from collections.abc import Callable
-from dataclasses import dataclass, field
 
 from flowguard import baselines
+from flowguard.agent_io import AgentInput, AgentOutput
 from flowguard.contracts import ActionProposal, AgentName, EvidencePost
+from flowguard.monitor import Monitor
+
+__all__ = ["AgentInput", "AgentOutput", "Diagnose", "Monitor", "Optimizer", "Release", "Security"]
 
 CLASSES = ("code", "dependency", "environment", "flaky_test", "infrastructure")
 FORCED_JOBS = ("sbom", "scans")  # P2: never skipped after a dependency change or a flag
-
-
-@dataclass
-class AgentInput:
-    incident_id: str
-    environment: str = "staging"
-    target: str = "podinfo"
-    log: str = ""
-    metrics: dict = field(default_factory=dict)  # name -> value, as Prometheus shows them
-    alerts: list[str] = field(default_factory=list)
-    scan_counts: dict = field(default_factory=dict)
-    changed_files: list[str] = field(default_factory=list)
-    params: dict = field(default_factory=dict)  # run_id, job_id, ...
-    evidence: list[EvidencePost] = field(default_factory=list)
-
-
-@dataclass
-class AgentOutput:
-    proposals: list[ActionProposal] = field(default_factory=list)
-    label_scores: dict[str, dict[str, float]] = field(default_factory=dict)  # proposal id -> scores
-    evidence: list[EvidencePost] = field(default_factory=list)
-    incident: bool = False
 
 
 def proposal(agent: AgentName, action: str, inp: AgentInput, rationale: str, **params):
@@ -63,22 +44,6 @@ def proposal(agent: AgentName, action: str, inp: AgentInput, rationale: str, **p
         confidence=0.0,  # never used by the gate (D9)
         rationale=rationale[:500],
     )
-
-
-class Monitor:
-    name = AgentName.MONITOR
-
-    def run(self, inp: AgentInput, cfg) -> AgentOutput:
-        z = max((abs(v) for k, v in inp.metrics.items() if k.endswith("_z")), default=0.0)
-        incident = bool(inp.alerts) or (cfg.ml and z > 3.0)
-        return AgentOutput(incident=incident)
-
-    def answer(self, inp: AgentInput) -> EvidencePost:
-        cpu = float(inp.metrics.get("node_cpu_ratio", 0.0))
-        claim = "node under CPU stress" if cpu > 0.85 else "node resources normal"
-        return EvidencePost(
-            incident_id=inp.incident_id, agent=self.name, claim=claim, refs=["node_cpu_ratio"]
-        )
 
 
 class Diagnose:
