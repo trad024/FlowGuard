@@ -1,6 +1,7 @@
 """LogChunks evidence targets (D32, D43): where each human-labelled chunk sits in its log.
 
     python evaluation/logchunks.py locate     # all 797 logs -> datasets/logchunks-located.csv
+    python evaluation/logchunks.py sample     # the H3 sample -> datasets/logchunks-h3-sample.csv
 
 A log's target is the block of its lines that holds the labelled chunk. Lines are compared after
 removing ANSI codes and carriage-return overwrites (only the text after the last \\r is what a
@@ -10,7 +11,13 @@ Status per log:
   partly         some chunk lines matched, not the whole block
   not_located    no chunk line matched
 Only `located` logs are used for H3 (D43); the others are excluded and counted in the report.
-This prepares the targets only: nothing is run on LogChunks before Step 11.
+
+The H3 sample (D47, D48): the located logs in a seeded order (SHA-256 of the seed and the log
+path). Each log goes through the corpus' drain3 reduction (flowguard.logreduce, identical at L2
+and L3); it is visible when at least one of its target lines survives the reduction, else it is
+counted as not visible and excluded. The first SAMPLE visible logs in that order are the sample;
+an excluded log is replaced by the next one in the same order, and the rest are never used.
+This prepares targets and inputs only: nothing is sent to a model on LogChunks before Step 11.
 
 Committed: identifiers, status, target line numbers and each log's SHA-256; no log text.
 """
@@ -27,8 +34,15 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "agents"))
+
+from flowguard import diagnose, logreduce  # noqa: E402
+
 RAW = ROOT / "evaluation" / "datasets" / "raw" / "LogChunks"
 OUT = ROOT / "evaluation" / "datasets" / "logchunks-located.csv"
+SAMPLE_OUT = ROOT / "evaluation" / "datasets" / "logchunks-h3-sample.csv"
+SAMPLE_SEED = "logchunks-h3-20261028"
+SAMPLE = 230  # H3 at +15 points, Holm alpha/3 (D43, D47)
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 
@@ -94,11 +108,70 @@ def run(raw: Path = RAW, out: Path = OUT) -> dict:
     return summary
 
 
+def order(paths: list[str], seed: str = SAMPLE_SEED) -> list[str]:
+    return sorted(paths, key=lambda p: hashlib.sha256(f"{seed}:{p}".encode()).hexdigest())
+
+
+def visible(log: str, target: list[int]) -> tuple[list[int], int]:
+    """(target lines the model sees, characters of the L2 request) for one log."""
+    seen = {n for n, _ in logreduce.reduce(log)}
+    chars = sum(len(m["content"]) for m in diagnose.messages(log))
+    return [n for n in target if n in seen], chars
+
+
+def sample(
+    raw: Path = RAW, located: Path = OUT, out: Path = SAMPLE_OUT, size: int = SAMPLE
+) -> dict:
+    with located.open(encoding="utf-8") as f:
+        rows = {r["log_path"]: r for r in csv.DictReader(f) if r["status"] == "located"}
+    picked, written, excluded = 0, [], 0
+    for rank, path in enumerate(order(sorted(rows)), start=1):
+        r = rows[path]
+        data = (raw / "logs" / path).read_bytes()
+        if hashlib.sha256(data).hexdigest() != r["sha256"]:
+            raise SystemExit(f"{path}: log changed since it was located")
+        target = [int(x) for x in r["target_lines"].split()]
+        seen, chars = visible(data.decode("utf-8", errors="replace"), target)
+        status = "used" if seen else "not_visible"
+        picked += bool(seen)
+        excluded += not seen
+        written.append(
+            {
+                "rank": rank,
+                "log_path": path,
+                "status": status,
+                "target_lines": r["target_lines"],
+                "visible_target_lines": " ".join(map(str, seen)),
+                "l2_request_chars": chars,
+                "sha256": r["sha256"],
+            }
+        )
+        if picked == size:
+            break
+    with out.open("w", encoding="utf-8", newline="\n") as f:
+        w = csv.DictWriter(f, fieldnames=list(written[0]), lineterminator="\n")
+        w.writeheader()
+        w.writerows(written)
+    full = sum(
+        r["status"] == "used" and r["visible_target_lines"] == r["target_lines"] for r in written
+    )
+    summary = {
+        "located": len(rows),
+        "examined": len(written),
+        "used": picked,
+        "not_visible": excluded,
+        "fully_visible": full,
+        "never_used": len(rows) - len(written),
+    }
+    print(json.dumps(summary))
+    return summary
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("cmd", choices=["locate"])
-    parser.parse_args(argv)
-    run()
+    parser.add_argument("cmd", choices=["locate", "sample"])
+    args = parser.parse_args(argv)
+    run() if args.cmd == "locate" else sample()
     return 0
 
 

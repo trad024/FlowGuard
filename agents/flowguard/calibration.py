@@ -11,12 +11,19 @@ is 0: an out-of-distribution input goes to a human.
 
 The gate never reads the confidence an agent or an LLM reports about itself. Without enough
 calibration examples the confidence is 0, so a medium-tier action always goes to a human.
+
+Diagnose (D45) is calibrated leave-one-template-out on the training and validation templates:
+every example's scores come from a model that never saw its template, and `coverage_by_group`
+reports, for each template held apart, how often the true label stays in the conformal
+prediction set of a calibrator fitted on the other templates only.
 """
 
 from __future__ import annotations
 
+import json
 from bisect import bisect_left
 from dataclasses import dataclass, field
+from pathlib import Path
 
 MIN_CALIBRATION = 20
 MIN_CREDIBILITY = 0.05
@@ -43,6 +50,20 @@ class ConformalCalibrator:
         at_least = n - bisect_left(self.alphas, alpha)
         return (at_least + 1) / (n + 1)
 
+    def prediction_set(self, scores: dict[str, float], epsilon: float = 0.1) -> set[str]:
+        """Labels whose p-value exceeds epsilon: holds the true label with probability about
+        1 - epsilon when the example is exchangeable with the calibration data."""
+        return {label for label, p in self.p_values(scores).items() if p > epsilon}
+
+    def save(self, path: Path, **meta) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**meta, "alphas": self.alphas}, indent=1), encoding="utf-8")
+        return path
+
+    @classmethod
+    def load(cls, path: Path) -> ConformalCalibrator:
+        return cls(alphas=sorted(json.loads(path.read_text(encoding="utf-8"))["alphas"]))
+
     def p_values(self, scores: dict[str, float]) -> dict[str, float]:
         return {label: self.p_value(s) for label, s in scores.items()}
 
@@ -58,3 +79,22 @@ class ConformalCalibrator:
             return predicted, 0.0
         second = ps[1] if len(ps) > 1 else 0.0
         return predicted, round(1.0 - second, 4)
+
+
+def coverage_by_group(
+    scores: list[dict[str, float]], labels: list[str], groups: list[str], epsilon: float = 0.1
+) -> dict[str, dict]:
+    """For each group held apart: a calibrator fitted on the other groups' examples, the share
+    of the group's examples whose true label is in their prediction set, and the mean set size."""
+    out = {}
+    for g in sorted(set(groups)):
+        rest = [i for i, x in enumerate(groups) if x != g]
+        cal = ConformalCalibrator().fit([scores[i] for i in rest], [labels[i] for i in rest])
+        mine = [i for i, x in enumerate(groups) if x == g]
+        sets = [cal.prediction_set(scores[i], epsilon) for i in mine]
+        out[g] = {
+            "n": len(mine),
+            "covered": sum(labels[i] in s for i, s in zip(mine, sets, strict=True)),
+            "mean_set_size": sum(len(s) for s in sets) / len(sets),
+        }
+    return out

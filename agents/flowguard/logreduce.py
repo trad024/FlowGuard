@@ -1,7 +1,9 @@
 """CI log reduction for Diagnose (Step 7): what the model sees, with original line numbers.
 
 1. Cut at "Post job cleanup" (GitHub Actions' teardown, after the failure).
-2. Strip ANSI colour codes; cut each line to 300 characters.
+2. Split on newlines only and keep what a terminal shows, the text after a line's last
+   carriage return (progress bars overwrite themselves); strip ANSI codes; cut each line
+   to 300 characters. Line numbers thus match the LogChunks targets (D48).
 3. drain3 groups lines into templates (variable parts masked); only the first 2 lines of each
    template are kept, so repeated progress or download lines collapse.
 4. If more than 200 lines remain, the last 200 are kept: failures are at the end.
@@ -21,7 +23,7 @@ from drain3 import TemplateMiner
 from drain3.template_miner_config import TemplateMinerConfig
 
 STOP = "Post job cleanup"
-ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 MAX_LINE = 300
 PER_TEMPLATE = 2
 MAX_LINES = 200
@@ -29,9 +31,12 @@ MAX_CHARS = 14_000
 
 
 def original_lines(log: str) -> list[str]:
-    """The log as the model's line numbers refer to it: cut at STOP, ANSI codes removed."""
+    """The log as the model's line numbers refer to it: cut at STOP, terminal view, no ANSI."""
     lines = []
-    for line in log.splitlines():
+    for line in log.split("\n"):
+        line = line.rstrip("\r")
+        if "\r" in line:
+            line = line.rsplit("\r", 1)[1]
         if STOP in line:
             break
         lines.append(ANSI.sub("", line).rstrip())

@@ -14,7 +14,7 @@ import pytest
 
 from flowguard.approval import ApprovalPage, SimulatedApprover
 from flowguard.audit import AuditLog
-from flowguard.calibration import ConformalCalibrator
+from flowguard.calibration import ConformalCalibrator, coverage_by_group
 from flowguard.contracts import ActionProposal, AgentRequest, EvidencePost, GateDecision, Incident
 from flowguard.executor import Executor, Refused
 from flowguard.incidents import IncidentRecord
@@ -266,3 +266,33 @@ def test_no_answer_within_the_timeout_is_a_denial():
             Executor().execute(proposal(), d)
     finally:
         page.close()
+
+
+def test_prediction_sets_cover_and_the_calibrator_round_trips(tmp_path):
+    cal = calibrated()
+    assert cal.prediction_set({"a": 0.98, "b": 0.01, "c": 0.01}) == {"a"}
+    assert {"a", "b"} <= cal.prediction_set({"a": 0.96, "b": 0.95, "c": 0.01})
+    again = ConformalCalibrator.load(cal.save(tmp_path / "cal.json", level="L1"))
+    assert again.alphas == cal.alphas
+
+
+def test_coverage_is_measured_on_each_group_held_apart():
+    rng = random.Random(3)
+    scores, labels, groups = [], [], []
+    for g in range(10):
+        for _ in range(8):
+            y = rng.choice(CLASSES)
+            top = rng.uniform(0.5, 1.0)
+            scores.append({c: (top if c == y else (1 - top) / 2) for c in CLASSES})
+            labels.append(y)
+            groups.append(f"t{g}")
+    folds = coverage_by_group(scores, labels, groups, epsilon=0.1)
+    assert set(folds) == {f"t{g}" for g in range(10)} and all(f["n"] == 8 for f in folds.values())
+    assert sum(f["covered"] for f in folds.values()) >= 70  # about 90% of 80
+    # a group the others cannot vouch for: its true label scores low, so coverage drops
+    folds = coverage_by_group(
+        [*scores, *[{"a": 0.1, "b": 0.9, "c": 0.0}] * 8],
+        [*labels, *["a"] * 8],
+        [*groups, *["odd"] * 8],
+    )
+    assert folds["odd"]["covered"] == 0

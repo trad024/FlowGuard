@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: draft
-version: 0.3
+version: 0.4
 drafted: 2026-10-27
 frozen: null
 amendments: []
@@ -286,9 +286,254 @@ external:                        # D32: no manual labelling
     use: evidence localization only (no root-cause labels)
     logs: >-
       all 797 labelled failed logs, located by evaluation/logchunks.py into
-      evaluation/datasets/logchunks-located.csv (D43): 514 located in full are used;
-      202 partly located and 81 not located are excluded and reported. The 150-log sample
-      is superseded (its earlier 130 usable counted partly located logs too)
+      evaluation/datasets/logchunks-located.csv (D43): 514 located in full; 202 partly
+      located and 81 not located are excluded and reported. The 150-log sample is
+      superseded (its earlier 130 usable counted partly located logs too)
+    sample:                     # D47, D48
+      size: 230                 # H3 at +15 points, Holm alpha/3 (D43)
+      seed: logchunks-h3-20261028
+      order: >-
+        the 514 located logs sorted by SHA-256 of '<seed>:<log path>'; the first 230 visible
+        logs in that order are used; the rest are never used
+      visibility: >-
+        each log goes through the corpus' drain3 reduction (flowguard.logreduce, the same
+        input at L2 and L3); a log is visible when at least one of its target lines
+        survives. A log that is not visible is excluded, counted and reported, and replaced
+        by the next log in the same order
+      result: 256 examined, 230 used, 26 not visible, 258 never used
+      file: evaluation/datasets/logchunks-h3-sample.csv
+      sha256: 2765cd0ad8219f3a89f5ad7017fbf0e4cba78eaca96410840d033b60b258ddf0
+      logs:
+      - "Rust/redox-os@redox/failed/360624245.log"
+      - "C++/electron@electron/failed/303195467.log"
+      - "Java/ReactiveX@RxJava/failed/565366738.log"
+      - "Java/square@retrofit/failed/403602199.log"
+      - "Clojure/LightTable@LightTable/failed/557192591.log"
+      - "C++/electron@electron/failed/303140404.log"
+      - "Elixir/h4cc@awesome-elixir/failed/566095816.log"
+      - "Ruby/jekyll@jekyll/failed/566659348.log"
+      - "Lisp/emacs-tw@awesome-emacs/failed/537024011.log"
+      - "C#/powershell@PowerShell/failed/536509309.log"
+      - "Swift/vsouza@awesome-ios/failed/557890661.log"
+      - "CSS/google@material-design-icons/failed/99516227.log"
+      - "TeX/cplusplus@draft/failed/566217161.log"
+      - "Python/vinta@awesome-python/failed/126281496.log"
+      - "CoffeeScript/Atom@atom/failed/544815664.log"
+      - "Haskell/purescript@purescript/failed/549463948.log"
+      - "Swift/SwiftyJSON@SwiftyJSON/failed/364917910.log"
+      - "TeX/soulmachine@leetcode/failed/224191617.log"
+      - "Go/avelino@awesome-go/failed/556378971.log"
+      - "VimL/junegunn@vim-plug/failed/413520039.log"
+      - "Ruby/jekyll@jekyll/failed/565960060.log"
+      - "Scala/twitter@finagle/failed/566723155.log"
+      - "VimL/junegunn@vim-plug/failed/567393250.log"
+      - "TeX/adambard@learnxinyminutes-docs/failed/559637917.log"
+      - "TypeScript/angular@angular/failed/476567056.log"
+      - "Haskell/purescript@purescript/failed/549447715.log"
+      - "Erlang/rabbitmq@rabbitmq-server/failed/572773115.log"
+      - "Rust/BurntSushi@ripgrep/failed/524443210.log"
+      - "Perl/sjdy521@Mojo-Webqq/failed/367594701.log"
+      - "Shell/tldr-pages@tldr/failed/564870496.log"
+      - "Rust/redox-os@redox/failed/387092985.log"
+      - "TypeScript/Microsoft@TypeScript/failed/566234931.log"
+      - "Lua/cmusatyalab@openface/failed/204083712.log"
+      - "CoffeeScript/Atom@atom/failed/544967184.log"
+      - "Ruby/jekyll@jekyll/failed/558598688.log"
+      - "Perl/jlord@git-it-electron/failed/295480897.log"
+      - "TeX/adambard@learnxinyminutes-docs/failed/559475600.log"
+      - "Erlang/erlang@otp/failed/546984181.log"
+      - "HTML/google@web-starter-kit/failed/398798677.log"
+      - "Lua/martanne@vis/failed/346425105.log"
+      - "Perl/sjdy521@Mojo-Webqq/failed/368688524.log"
+      - "TeX/cplusplus@draft/failed/566236411.log"
+      - "C++/electron@electron/failed/303172126.log"
+      - "R/twitter@AnomalyDetection/failed/56908634.log"
+      - "PHP/bcit-ci@CodeIgniter/failed/496530269.log"
+      - "C/git@git/failed/565709337.log"
+      - "Lua/cmusatyalab@openface/failed/199292219.log"
+      - "CSS/twbs@bootstrap/failed/566876747.log"
+      - "Objective-C/Realm@realm-cocoa/failed/552057535.log"
+      - "Erlang/erlang@otp/failed/554692041.log"
+      - "Clojure/LightTable@LightTable/failed/557182511.log"
+      - "Perl/jlord@git-it-electron/failed/189033034.log"
+      - "JavaScript/airbnb@javascript/failed/556129904.log"
+      - "Go/getlantern@lantern/failed/547502360.log"
+      - "Clojure/LightTable@LightTable/failed/557196013.log"
+      - "C/php@php-src/failed/530444639.log"
+      - "Python/vinta@awesome-python/failed/125301582.log"
+      - "TypeScript/Microsoft@TypeScript/failed/566574811.log"
+      - "Rust/BurntSushi@ripgrep/failed/524433448.log"
+      - "Go/ethereum@go-ethereum/failed/566824752.log"
+      - "Rust/BurntSushi@ripgrep/failed/524430085.log"
+      - "Elixir/h4cc@awesome-elixir/failed/569345345.log"
+      - "Perl/sjdy521@Mojo-Webqq/failed/367594706.log"
+      - "Clojure/LightTable@LightTable/failed/557196001.log"
+      - "Erlang/erlang@otp/failed/546987224.log"
+      - "Elixir/h4cc@awesome-elixir/failed/557164268.log"
+      - "HTML/google@web-starter-kit/failed/537108381.log"
+      - "PowerShell/pester@Pester/failed/555419018.log"
+      - "TeX/soulmachine@leetcode/failed/250792311.log"
+      - "Haskell/koalaman@shellcheck/failed/553130518.log"
+      - "TeX/soulmachine@leetcode/failed/224191504.log"
+      - "Python/vinta@awesome-python/failed/125721156.log"
+      - "C++/electron@electron/failed/303191669.log"
+      - "VimL/junegunn@vim-plug/failed/427130117.log"
+      - "JavaScript/airbnb@javascript/failed/543923279.log"
+      - "C#/powershell@PowerShell/failed/535987243.log"
+      - "JavaScript/airbnb@javascript/failed/563272067.log"
+      - "Perl/sjdy521@Mojo-Webqq/failed/347585795.log"
+      - "Lisp/emacs-tw@awesome-emacs/failed/536981552.log"
+      - "Perl/jlord@git-it-electron/failed/506436018.log"
+      - "Java/ReactiveX@RxJava/failed/561016934.log"
+      - "Haskell/jgm@pandoc/failed/479984913.log"
+      - "C#/powershell@PowerShell/failed/536510132.log"
+      - "Clojure/LightTable@LightTable/failed/557187552.log"
+      - "Perl/jlord@git-it-electron/failed/189034096.log"
+      - "PHP/bcit-ci@CodeIgniter/failed/532942148.log"
+      - "C#/powershell@PowerShell/failed/536510159.log"
+      - "JavaScript/airbnb@javascript/failed/556125301.log"
+      - "CSS/jgthms@bulma/failed/534211385.log"
+      - "C++/electron@electron/failed/303192562.log"
+      - "Ruby/jekyll@jekyll/failed/558544016.log"
+      - "CSS/google@material-design-icons/failed/92807014.log"
+      - "C++/electron@electron/failed/303174572.log"
+      - "C/git@git/failed/564416725.log"
+      - "Shell/tldr-pages@tldr/failed/564866008.log"
+      - "C/git@git/failed/564815538.log"
+      - "CoffeeScript/Atom@atom/failed/544911466.log"
+      - "TeX/adambard@learnxinyminutes-docs/failed/559469687.log"
+      - "C/vim@vim/failed/555392625.log"
+      - "Objective-C/Realm@realm-cocoa/failed/552207105.log"
+      - "JavaScript/airbnb@javascript/failed/562099876.log"
+      - "Python/scikit-learn@scikit-learn/failed/562416451.log"
+      - "Swift/vsouza@awesome-ios/failed/561711374.log"
+      - "Ruby/jekyll@jekyll/failed/557871100.log"
+      - "PHP/composer@composer/failed/565348117.log"
+      - "R/twitter@AnomalyDetection/failed/57198542.log"
+      - "Clojure/technomancy@leiningen/failed/239339113.log"
+      - "Scala/twitter@finagle/failed/566247562.log"
+      - "Perl/jlord@git-it-electron/failed/189032546.log"
+      - "PHP/bcit-ci@CodeIgniter/failed/507195141.log"
+      - "Perl/sjdy521@Mojo-Webqq/failed/345524470.log"
+      - "Lua/martanne@vis/failed/346413726.log"
+      - "Ruby/jekyll@jekyll/failed/567204630.log"
+      - "TypeScript/angular@angular/failed/502325280.log"
+      - "Ruby/discourse@discourse/failed/565999589.log"
+      - "Perl/sjdy521@Mojo-Webqq/failed/373752512.log"
+      - "Rust/BurntSushi@ripgrep/failed/524445021.log"
+      - "PowerShell/pester@Pester/failed/555401307.log"
+      - "Perl/jlord@git-it-electron/failed/189034833.log"
+      - "R/rstudio@shiny/failed/575541227.log"
+      - "CSS/twbs@bootstrap/failed/565973566.log"
+      - "C/vim@vim/failed/557785733.log"
+      - "Elixir/elixir-lang@elixir/failed/572202566.log"
+      - "CSS/google@material-design-icons/failed/92806560.log"
+      - "Swift/vsouza@awesome-ios/failed/566908885.log"
+      - "Perl/jlord@git-it-electron/failed/376184199.log"
+      - "C/vim@vim/failed/555423918.log"
+      - "C/git@git/failed/566150972.log"
+      - "Go/avelino@awesome-go/failed/552235410.log"
+      - "Rust/redox-os@redox/failed/357884038.log"
+      - "C++/bitcoin@bitcoin/failed/567143552.log"
+      - "VimL/mhinz@vim-galore/failed/374779422.log"
+      - "Haskell/koalaman@shellcheck/failed/563381753.log"
+      - "Clojure/LightTable@LightTable/failed/557192585.log"
+      - "Python/scikit-learn@scikit-learn/failed/562395304.log"
+      - "PHP/bcit-ci@CodeIgniter/failed/514356719.log"
+      - "VimL/mhinz@vim-galore/failed/443978045.log"
+      - "TeX/soulmachine@leetcode/failed/224192148.log"
+      - "Ruby/discourse@discourse/failed/565586706.log"
+      - "CSS/jgthms@bulma/failed/534204380.log"
+      - "Swift/vsouza@awesome-ios/failed/558884711.log"
+      - "Rust/jwilm@alacritty/failed/567130646.log"
+      - "Python/vinta@awesome-python/failed/125934220.log"
+      - "TeX/cplusplus@draft/failed/568376150.log"
+      - "CSS/jgthms@bulma/failed/438531930.log"
+      - "C++/bitcoin@bitcoin/failed/567119401.log"
+      - "TeX/cplusplus@draft/failed/568239097.log"
+      - "R/rstudio@shiny/failed/575521370.log"
+      - "Rust/redox-os@redox/failed/387097804.log"
+      - "HTML/google@web-starter-kit/failed/348293982.log"
+      - "JavaScript/FreeCodeCamp@freecodecamp/failed/566340191.log"
+      - "Objective-C/Realm@realm-cocoa/failed/552059876.log"
+      - "Objective-C/Realm@realm-cocoa/failed/545920250.log"
+      - "Ruby/discourse@discourse/failed/566815121.log"
+      - "Erlang/rabbitmq@rabbitmq-server/failed/571753140.log"
+      - "R/twitter@AnomalyDetection/failed/45994776.log"
+      - "CSS/jgthms@bulma/failed/437082455.log"
+      - "Java/ReactiveX@RxJava/failed/565371172.log"
+      - "JavaScript/airbnb@javascript/failed/563282619.log"
+      - "Go/avelino@awesome-go/failed/566530398.log"
+      - "VimL/junegunn@vim-plug/failed/427130135.log"
+      - "C/vim@vim/failed/557328684.log"
+      - "C/vim@vim/failed/557005417.log"
+      - "TeX/adambard@learnxinyminutes-docs/failed/559642811.log"
+      - "R/twitter@AnomalyDetection/failed/46403875.log"
+      - "Perl/jlord@git-it-electron/failed/356703873.log"
+      - "Perl/major@MySQLTuner-perl/failed/431782730.log"
+      - "Haskell/purescript@purescript/failed/551305362.log"
+      - "CSS/google@material-design-icons/failed/92809009.log"
+      - "Swift/vsouza@awesome-ios/failed/566968587.log"
+      - "C#/powershell@PowerShell/failed/547432434.log"
+      - "Lua/cmusatyalab@openface/failed/199278645.log"
+      - "R/twitter@AnomalyDetection/failed/48330777.log"
+      - "Shell/tldr-pages@tldr/failed/564867534.log"
+      - "JavaScript/airbnb@javascript/failed/556132210.log"
+      - "Lua/cmusatyalab@openface/failed/199282796.log"
+      - "Elixir/elixir-lang@elixir/failed/574602754.log"
+      - "VimL/mhinz@vim-galore/failed/374778890.log"
+      - "Elixir/h4cc@awesome-elixir/failed/504854205.log"
+      - "Lua/cmusatyalab@openface/failed/204085173.log"
+      - "VimL/mhinz@vim-galore/failed/430784580.log"
+      - "C++/BVLC@caffe/failed/214329485.log"
+      - "CoffeeScript/Atom@atom/failed/529072794.log"
+      - "TeX/soulmachine@leetcode/failed/224191374.log"
+      - "CSS/twbs@bootstrap/failed/566522647.log"
+      - "Erlang/erlang@otp/failed/551677118.log"
+      - "Ruby/rails@rails/failed/517368002.log"
+      - "Clojure/technomancy@leiningen/failed/242689049.log"
+      - "Ruby/rails@rails/failed/517022106.log"
+      - "Ruby/rails@rails/failed/517220648.log"
+      - "C++/bitcoin@bitcoin/failed/567199364.log"
+      - "TeX/cplusplus@draft/failed/568620326.log"
+      - "Python/vinta@awesome-python/failed/126421712.log"
+      - "VimL/junegunn@vim-plug/failed/445184806.log"
+      - "TypeScript/angular@angular/failed/502325876.log"
+      - "C/git@git/failed/565119978.log"
+      - "Go/avelino@awesome-go/failed/554941726.log"
+      - "Haskell/jgm@pandoc/failed/483377953.log"
+      - "VimL/mhinz@vim-galore/failed/374779992.log"
+      - "Perl/sjdy521@Mojo-Webqq/failed/341246416.log"
+      - "Java/ReactiveX@RxJava/failed/561008032.log"
+      - "C/vim@vim/failed/557500309.log"
+      - "PHP/composer@composer/failed/566904372.log"
+      - "HTML/google@web-starter-kit/failed/348091008.log"
+      - "PHP/composer@composer/failed/551282890.log"
+      - "Java/ReactiveX@RxJava/failed/564360281.log"
+      - "JavaScript/FreeCodeCamp@freecodecamp/failed/566340236.log"
+      - "Lisp/purcell@emacs.d/failed/515416520.log"
+      - "C#/powershell@PowerShell/failed/535985298.log"
+      - "Java/ReactiveX@RxJava/failed/564360351.log"
+      - "Erlang/rabbitmq@rabbitmq-server/failed/572967302.log"
+      - "Elixir/h4cc@awesome-elixir/failed/506226859.log"
+      - "Erlang/rabbitmq@rabbitmq-server/failed/572968583.log"
+      - "Erlang/rabbitmq@rabbitmq-server/failed/571806905.log"
+      - "C++/electron@electron/failed/303153628.log"
+      - "TypeScript/Microsoft@TypeScript/failed/566236265.log"
+      - "TeX/cplusplus@draft/failed/568621273.log"
+      - "Clojure/LightTable@LightTable/failed/557187564.log"
+      - "Elixir/h4cc@awesome-elixir/failed/549739957.log"
+      - "Go/avelino@awesome-go/failed/556757260.log"
+      - "Elixir/elixir-lang@elixir/failed/572202401.log"
+      - "Swift/vsouza@awesome-ios/failed/566627090.log"
+      - "Swift/vsouza@awesome-ios/failed/557856885.log"
+      - "CSS/jgthms@bulma/failed/513332094.log"
+      - "JavaScript/FreeCodeCamp@freecodecamp/failed/564664934.log"
+      - "HTML/google@web-starter-kit/failed/411570811.log"
+      - "Rust/redox-os@redox/failed/391353410.log"
+      - "C++/BVLC@caffe/failed/214320399.log"
+      - "Lisp/emacs-tw@awesome-emacs/failed/547370322.log"
+      - "TeX/adambard@learnxinyminutes-docs/failed/572950271.log"
     not_before: step 11, after diagnose-freeze (D39)
     target: >-
       the log lines matching the human-labelled chunk (whitespace collapsed, ANSI codes and
@@ -307,20 +552,31 @@ llm:
     key rotation (D41). The report states that the calls ran on team members' individual
     free-tier accounts
   levels_calling: [L2, L3]      # L4 and L5 reuse L3's cached answers for identical inputs (D39)
-  openrouter: >-
-    development only (D40): openai/gpt-oss-120b:free, same settings, backend recorded; used
-    for reported results only if it matches the Groq lanes on the same validation logs
-    (per-item agreement, macro-F1) within noise
+  providers: Groq only; OpenRouter (D40) dropped (D46)
   prompt_experiments: may use a second free Groq model; validation and final runs use the pinned model (D39)
   request_budget: >-
     the log shown to the model is cut to 14,000 characters (its end kept) and each L3 example
-    to 2,000, so one request stays under the free tier's 8,000 tokens per minute
+    to 2,000, so one request stays under the free tier's 8,000 tokens per minute. Line
+    numbers follow the terminal view (newline-split, text after the last carriage return),
+    as the LogChunks targets do (D48)
   model: openai/gpt-oss-120b     # pinned; logged per call; never mixed within one result set
   temperature: 0
   reasoning_effort: low
   repeats: >-
     3 runs on a seeded random subset of 60 items per LLM level, with the repeat index in the
     cache key (D28); 1 run elsewhere; mean and spread reported on the subset
+
+# ------------------------------------------------------------------ calibration (D9, D45)
+calibration:
+  method: split conformal; the gate reads the calibrated confidence, never a self-report
+  diagnose: >-
+    leave-one-template-out on the 25 training and validation templates (D45): every
+    template's scores come from a model that never saw it (L1 refit without it; L3's
+    retrieval excludes cases of the same template; L2 has no training). The pooled scores
+    are the calibration set; coverage at epsilon 0.1 is reported on each template held
+    apart. Validation-only fitting is dropped
+  dev_coverage: >-
+    L1 67/74, L2 68/74 at a 90% target (2026-10-28, evaluation/diagnose_calibrate.py)
 
 # ------------------------------------------------------------------ metrics
 # Every rate with its count (n) and a 95% Wilson interval; event rates per hour get an exact
