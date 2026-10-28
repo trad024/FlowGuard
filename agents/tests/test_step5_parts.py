@@ -22,9 +22,9 @@ from flowguard.incidents import IncidentRecord
 CLASSES = ["a", "b", "c"]
 
 
-def proposal(action="restart_deployment", rationale="test", env="staging"):
+def proposal(action="restart_deployment", rationale="test", env="staging", pid="p-1"):
     return ActionProposal(
-        id="p-1",
+        id=pid,
         incident_id="i-1",
         agent="diagnose",
         action=action,
@@ -36,9 +36,9 @@ def proposal(action="restart_deployment", rationale="test", env="staging"):
     )
 
 
-def decision(outcome="execute", verdict=None):
+def decision(outcome="execute", verdict=None, pid="p-1"):
     return GateDecision(
-        proposal_id="p-1",
+        proposal_id=pid,
         tier="medium",
         risk_score=0.5,
         outcome=outcome,
@@ -109,26 +109,66 @@ def test_incidents_evidence_and_requests_round_trip(tmp_path):
 # ---------------------------------------------------------------- executor
 
 
+def logged(audit, p, d):
+    """What the orchestrator writes before it calls the executor."""
+    audit.proposal(p)
+    audit.gate_decision(d)  # also logs the approval when d carries a verdict
+    return p, d
+
+
 def test_executor_refuses_what_the_gate_did_not_allow(tmp_path):
-    audit = AuditLog(tmp_path / "a.db")
-    audit.proposal(proposal())
-    ex = Executor(audit=audit)
-    for d in (
+    refused = (
         decision("reject"),
         decision("ask_human"),
         decision("ask_human", "denied"),
         decision("ask_human", "timeout"),
-    ):
+    )
+    for i, d in enumerate(refused):
+        audit = AuditLog(tmp_path / f"{i}.db")
         with pytest.raises(Refused):
-            ex.execute(proposal(), d)
-    assert ex.execute(proposal(), decision("ask_human", "approved")).success
-    assert ex.execute(proposal(), decision("execute")).output.startswith("dry run")
+            Executor(audit=audit).execute(*logged(audit, proposal(), d))
+    audit = AuditLog(tmp_path / "ok.db")
+    ex = Executor(audit=audit)
+    approved = logged(audit, proposal(pid="p-a"), decision("ask_human", "approved", pid="p-a"))
+    assert ex.execute(*approved).success
+    run = logged(audit, proposal(pid="p-b"), decision("execute", pid="p-b"))
+    assert ex.execute(*run).output.startswith("dry run")
+
+
+def test_executor_trusts_only_the_audit_log(tmp_path):
+    audit = AuditLog(tmp_path / "a.db")
+    ex = Executor(audit=audit)
+    # a forged execute decision the gate never logged
+    audit.proposal(proposal(pid="p-forged"))
+    with pytest.raises(Refused, match="0 gate decisions"):
+        ex.execute(proposal(pid="p-forged"), decision("execute", pid="p-forged"))
+    # the gate rejected; the object handed over says execute
+    audit.proposal(proposal(pid="p-r"))
+    audit.gate_decision(decision("reject", pid="p-r"))
+    with pytest.raises(Refused, match="differs"):
+        ex.execute(proposal(pid="p-r"), decision("execute", pid="p-r"))
+    # the human denied; the object handed over says approved
+    logged(audit, proposal(pid="p-h"), decision("ask_human", "denied", pid="p-h"))
+    with pytest.raises(Refused, match="no approval"):
+        ex.execute(proposal(pid="p-h"), decision("ask_human", "approved", pid="p-h"))
+    # same id, another action than the one the gate saw
+    logged(audit, proposal(pid="p-s"), decision(pid="p-s"))
+    with pytest.raises(Refused, match="proposal differs"):
+        ex.execute(proposal("rollout_abort", pid="p-s"), decision(pid="p-s"))
+    # a proposal never logged, and no replay of an executed one
+    with pytest.raises(Refused, match="not in the audit log"):
+        ex.execute(proposal(pid="p-none"), decision(pid="p-none"))
+    assert ex.execute(proposal(pid="p-s"), decision(pid="p-s")).success
+    with pytest.raises(Refused, match="already executed"):
+        ex.execute(proposal(pid="p-s"), decision(pid="p-s"))
+    # no audit log: nothing to verify against
+    with pytest.raises(Refused, match="no audit log"):
+        Executor().execute(proposal(pid="p-s"), decision(pid="p-s"))
 
 
 def test_live_handlers_use_kubectl_and_github(tmp_path):
     calls = []
     audit = AuditLog(tmp_path / "a.db")
-    audit.proposal(proposal())
     ex = Executor(
         audit=audit,
         dry_run=False,
@@ -136,13 +176,17 @@ def test_live_handlers_use_kubectl_and_github(tmp_path):
         kubectl=lambda args: calls.append(args) or "ok",
         github=lambda method, path: calls.append((method, path)) or 201,
     )
-    assert ex.execute(proposal("rollout_abort"), decision()).success
+
+    def run(action):
+        return ex.execute(*logged(audit, proposal(action, pid=action), decision(pid=action)))
+
+    assert run("rollout_abort").success
     assert "--subresource=status" in calls[-1] and '"abort": true' in calls[-1][-1]
-    assert ex.execute(proposal("scale_deployment"), decision()).success
+    assert run("scale_deployment").success
     assert '"replicas": 3' in calls[-1][-1]
-    assert ex.execute(proposal("rerun_workflow"), decision()).success
+    assert run("rerun_workflow").success
     assert calls[-1] == ("POST", "/repos/trad024/FlowGuard/actions/runs/7/rerun-failed-jobs")
-    not_yet = ex.execute(proposal("open_fix_pr"), decision())
+    not_yet = run("open_fix_pr")
     assert not not_yet.success and "Step 7" in not_yet.output
     executions = AuditLog(tmp_path / "a.db").query("SELECT success FROM executions")
     assert len(executions) == 4

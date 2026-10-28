@@ -4,7 +4,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from flowguard.contracts import ActionProposal, RiskTier
+from flowguard.audit import AuditLog
+from flowguard.contracts import ActionProposal, ExecutionResult, RiskTier
+from flowguard.executor import Executor
 from flowguard.gate import RiskGate, risk_score
 
 N = 0
@@ -71,6 +73,43 @@ def test_loop_limit_per_action_and_target_within_an_hour():
     assert gate.decide(prop("retry_job", target="other")).outcome == "execute"
     clock.now += timedelta(hours=1, seconds=1)
     assert gate.decide(prop("retry_job")).outcome == "execute"
+
+
+def run_through(gate, audit, p):
+    """Gate, then the executor for whatever the gate let run, as the orchestrator does."""
+    audit.proposal(p)
+    d = gate.decide(p)
+    audit.gate_decision(d)
+    if d.outcome == "execute":
+        Executor(audit=audit).execute(p, d)
+    return d.outcome
+
+
+def test_the_loop_limit_survives_a_restart(tmp_path):
+    audit = AuditLog(tmp_path / "audit.db")
+    first = RiskGate(audit=audit)
+    assert [run_through(first, audit, prop("retry_job")) for _ in range(3)] == ["execute"] * 3
+    restarted = RiskGate(audit=audit)  # a new process: nothing in memory
+    d = restarted.decide(prop("retry_job"))
+    assert d.outcome == "reject" and d.reason.startswith("rule 3: loop limit: 3")
+    assert restarted.decide(prop("retry_job", target="other")).outcome == "execute"
+
+
+def test_executions_older_than_an_hour_do_not_count(tmp_path):
+    audit = AuditLog(tmp_path / "audit.db")
+    old = datetime.now(UTC) - timedelta(hours=1, minutes=1)
+    for _ in range(3):
+        p = prop("retry_job")
+        audit.proposal(p)
+        audit.execution(ExecutionResult(proposal_id=p.id, success=True, output="", finished_at=old))
+    assert RiskGate(audit=audit).decide(prop("retry_job")).outcome == "execute"
+
+
+def test_passes_not_yet_executed_count_too(tmp_path):
+    # a burst decided before anything runs (or while a human decides) cannot pass the limit
+    gate = RiskGate(audit=AuditLog(tmp_path / "audit.db"))
+    outcomes = [gate.decide(prop("retry_job")).outcome for _ in range(4)]
+    assert outcomes == ["execute", "execute", "execute", "reject"]
 
 
 def test_risk_score_follows_v1():

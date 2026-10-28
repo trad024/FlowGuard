@@ -110,7 +110,7 @@ class Orchestrator:
     def __post_init__(self):
         if not self.cfg.gate and not self.executor.dry_run:
             raise ValueError("L0 runs without a gate: only with a dry-run executor")
-        self.gate = RiskGate(threshold=self.cfg.threshold)
+        self.gate = RiskGate(threshold=self.cfg.threshold, audit=self.audit)
         self.agents = {
             AgentName.MONITOR: Monitor(),
             AgentName.DIAGNOSE: Diagnose(self.diagnose_llm),

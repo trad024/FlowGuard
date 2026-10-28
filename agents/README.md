@@ -34,7 +34,10 @@ fails if it does (D25).
 ## Safety
 
 - Agents only propose catalog actions; the gate decides; only the executor writes, and it
-  refuses anything the gate or a human did not allow, even when called directly.
+  refuses anything the gate or a human did not allow, even when called directly: it re-reads
+  the decision and the approval from the audit log and never trusts the object it is handed
+  (D37).
+- The loop limit counts executions in the audit log, so it holds across restarts (D37).
 - The gate never reads the confidence an agent reports; it uses calibrated confidence (D9),
   which is 0 until calibration data exists, so every medium action goes to a human.
 - The approval page listens on 127.0.0.1 only, escapes everything it shows, needs its form
@@ -42,5 +45,6 @@ fails if it does (D25).
 
 ```python
 from flowguard.approval import ApprovalPage
-page = ApprovalPage()          # open page.url in a browser; pass it as the orchestrator's approver
+
+page = ApprovalPage()  # open page.url in a browser; pass it as the orchestrator's approver
 ```

@@ -15,6 +15,11 @@ P3 (D5): proposals for the same target in the same incident are resolved first; 
 conservative one (reversible before irreversible, then the lower tier) goes on to the rules,
 the others are rejected; if the best two cannot be ranked, all of them go to a human.
 
+Rule 3 counts the last hour's executions of the action on the target from the audit log, so
+the limit survives a restart (D37), plus the proposals this gate let through that have not
+been executed yet (asked of a human, or about to run), so a burst decided before anything runs
+cannot pass the limit either. Without an audit log only the second count exists (unit tests).
+
 The confidence is the calibrated one the orchestrator passes in (D9), never the proposal's own
 `confidence` field. Tiers come only from the catalog. The risk score orders the approval queue
 and never changes an outcome.
@@ -22,7 +27,7 @@ and never changes an outcome.
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
@@ -62,12 +67,14 @@ class RiskGate:
         catalog: dict[str, CatalogEntry] = CATALOG,
         agent_actions=AGENT_ACTIONS,
         clock: Callable[[], datetime] = utcnow,
+        audit=None,
     ):
         self.threshold = threshold
         self.catalog = catalog
         self.agent_actions = agent_actions
         self.clock = clock
-        self._passed: dict[tuple[str, str], deque] = defaultdict(deque)
+        self.audit = audit
+        self._pending: dict[tuple[str, str], dict[str, datetime]] = defaultdict(dict)
 
     # ------------------------------------------------------------ rules
 
@@ -80,9 +87,10 @@ class RiskGate:
             return self._decision(proposal, entry, "reject", "not in the catalog", 1, confidence)
         if entry.tier == RiskTier.PROHIBITED:
             return self._decision(proposal, entry, "reject", "prohibited tier", 2, confidence)
-        recent = self._recent((proposal.action, proposal.target))
-        if len(recent) >= entry.max_per_hour:
-            reason = f"loop limit: {len(recent)} in the last hour (max {entry.max_per_hour})"
+        key = (proposal.action, proposal.target)
+        recent = self._recent(key)
+        if recent >= entry.max_per_hour:
+            reason = f"loop limit: {recent} in the last hour (max {entry.max_per_hour})"
             return self._decision(proposal, entry, "reject", reason, 3, confidence)
         if entry.tier == RiskTier.HIGH:
             outcome, reason, rule = "ask_human", "high tier", 4
@@ -93,15 +101,27 @@ class RiskGate:
             outcome, rule = "ask_human", 6
         else:
             outcome, reason, rule = "execute", f"{entry.tier} tier", 7
-        recent.append(self.clock())
+        self._pending[key][proposal.id] = self.clock()
         return self._decision(proposal, entry, outcome, reason, rule, confidence)
 
-    def _recent(self, key: tuple[str, str]) -> deque:
-        recent = self._passed[key]
+    def _recent(self, key: tuple[str, str]) -> int:
+        """Executions in the last hour (audit log) plus passes not executed yet."""
         horizon = self.clock() - timedelta(hours=1)
-        while recent and recent[0] < horizon:
-            recent.popleft()
-        return recent
+        pending = self._pending[key]
+        for pid in [pid for pid, at in pending.items() if at < horizon]:
+            del pending[pid]
+        if self.audit is None:
+            return len(pending)
+        since = horizon.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        rows = self.audit.query(
+            "SELECT e.proposal_id FROM executions e JOIN proposals p ON p.id = e.proposal_id"
+            " WHERE p.action = ? AND p.target = ? AND e.ts >= ?",
+            (key[0], key[1], since),
+        )
+        executed = {r["proposal_id"] for r in rows}
+        for pid in [pid for pid in pending if pid in executed]:
+            del pending[pid]
+        return len(rows) + len(pending)
 
     def _decision(self, proposal, entry, outcome, reason, rule, confidence=0.0) -> GateDecision:
         tier = entry.tier if entry else RiskTier.PROHIBITED

@@ -3,7 +3,7 @@
 Single source of truth for FlowGuard. Every approved decision lives here. Anything not written here is not approved.
 
 - Version: v2, 2026-10-21. Supersedes the v1 PDF blueprint where they differ; v1 stays valid for everything not changed below.
-- Status: v2 decisions D1 to D36 accepted. Build position: Step 0 done; Step 1 done and verified on a team laptop (2026-10-22, commit `a0abaf2`): setup from zero, 9/9 smoke checks pass, cluster about 930 to 980 MiB of the 4096 MiB budget (Docker was not yet capped at 4 GB). Step 2 implemented and verified on the same laptop (2026-10-22): `check-step2.ps1` 6/6 (good version promoted 20/50/100, bad version aborted by L0 at 20%, stable kept serving, canary and stable pods in the per-request log), cluster about 1.73 GB at the canary peak. Step 2 signed off 2026-10-22 after Q7 and Q8 were closed by D21 and D22. Step 3 implemented and verified 2026-10-22: `check-step3.ps1` passed (an `app/` commit ran app-ci to success, the laptop deployer rolled its image out to the staging canary, promoted under L0 with both analyses successful; a docs-only commit started no app-ci run). Step 3 done 2026-10-25: `check-step3.ps1` 6/6 on a throwaway `scenario/` branch (dev untouched), baseline plan mode proven on a `scenario/baseline/` branch, and the demo app's vulnerabilities fixed (D24: 0 HIGH, 0 CRITICAL, 0 Gitleaks findings). Step 4 is split (section 7): 4a approved 2026-10-26 and signed off 2026-10-27; D25 (information firewall) implemented before 4b; 4b not approved yet.
+- Status: v2 decisions D1 to D38 accepted. Build position: Step 0 done; Step 1 done and verified on a team laptop (2026-10-22, commit `a0abaf2`): setup from zero, 9/9 smoke checks pass, cluster about 930 to 980 MiB of the 4096 MiB budget (Docker was not yet capped at 4 GB). Step 2 implemented and verified on the same laptop (2026-10-22): `check-step2.ps1` 6/6 (good version promoted 20/50/100, bad version aborted by L0 at 20%, stable kept serving, canary and stable pods in the per-request log), cluster about 1.73 GB at the canary peak. Step 2 signed off 2026-10-22 after Q7 and Q8 were closed by D21 and D22. Step 3 implemented and verified 2026-10-22: `check-step3.ps1` passed (an `app/` commit ran app-ci to success, the laptop deployer rolled its image out to the staging canary, promoted under L0 with both analyses successful; a docs-only commit started no app-ci run). Step 3 done 2026-10-25: `check-step3.ps1` 6/6 on a throwaway `scenario/` branch (dev untouched), baseline plan mode proven on a `scenario/baseline/` branch, and the demo app's vulnerabilities fixed (D24: 0 HIGH, 0 CRITICAL, 0 Gitleaks findings). Step 4 is split (section 7): 4a approved 2026-10-26 and signed off 2026-10-27; D25 (information firewall) implemented before 4b; 4b not approved yet.
 
 ---
 
@@ -129,7 +129,7 @@ The tiers are as implemented in `agents/flowguard/catalog.py`. The gate (`agents
 0. The proposing agent is not allowed the action (`AGENT_ACTIONS`) → reject.
 1. Action not in the catalog → reject.
 2. Prohibited tier → reject.
-3. Loop limit exceeded (catalog `max_per_hour` per action + target) → reject.
+3. Loop limit exceeded (catalog `max_per_hour` per action + target) → reject. Counted from the audit log's executions in the last hour plus the passes not executed yet (D37).
 4. High tier → ask a human.
 5. Medium tier in prod → ask a human.
 6. Medium tier with confidence below 0.70 → ask a human.
@@ -139,6 +139,7 @@ Risk score (orders the approval queue only, never changes the outcome): tier bas
 
 - No agent or LLM ever sets or changes a risk tier.
 - The 0.70 confidence threshold for the medium tier is applied to calibrated confidence (D9).
+- The executor does not trust the decision it is handed (D37): it re-reads the proposal, the gate decision and the approval from the audit log by proposal id and refuses anything missing, different, unapproved or already executed.
 
 ### Technology choices
 
@@ -302,6 +303,8 @@ Each step needs explicit approval before it starts. Each step ships with tests, 
 
 | Date | ID | Decision | Reason |
 |---|---|---|---|
+| 2026-10-28 | D38 | `ruff` pinned to one exact version (0.17.1) in `pyproject.toml`; the local check and CI's `checks` run the same formatter | An unpinned `ruff>=0.6` let CI and the laptop disagree; `checks` was red on 4987916 over the code block in `agents/README.md` |
+| 2026-10-28 | D37 | Executor and loop limit read the audit log, never memory or the caller: (a) before acting, the executor re-reads the proposal, its single gate decision and, for `ask_human`, the latest approval by proposal id, and refuses if any is missing, differs from what it was handed (agent, action, target, environment, params; outcome, tier, reason), the approval is not `approved`, or the proposal was already executed; an executor without an audit log runs nothing. (b) Rule 3 counts the last hour's executions per (action, target) from the audit log, plus the proposals this gate passed that are not executed yet, so the limit holds across restarts and against a burst decided before anything runs | A forged or altered `GateDecision` must not reach a write; an in-memory counter reset on every restart. The replay refusal and the pending count are additions to the review's two fixes |
 | 2026-10-27 | D36 | Gate rule 0, before the v1 rules: the proposing agent must be allowed the action in `AGENT_ACTIONS`, otherwise reject | An agent must not act outside its role even with a catalog action (e.g. Optimizer proposing `rollout_undo`) |
 | 2026-10-27 | D35 | Groq's 200K tokens per day for `openai/gpt-oss-120b` is a working assumption (not visible in the headers); the client's own daily token count and the 429 handling cover it. H3's smallest effect of interest: +10 points of localization hit rate on LogChunks | Confirmed after the D27 measurement and D32 |
 | 2026-10-27 | D34 | Failure corpus (D6): several variants per CI failure template (different files, functions, modules, versions or hosts); the train/validation/test split stays by template, so no variant of a test template is ever seen in training | 31 templates with near-identical repeated runs would leave about 6 distinct failures in the test set |

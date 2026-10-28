@@ -1,8 +1,11 @@
 """Executor: the only component that writes (to the cluster, GitHub or the deployment flow).
 
 It runs a proposal only if the gate said execute, or said ask_human and a human approved; it
-refuses everything else even if called directly (defence in depth). Every attempt is written
-to the audit log. Agents never hold write credentials: kubectl writes and the GitHub write
+refuses everything else even if called directly (defence in depth). The decision it is handed
+is not trusted: the proposal, the gate decision and the approval are re-read from the audit
+log by proposal id, and anything missing, different, unapproved or already executed is refused
+(D37), so an executor without an audit log runs nothing. Every execution is written to the
+audit log. Agents never hold write credentials: kubectl writes and the GitHub write
 token (GITHUB_TOKEN_WRITE) appear only in this module (agents/tests/test_executor.py checks).
 
 dry_run=True records what would be done and changes nothing (tests, replays). Live handlers:
@@ -64,6 +67,7 @@ class Executor:
     def execute(self, proposal: ActionProposal, decision: GateDecision) -> ExecutionResult:
         if decision.proposal_id != proposal.id or not allowed(decision):
             raise Refused(f"{proposal.id}: gate outcome {decision.outcome}, not executable")
+        self._verify(proposal, decision)
         if self.dry_run:
             result = ExecutionResult(
                 proposal_id=proposal.id, success=True, output=f"dry run: {proposal.action}"
@@ -79,6 +83,41 @@ class Executor:
         if self.audit is not None:
             self.audit.execution(result)
         return result
+
+    def _verify(self, proposal: ActionProposal, decision: GateDecision) -> None:
+        """The decision object passed in is not trusted (D37): the proposal, the gate decision
+        and, for ask_human, the approval are re-read from the audit log by proposal id. Missing,
+        different, not approved, or already executed: refused."""
+        if self.audit is None:
+            raise Refused(f"{proposal.id}: no audit log to verify the decision against")
+        pid = proposal.id
+        stored = self.audit.query("SELECT * FROM proposals WHERE id = ?", (pid,))
+        if not stored:
+            raise Refused(f"{pid}: proposal not in the audit log")
+        s = stored[0]
+        logged = (s["agent"], s["action"], s["target"], s["environment"], json.loads(s["params"]))
+        d = proposal.model_dump(mode="json")
+        given = (d["agent"], d["action"], d["target"], d["environment"], d["params"] or {})
+        if logged != given:
+            raise Refused(f"{pid}: proposal differs from the audit log")
+        rows = self.audit.query("SELECT * FROM gate_decisions WHERE proposal_id = ?", (pid,))
+        if len(rows) != 1:
+            raise Refused(f"{pid}: {len(rows)} gate decisions in the audit log, expected 1")
+        g = rows[0]
+        d = decision.model_dump(mode="json")
+        if (g["outcome"], g["tier"], g["reason"]) != (d["outcome"], d["tier"], d["reason"]):
+            raise Refused(f"{pid}: gate decision differs from the audit log")
+        if g["outcome"] == "ask_human":
+            approvals = self.audit.query(
+                "SELECT verdict FROM approvals WHERE proposal_id = ? ORDER BY id DESC LIMIT 1",
+                (pid,),
+            )
+            if not approvals or approvals[0]["verdict"] != "approved":
+                raise Refused(f"{pid}: no approval in the audit log")
+        elif g["outcome"] != "execute":
+            raise Refused(f"{pid}: logged gate outcome {g['outcome']}")
+        if self.audit.query("SELECT 1 FROM executions WHERE proposal_id = ?", (pid,)):
+            raise Refused(f"{pid}: already executed")
 
     # ------------------------------------------------------------ live handlers
 
