@@ -1,0 +1,388 @@
+{
+ "seed": "corpus-split-20261027",
+ "templates": {
+  "code-01": "validation",
+  "code-02": "train",
+  "code-03": "train",
+  "code-04": "train",
+  "code-05": "train",
+  "code-06": "test",
+  "dependency-01": "train",
+  "dependency-02": "train",
+  "dependency-03": "validation",
+  "dependency-04": "test",
+  "dependency-05": "train",
+  "dependency-06": "train",
+  "dependency-07": "train",
+  "environment-01": "validation",
+  "environment-02": "train",
+  "environment-03": "train",
+  "environment-04": "test",
+  "environment-05": "train",
+  "environment-06": "train",
+  "flaky_test-01": "validation",
+  "flaky_test-02": "test",
+  "flaky_test-03": "train",
+  "flaky_test-04": "train",
+  "flaky_test-05": "train",
+  "flaky_test-06": "train",
+  "infrastructure-01": "validation",
+  "infrastructure-02": "train",
+  "infrastructure-03": "train",
+  "infrastructure-05": "test",
+  "infrastructure-06": "train"
+ },
+ "variants": {
+  "code-01": {
+   "template": "code-01",
+   "root_cause": "code"
+  },
+  "code-01.v2": {
+   "template": "code-01",
+   "root_cause": "code"
+  },
+  "code-02": {
+   "template": "code-02",
+   "root_cause": "code"
+  },
+  "code-02.v2": {
+   "template": "code-02",
+   "root_cause": "code"
+  },
+  "code-02.v3": {
+   "template": "code-02",
+   "root_cause": "code"
+  },
+  "code-03": {
+   "template": "code-03",
+   "root_cause": "code"
+  },
+  "code-03.v2": {
+   "template": "code-03",
+   "root_cause": "code"
+  },
+  "code-04": {
+   "template": "code-04",
+   "root_cause": "code"
+  },
+  "code-04.v2": {
+   "template": "code-04",
+   "root_cause": "code"
+  },
+  "code-05": {
+   "template": "code-05",
+   "root_cause": "code"
+  },
+  "code-05.v2": {
+   "template": "code-05",
+   "root_cause": "code"
+  },
+  "code-05.v3": {
+   "template": "code-05",
+   "root_cause": "code"
+  },
+  "code-05.v4": {
+   "template": "code-05",
+   "root_cause": "code"
+  },
+  "code-06": {
+   "template": "code-06",
+   "root_cause": "code"
+  },
+  "code-06.v2": {
+   "template": "code-06",
+   "root_cause": "code"
+  },
+  "dependency-01": {
+   "template": "dependency-01",
+   "root_cause": "dependency"
+  },
+  "dependency-01.v2": {
+   "template": "dependency-01",
+   "root_cause": "dependency"
+  },
+  "dependency-01.v3": {
+   "template": "dependency-01",
+   "root_cause": "dependency"
+  },
+  "dependency-01.v4": {
+   "template": "dependency-01",
+   "root_cause": "dependency"
+  },
+  "dependency-02": {
+   "template": "dependency-02",
+   "root_cause": "dependency"
+  },
+  "dependency-02.v2": {
+   "template": "dependency-02",
+   "root_cause": "dependency"
+  },
+  "dependency-02.v3": {
+   "template": "dependency-02",
+   "root_cause": "dependency"
+  },
+  "dependency-02.v4": {
+   "template": "dependency-02",
+   "root_cause": "dependency"
+  },
+  "dependency-03": {
+   "template": "dependency-03",
+   "root_cause": "dependency"
+  },
+  "dependency-03.v2": {
+   "template": "dependency-03",
+   "root_cause": "dependency"
+  },
+  "dependency-03.v3": {
+   "template": "dependency-03",
+   "root_cause": "dependency"
+  },
+  "dependency-04": {
+   "template": "dependency-04",
+   "root_cause": "dependency"
+  },
+  "dependency-04.v2": {
+   "template": "dependency-04",
+   "root_cause": "dependency"
+  },
+  "dependency-04.v3": {
+   "template": "dependency-04",
+   "root_cause": "dependency"
+  },
+  "dependency-05": {
+   "template": "dependency-05",
+   "root_cause": "dependency"
+  },
+  "dependency-05.v2": {
+   "template": "dependency-05",
+   "root_cause": "dependency"
+  },
+  "dependency-05.v3": {
+   "template": "dependency-05",
+   "root_cause": "dependency"
+  },
+  "dependency-05.v4": {
+   "template": "dependency-05",
+   "root_cause": "dependency"
+  },
+  "dependency-06": {
+   "template": "dependency-06",
+   "root_cause": "dependency"
+  },
+  "dependency-06.v2": {
+   "template": "dependency-06",
+   "root_cause": "dependency"
+  },
+  "dependency-06.v3": {
+   "template": "dependency-06",
+   "root_cause": "dependency"
+  },
+  "dependency-07": {
+   "template": "dependency-07",
+   "root_cause": "dependency"
+  },
+  "dependency-07.v2": {
+   "template": "dependency-07",
+   "root_cause": "dependency"
+  },
+  "dependency-07.v3": {
+   "template": "dependency-07",
+   "root_cause": "dependency"
+  },
+  "environment-01": {
+   "template": "environment-01",
+   "root_cause": "environment"
+  },
+  "environment-01.v2": {
+   "template": "environment-01",
+   "root_cause": "environment"
+  },
+  "environment-01.v3": {
+   "template": "environment-01",
+   "root_cause": "environment"
+  },
+  "environment-01.v4": {
+   "template": "environment-01",
+   "root_cause": "environment"
+  },
+  "environment-02": {
+   "template": "environment-02",
+   "root_cause": "environment"
+  },
+  "environment-02.v2": {
+   "template": "environment-02",
+   "root_cause": "environment"
+  },
+  "environment-03": {
+   "template": "environment-03",
+   "root_cause": "environment"
+  },
+  "environment-03.v2": {
+   "template": "environment-03",
+   "root_cause": "environment"
+  },
+  "environment-04": {
+   "template": "environment-04",
+   "root_cause": "environment"
+  },
+  "environment-04.v2": {
+   "template": "environment-04",
+   "root_cause": "environment"
+  },
+  "environment-05": {
+   "template": "environment-05",
+   "root_cause": "environment"
+  },
+  "environment-05.v2": {
+   "template": "environment-05",
+   "root_cause": "environment"
+  },
+  "environment-05.v3": {
+   "template": "environment-05",
+   "root_cause": "environment"
+  },
+  "environment-06": {
+   "template": "environment-06",
+   "root_cause": "environment"
+  },
+  "environment-06.v2": {
+   "template": "environment-06",
+   "root_cause": "environment"
+  },
+  "environment-06.v3": {
+   "template": "environment-06",
+   "root_cause": "environment"
+  },
+  "flaky_test-01": {
+   "template": "flaky_test-01",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-01.v2": {
+   "template": "flaky_test-01",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-02": {
+   "template": "flaky_test-02",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-02.v2": {
+   "template": "flaky_test-02",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-02.v3": {
+   "template": "flaky_test-02",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-03": {
+   "template": "flaky_test-03",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-03.v2": {
+   "template": "flaky_test-03",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-03.v3": {
+   "template": "flaky_test-03",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-04": {
+   "template": "flaky_test-04",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-04.v2": {
+   "template": "flaky_test-04",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-04.v3": {
+   "template": "flaky_test-04",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-05": {
+   "template": "flaky_test-05",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-05.v2": {
+   "template": "flaky_test-05",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-05.v3": {
+   "template": "flaky_test-05",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-06": {
+   "template": "flaky_test-06",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-06.v2": {
+   "template": "flaky_test-06",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-06.v3": {
+   "template": "flaky_test-06",
+   "root_cause": "flaky_test"
+  },
+  "infrastructure-01": {
+   "template": "infrastructure-01",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-01.v2": {
+   "template": "infrastructure-01",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-01.v3": {
+   "template": "infrastructure-01",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-02": {
+   "template": "infrastructure-02",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-02.v2": {
+   "template": "infrastructure-02",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-02.v3": {
+   "template": "infrastructure-02",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-03": {
+   "template": "infrastructure-03",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-03.v2": {
+   "template": "infrastructure-03",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-03.v3": {
+   "template": "infrastructure-03",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-05": {
+   "template": "infrastructure-05",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-05.v3": {
+   "template": "infrastructure-05",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-06": {
+   "template": "infrastructure-06",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-06.v2": {
+   "template": "infrastructure-06",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-06.v3": {
+   "template": "infrastructure-06",
+   "root_cause": "infrastructure"
+  }
+ },
+ "unverified": [
+  "flaky_test-01.v3",
+  "infrastructure-04",
+  "infrastructure-04.v2",
+  "infrastructure-04.v3",
+  "infrastructure-05.v2"
+ ]
+}

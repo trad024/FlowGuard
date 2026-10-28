@@ -150,7 +150,19 @@ families:
     count: null
     delivery: commit
     kinds: {code: 1, dependency: 1, environment: 1, flaky_test: 1, infrastructure: 1}
-    templates: []                # test-split template ids (D6 split by template), set in 4b
+    templates:                   # test-split variants (D6, D34; corpus-split.json)
+      - code-06
+      - code-06.v2
+      - dependency-04
+      - dependency-04.v2
+      - dependency-04.v3
+      - environment-04
+      - environment-04.v2
+      - flaky_test-02
+      - flaky_test-02.v2
+      - flaky_test-02.v3
+      - infrastructure-05
+      - infrastructure-05.v3
 
   security:                      # DSO4
     count: null
