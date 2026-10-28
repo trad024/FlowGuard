@@ -1,4 +1,4 @@
-"""Measure the externally trained encoder on its target CPU laptop; never train here."""
+"""Measure a trained encoder on the target CPU laptop with a labelled smoke workload."""
 
 import argparse
 import json

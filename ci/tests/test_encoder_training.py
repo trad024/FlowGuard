@@ -72,6 +72,18 @@ def test_f1_metrics_have_known_values_without_training():
     assert result["macro_f1"] == pytest.approx((2 / 3 + 3) / 5)
 
 
+def test_incomplete_index_fails_before_any_log_is_read(data, monkeypatch):
+    root, split, index, digest = data
+    index.write_text(json.dumps({"variant_id": "a", "log_path": "a.log"}))
+
+    def refuse(self):
+        raise AssertionError("an incomplete index opened a log")
+
+    monkeypatch.setattr(Path, "read_bytes", refuse)
+    with pytest.raises(ValueError, match="every verified"):
+        load_examples(split, index, root, digest)
+
+
 class Response(io.BytesIO):
     def geturl(self):
         return "https://example.invalid/checkpoint.zip"

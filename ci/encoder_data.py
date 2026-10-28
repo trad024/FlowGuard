@@ -23,16 +23,21 @@ class Example:
     sha256: str
 
 
-def load_examples(split_path: Path, index_path: Path, log_root: Path, expected_hash=None):
-    record = json.loads(split_path.read_text(encoding="utf-8"))
-    if expected_hash is not None and canonical_hash(record) != expected_hash:
-        raise ValueError("recorded split checksum mismatch")
+def allowed_variants(record):
     allowed = {}
     unverified = set(record.get("unverified", []))
     for variant, meta in record["variants"].items():
         split = record["templates"].get(meta["template"])
         if split in ("train", "validation") and variant not in unverified:
             allowed[variant] = (split, CLASSES.index(meta["root_cause"]))
+    return allowed
+
+
+def load_examples(split_path: Path, index_path: Path, log_root: Path, expected_hash=None):
+    record = json.loads(split_path.read_text(encoding="utf-8"))
+    if expected_hash is not None and canonical_hash(record) != expected_hash:
+        raise ValueError("recorded split checksum mismatch")
+    allowed = allowed_variants(record)
     root = log_root.resolve(strict=True)
     examples, seen = [], set()
     rows = [
@@ -55,6 +60,8 @@ def load_examples(split_path: Path, index_path: Path, log_root: Path, expected_h
             or path.suffix not in (".log", ".txt")
         ):
             raise ValueError("log path outside the declared root or unsupported file type")
+    if seen != set(allowed):
+        raise ValueError("index must contain every verified training and validation variant")
     for row in rows:
         variant = row["variant_id"]
         path = (root / row["log_path"]).resolve()

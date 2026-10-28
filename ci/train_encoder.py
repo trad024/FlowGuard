@@ -1,11 +1,12 @@
-"""External Python 3.11 GPU training only. No CPU-training fallback or test-split access."""
+"""Fixed-seed Python 3.11 CPU fine-tuning on the complete verified train/validation export."""
 
 import argparse
 import hashlib
 import json
-import os
+import platform
 import random
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -23,11 +24,18 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("state/encoder-training"))
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--seed", type=int, default=31)
+    parser.add_argument("--threads", type=int, default=2)
+    parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--unfreeze-layers", type=int, default=2)
     args = parser.parse_args()
     if sys.version_info[:2] != (3, 11):
-        raise SystemExit("Select a Python 3.11 GPU runtime")
+        raise SystemExit("Python 3.11 is required")
     if not 1 <= args.epochs <= 10:
         raise SystemExit("epochs must be between 1 and 10")
+    if not 1 <= args.threads <= 32 or not 1 <= args.batch_size <= 32:
+        raise SystemExit("threads and batch size must be between 1 and 32")
+    if not 1 <= args.unfreeze_layers <= 6:
+        raise SystemExit("unfreeze-layers must be between 1 and 6")
     base = json.loads(BASE_FILE.read_text(encoding="utf-8"))
     examples = load_examples(args.split, args.index, args.log_root, base["split_sha256"])
     train = [e for e in examples if e.split == "train"]
@@ -37,18 +45,15 @@ def main():
     if args.output.exists():
         raise SystemExit("output already exists; choose a new directory")
 
-    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    import psutil
     import torch
     from torch.utils.data import DataLoader
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-    if not torch.cuda.is_available():
-        raise SystemExit("GPU required: run this script in the external free-GPU notebook")
+    torch.set_num_threads(args.threads)
     random.seed(args.seed)
     torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
     torch.use_deterministic_algorithms(True)
-    torch.backends.cudnn.benchmark = False
     tokenizer = AutoTokenizer.from_pretrained(
         base["model"], revision=base["revision"], trust_remote_code=False
     )
@@ -62,7 +67,14 @@ def main():
         use_safetensors=True,
         trust_remote_code=False,
         attn_implementation="eager",
-    ).to("cuda")
+    ).to("cpu")
+    # A small corpus does not justify updating all 66M parameters on a laptop CPU.
+    # Retain the classifier and last two transformer blocks as the default trainable subset.
+    for parameter in model.distilbert.parameters():
+        parameter.requires_grad_(False)
+    for layer in model.distilbert.transformer.layer[-args.unfreeze_layers :]:
+        for parameter in layer.parameters():
+            parameter.requires_grad_(True)
 
     def collate(batch):
         encoded = tokenizer(
@@ -73,28 +85,35 @@ def main():
             return_tensors="pt",
         )
         encoded["labels"] = torch.tensor([e.label for e in batch], dtype=torch.long)
-        return {k: v.to("cuda") for k, v in encoded.items()}
+        return {k: v.to("cpu") for k, v in encoded.items()}
 
     train_loader = DataLoader(
         train,
-        batch_size=8,
+        batch_size=args.batch_size,
         shuffle=True,
         collate_fn=collate,
         generator=torch.Generator().manual_seed(args.seed),
         num_workers=0,
     )
     val_loader = DataLoader(
-        validation, batch_size=8, shuffle=False, collate_fn=collate, num_workers=0
+        validation, batch_size=args.batch_size, shuffle=False, collate_fn=collate, num_workers=0
     )
-    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5, weight_decay=0.01)
+    optimizer = torch.optim.AdamW(
+        [p for p in model.parameters() if p.requires_grad], lr=2e-5, weight_decay=0.01
+    )
+    process = psutil.Process()
+    started = time.perf_counter()
     args.output.mkdir(parents=True)
     checkpoint = args.output / "checkpoint"
     history, best = [], -1.0
     for epoch in range(1, args.epochs + 1):
+        epoch_started = time.perf_counter()
+        training_loss = 0.0
         model.train()
         for batch in train_loader:
             optimizer.zero_grad(set_to_none=True)
             loss = model(**batch).loss
+            training_loss += loss.item() * len(batch["labels"])
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -106,9 +125,17 @@ def main():
                 predicted.extend(logits.argmax(dim=-1).cpu().tolist())
                 probabilities.extend(logits.softmax(dim=-1).cpu().tolist())
         metrics = classification_metrics([e.label for e in validation], predicted)
-        metrics["epoch"] = epoch
+        metrics.update(
+            epoch=epoch,
+            training_loss=training_loss / len(train),
+            epoch_wall_s=time.perf_counter() - epoch_started,
+        )
         history.append(metrics)
-        print(json.dumps(metrics))
+        (args.output / "training-log.json").write_text(
+            json.dumps({"seed": args.seed, "device": "cpu", "epochs": history}, indent=2),
+            encoding="utf-8",
+        )
+        print(json.dumps(metrics), flush=True)
         if metrics["macro_f1"] > best:
             best = metrics["macro_f1"]
             model.save_pretrained(checkpoint, safe_serialization=True)
@@ -117,7 +144,10 @@ def main():
             predictions = [
                 {
                     "variant_id": e.variant,
-                    "root_cause": CLASSES[e.label],
+                    "actual_root_cause": CLASSES[e.label],
+                    "predicted_root_cause": CLASSES[
+                        max(range(len(scores)), key=scores.__getitem__)
+                    ],
                     "scores": dict(zip(CLASSES, scores, strict=True)),
                 }
                 for e, scores in zip(validation, probabilities, strict=True)
@@ -131,7 +161,16 @@ def main():
         "seed": args.seed,
         "split_sha256": base["split_sha256"],
         "classes": list(CLASSES),
-        "gpu": torch.cuda.get_device_name(),
+        "device": "cpu",
+        "cpu": platform.processor(),
+        "platform": platform.platform(),
+        "threads": args.threads,
+        "batch_size": args.batch_size,
+        "unfrozen_transformer_layers": args.unfreeze_layers,
+        "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+        "training_wall_s": time.perf_counter() - started,
+        "training_process_rss_mib": process.memory_info().rss / 2**20,
+        "windows_peak_rss_mib": getattr(process.memory_info(), "peak_wset", 0) / 2**20 or None,
         "torch": torch.__version__,
         "index_sha256": canonical_hash(
             [{"variant": e.variant, "split": e.split, "log_sha256": e.sha256} for e in examples]
@@ -139,9 +178,12 @@ def main():
         "train_variants": [e.variant for e in train],
         "validation_variants": [e.variant for e in validation],
         "epochs": history,
+        "best_validation_macro_f1": best,
+        "best_epoch": max(history, key=lambda row: row["macro_f1"])["epoch"],
         "selection": "best validation macro-F1; no final-test evaluation",
     }
     (checkpoint / "encoder_metadata.json").write_text(json.dumps(metadata, indent=2))
+    (args.output / "training-log.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     bundle = args.output / "encoder-weights.zip"
     with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(checkpoint.iterdir()):
