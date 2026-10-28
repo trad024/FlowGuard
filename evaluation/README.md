@@ -50,14 +50,20 @@ whatever the tier (DSO6, must stay 0), executions after a reject, approvals per 
 
 ## DSO1 by replay (D15, step 6)
 
-`monitor_replay.py` runs the Monitor on dev recordings (a folder, or the zip they arrive in;
-held-out paths are refused) at L0 (the frozen alert rules as Prometheus evaluated them, read
-exactly as `l0_baseline.py` reads them) and L1 (L0 plus the runtime detector):
+`monitor_replay.py` runs the Monitor on dev recordings (folders or zips, read in place and
+never copied; held-out paths are refused) at L0 (the frozen alert rules as Prometheus evaluated
+them, read exactly as `l0_baseline.py` reads them) and L1 (L0 plus the detectors):
 
 ```powershell
-py evaluation\monitor_replay.py fit evaluation\recordings     # writes agents\flowguard\models\monitor.json
-py evaluation\monitor_replay.py score evaluation\recordings   # writes runs\dso1-replay.json
+py evaluation\monitor_replay.py fit <dev recordings> <normal traffic>     # writes agents\flowguard\models\monitor.json
+py evaluation\monitor_replay.py score <dev recordings> <normal traffic>   # writes runs\dso1-replay.json
 ```
+
+Runtime recordings without an ALERTS series (made before D33) are listed and not scored.
+Incidents with an L0 alert already firing before the fault (left over from the previous run)
+are kept in the primary result, left out of a sensitivity result and of the tuning. CI: L0 is
+the rule frozen 2026-10-28 (`CI_L0`: a job longer than 3x its dev median, or 3 failed runs in a
+row on a branch); L1 adds the duration detector.
 
 `fit` uses the first half of each normal-traffic recording for the reference profile and the
 Isolation Forest, then tunes a small grid (z threshold, forest quantile, persistence) for L1

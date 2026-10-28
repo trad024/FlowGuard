@@ -1,7 +1,10 @@
 """DSO1 by replay (D15, Step 6): the Monitor at L0 and L1 on the same dev recordings.
 
-    python evaluation/monitor_replay.py fit   <recordings folder or zip>   # writes the model file
-    python evaluation/monitor_replay.py score <recordings folder or zip> [--out FILE]
+    python evaluation/monitor_replay.py fit   <folder or zip> [...]   # writes the model file
+    python evaluation/monitor_replay.py score <folder or zip> [...] [--out FILE]
+
+Several folders are read as one set (the dev recordings and the normal-traffic window arrive
+separately); nothing is copied.
 
 Scoring side: reads each recording's ground_truth.json (family, incident window, band). The
 Monitor sees only ticks built from the recorded series by `flowguard.series`, one every 15 s
@@ -22,8 +25,17 @@ fit: the first half of each normal-traffic recording fits the reference profile 
 a small grid (z threshold, forest quantile, persistence) is tuned for L1 recall on the dev
 runtime incidents, keeping the detector's own false alerts on that same first half under a
 budget (0.5 per hour). The second half is never used to
-fit and is where false alerts are scored. CI: durations of successful jobs in runs outside the
-pipeline family; k by leave-one-out. Held-out recordings are refused.
+fit and is where false alerts are scored.
+
+Runtime recordings without an ALERTS series (recorded before D33) are left out and listed: L0
+cannot be measured on them. Incidents with an L0 alert already firing before the fault (left
+over from the previous run) stay in the primary result and are left out of a sensitivity
+result and of the tuning.
+
+CI: the pipeline family's runs are the anomalies, every other run is normal and is judged
+against the history of the others (leave one out). L0 is the rule frozen 2026-10-28 (CI_L0): a
+job longer than 3x its dev median, or 3 failed runs in a row on a branch. L1 adds the duration
+detector (median + k x robust spread, k by leave-one-out). Held-out recordings are refused.
 """
 
 from __future__ import annotations
@@ -163,7 +175,7 @@ def outcomes(runs: list[dict], times: dict[str, list[float]]) -> dict[str, tuple
         start = l0_baseline.ts(incident["start"])
         end = l0_baseline.ts(incident["end"]) + 60  # the cooldown counts, as at L0
         hits = [t for t in times.get(r["id"], []) if start <= t <= end]
-        band = r["ground_truth"].get("band", "dev")
+        band = r["ground_truth"].get("band") or "dev"  # the first dev scenarios have none
         out[r["id"]] = (band, bool(hits), (min(hits) - start) if hits else None)
     return out
 
@@ -229,9 +241,31 @@ def held_back(runs: list[dict], model: RuntimeModel | None) -> dict[str, tuple[f
     return spans
 
 
+def alerts_recorded(run: dict) -> bool:
+    """L0 can only be scored where the ALERTS series was recorded (from 2026-10-27, D33)."""
+    return (Path(run["recording"]) / "prometheus" / "alerts.json").is_file()
+
+
+def carry_over(run: dict) -> bool:
+    """An L0 alert already firing before the fault started: left over from an earlier run."""
+    incident = run["ground_truth"].get("incident") or {}
+    if run["family"] != "runtime" or not incident.get("start"):
+        return False
+    start = l0_baseline.ts(incident["start"])
+    return any(run["window"][0] <= t < start for t in l0_times(run))
+
+
+def runtime_set(runs: list[dict]) -> tuple[list[dict], list[str]]:
+    """Runtime and normal recordings L0 can be scored on, and the ids left out."""
+    scored = [r for r in runs if r["family"] in ("runtime", "normal")]
+    return [r for r in scored if alerts_recorded(r)], [
+        r["id"] for r in scored if not alerts_recorded(r)
+    ]
+
+
 def score_runtime(runs: list[dict], model: RuntimeModel, cache: dict | None = None) -> dict:
     cache = cache if cache is not None else {}
-    scored = [r for r in runs if r["family"] in ("runtime", "normal")]
+    scored, unmeasured = runtime_set(runs)
     l0 = {r["id"]: l0_times(r) for r in scored}
     det = {}
     for r in scored:
@@ -239,15 +273,28 @@ def score_runtime(runs: list[dict], model: RuntimeModel, cache: dict | None = No
             cache[r["id"]] = snapshots(r)
         det[r["id"]] = detector_times(model, cache[r["id"]])
     l1 = {i: sorted(set(l0[i]) | set(det[i])) for i in l0}
-    spans = held_back(runs, model)
+    spans = held_back(scored, model)
     levels = {"L0": l0, "L1": l1, "detector": det}
-    cases = {name: outcomes(runs, times) for name, times in levels.items()}
-    out = {name: summary(cases[name], false_alerts(runs, levels[name], spans)) for name in levels}
+    cases = {name: outcomes(scored, times) for name, times in levels.items()}
+    out = {"label": "dev, in-sample"}
+    out.update(
+        {name: summary(cases[name], false_alerts(scored, levels[name], spans)) for name in levels}
+    )
     out["L1_vs_L0"] = paired(cases["L0"], cases["L1"])
+    tainted = sorted(r["id"] for r in scored if carry_over(r))
+    clean = {name: {i: c for i, c in v.items() if i not in tainted} for name, v in cases.items()}
+    out["without_carry_over"] = {
+        "excluded": tainted,
+        **{name: summary(clean[name], {}) for name in ("L0", "L1")},
+        "L1_vs_L0": paired(clean["L0"], clean["L1"]),
+    }
+    out["not_scored"] = {"no ALERTS series recorded (L0 unmeasurable)": unmeasured}
     out["notes"] = [
-        "dev recordings: thresholds were tuned on these incidents (in-sample recall); "
-        "H1 is tested on the held-out set at Step 11",
-        "false alerts are scored on the normal-traffic time the model was not fitted on",
+        "dev, in-sample: the grid was tuned on these incidents; H1 is tested on the held-out "
+        "set at Step 11",
+        "false alerts are scored only on normal-traffic time the model was not fitted on",
+        "without_carry_over: sensitivity, leaves out incidents with an L0 alert already firing "
+        "before the fault (left over from the previous run); the primary result keeps them",
         "detector: exploratory (not a level of the ladder)",
     ]
     return out
@@ -283,45 +330,131 @@ def as_of(meta: dict, jobs: list[dict], t: float) -> tuple[dict, list[dict]]:
     return {**meta, "status": "completed" if done else "in_progress"}, seen
 
 
-def first_ci_finding(model: CIModel, meta: dict, jobs: list[dict]) -> float | None:
+def first_alert(check, meta: dict, jobs: list[dict]) -> float | None:
+    """Seconds from the run's first job start to the first poll at which check(run, jobs, t)
+    holds, polling every STEP as the run unfolds; None if it never does."""
     starts = [l0_baseline.ts(j["started_at"]) for j in jobs if j.get("started_at")]
     ends = [l0_baseline.ts(j["completed_at"]) for j in jobs if j.get("completed_at")]
     if not starts:
         return None
-    det, t = CIDetector(model), min(starts)
+    t = min(starts)
     while t <= max(ends or starts) + STEP:
-        if det.check(*as_of(meta, jobs, t), t):
+        if check(*as_of(meta, jobs, t), t):
             return t - min(starts)
         t += STEP
     return None
 
 
-def without(model: CIModel, jobs: list[dict]) -> CIModel:
+# CI L0, decided 2026-10-28 and frozen before any CI scoring: a job alerts when its duration
+# exceeds 3x its median over the dev history, or when 3 consecutive runs fail (one branch).
+CI_L0 = {"duration_factor": 3.0, "failure_streak": 3}
+
+
+def job_durations(ci: list[tuple[dict, list[dict]]]) -> dict[str, list[float]]:
+    """Durations of successful jobs, by job name."""
+    out: dict[str, list[float]] = defaultdict(list)
+    for _, jobs in ci:
+        for job in jobs:
+            if (
+                job.get("conclusion") == "success"
+                and job.get("started_at")
+                and job.get("completed_at")
+            ):
+                d = l0_baseline.ts(job["completed_at"]) - l0_baseline.ts(job["started_at"])
+                out[job["name"]].append(d)
+    return dict(out)
+
+
+def without(history: dict[str, list[float]], jobs: list[dict]) -> dict[str, list[float]]:
     """Leave this run's own durations out of the history it is judged against."""
-    durations = {k: list(v) for k, v in model.durations.items()}
-    for job in jobs:
-        if job.get("conclusion") == "success" and job.get("started_at") and job.get("completed_at"):
-            d = l0_baseline.ts(job["completed_at"]) - l0_baseline.ts(job["started_at"])
-            if d in durations.get(job["name"], []):
-                durations[job["name"]].remove(d)
-    return CIModel(durations=durations, k=model.k, min_runs=model.min_runs, streak=model.streak)
+    left = {k: list(v) for k, v in history.items()}
+    for name, ds in job_durations([({}, jobs)]).items():
+        for d in ds:
+            if d in left.get(name, []):
+                left[name].remove(d)
+    return left
 
 
-def score_ci(runs: list[dict], model: CIModel) -> dict:
-    anomalies, normal = [], []
-    for r in runs:
-        for meta, jobs in ci_runs(r):
-            if r["family"] == "pipeline":
-                anomalies.append(first_ci_finding(model, meta, jobs))
-            else:
-                normal.append(first_ci_finding(without(model, jobs), meta, jobs) is not None)
-    mttd = [m for m in anomalies if m is not None]
+def l0_duration_check(history: dict[str, list[float]]):
+    medians = {k: statistics.median(v) for k, v in history.items() if v}
+
+    def check(meta: dict, jobs: list[dict], t: float) -> bool:
+        for job in jobs:
+            if job.get("started_at") and job["name"] in medians:
+                end = l0_baseline.ts(job["completed_at"]) if job.get("completed_at") else t
+                elapsed = end - l0_baseline.ts(job["started_at"])
+                if elapsed > CI_L0["duration_factor"] * medians[job["name"]]:
+                    return True
+        return False
+
+    return check
+
+
+def l1_duration_check(model: CIModel, history: dict[str, list[float]]):
+    det = CIDetector(
+        CIModel(durations=history, k=model.k, min_runs=model.min_runs, streak=model.streak)
+    )
+    return lambda meta, jobs, t: any(f.kind == "slow" for f in det.check(meta, jobs, t))
+
+
+def streak_runs(ci: list[tuple[dict, list[dict]]], by_job: bool, streak: int) -> set[int]:
+    """Runs that complete a failure streak, in time order: L0 counts failed runs per branch,
+    the detector failed jobs per branch and job."""
+    flagged, count = set(), defaultdict(int)
+    for meta, jobs in sorted(ci, key=lambda rj: rj[0].get("created_at") or ""):
+        branch = meta.get("head_branch", "")
+        keys = (
+            [((branch, j["name"]), j.get("conclusion")) for j in jobs]
+            if by_job
+            else [((branch,), meta.get("conclusion"))]
+        )
+        for key, conclusion in keys:
+            if conclusion == "failure":
+                count[key] += 1
+                if count[key] == streak:
+                    flagged.add(meta.get("id"))
+            elif conclusion == "success":
+                count[key] = 0
+    return flagged
+
+
+def score_ci(runs: list[dict], model: CIModel | None) -> dict:
+    """Pipeline-family runs are the anomalies (a slow step); every other run is normal and is
+    judged against the history without itself. L1 = L0 plus the detector."""
+    every = [(r, rj) for r in runs for rj in ci_runs(r)]
+    history = job_durations([rj for r, rj in every if r["family"] != "pipeline"])
+    l0_streak = streak_runs([rj for _, rj in every], False, CI_L0["failure_streak"])
+    l1_streak = streak_runs([rj for _, rj in every], True, model.streak) if model else set()
+    times: dict[str, list] = {"L0": [], "L1": [], "detector": []}
+    labels = []
+    for r, (meta, jobs) in every:
+        hist = history if r["family"] == "pipeline" else without(history, jobs)
+        l0 = first_alert(l0_duration_check(hist), meta, jobs)
+        det = first_alert(l1_duration_check(model, hist), meta, jobs) if model else None
+        labels.append(r["family"] == "pipeline")
+        times["L0"].append(l0)
+        times["detector"].append(det)
+        times["L1"].append(min((x for x in (l0, det) if x is not None), default=None))
+
+    def block(found: list) -> dict:
+        hits = [m for m, bad in zip(found, labels, strict=True) if bad and m is not None]
+        return {
+            "recall": rate(len(hits), sum(labels)),
+            "mttd_s_median": statistics.median(hits) if hits else None,
+            "false_flags_per_run": rate(
+                sum(m is not None for m, bad in zip(found, labels, strict=True) if not bad),
+                len(labels) - sum(labels),
+            ),
+        }
+
     return {
-        "recall": rate(len(mttd), len(anomalies)),
-        "mttd_s_median": statistics.median(mttd) if mttd else None,
+        **{name: block(found) for name, found in times.items()},
+        "streak_runs": {"L0": sorted(l0_streak), "detector": sorted(l1_streak)},
+        "L0_rule": CI_L0,
+        "history": {name: len(ds) for name, ds in sorted(history.items())},
+        "detector_min_runs": model.min_runs if model else None,
         "mttd_from": "the run's first job start",
-        "false_flags_per_run": rate(sum(normal), len(normal)),
-        "L0": "not defined: no frozen L0 rule for CI durations (open question)",
+        "notes": ["detector: exploratory (not a level of the ladder)"],
     }
 
 
@@ -329,10 +462,11 @@ def score_ci(runs: list[dict], model: CIModel) -> dict:
 
 
 def fit(runs: list[dict], grid: dict = GRID, budget: float = FA_BUDGET) -> MonitorModel:
-    normal = [r for r in runs if r["family"] == "normal"]
+    measured, _ = runtime_set(runs)
+    normal = [r for r in measured if r["family"] == "normal"]
     if not normal:
         raise ValueError("no normal-traffic recording: nothing to fit the runtime detector on")
-    scored = [r for r in runs if r["family"] in ("runtime", "normal")]
+    scored = [r for r in measured if not carry_over(r)]  # tuned on clean incidents only
     cache = {r["id"]: snapshots(r) for r in scored}
     fit_snaps, fit_spans = [], {}
     for r in normal:
@@ -352,8 +486,8 @@ def fit(runs: list[dict], grid: dict = GRID, budget: float = FA_BUDGET) -> Monit
                 )
                 times = {i: detector_times(m, cache[i]) for i in cache}
                 l1 = {r["id"]: sorted(set(l0_times(r)) | set(times[r["id"]])) for r in scored}
-                cases = outcomes(runs, l1)
-                fa = false_alerts(runs, times, fit_spans)  # what the detector adds to L0
+                cases = outcomes(scored, l1)
+                fa = false_alerts(scored, times, fit_spans)  # what the detector adds to L0
                 mttd = [c[2] for c in cases.values() if c[2] is not None]
                 row = {
                     "z_threshold": z,
@@ -383,18 +517,20 @@ def fit(runs: list[dict], grid: dict = GRID, budget: float = FA_BUDGET) -> Monit
 def score(runs: list[dict], model: MonitorModel) -> dict:
     out = {"recordings": len(runs)}
     out["runtime"] = score_runtime(runs, model.runtime) if model.runtime else "no runtime model"
-    out["ci"] = score_ci(runs, model.ci) if model.ci else "no CI model"
+    out["ci"] = score_ci(runs, model.ci)
     return out
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("fit", "score"))
-    parser.add_argument("recordings", type=Path)
+    parser.add_argument("recordings", type=Path, nargs="+", help="folders or zips")
     parser.add_argument("--model", type=Path, default=MODEL_FILE)
     parser.add_argument("--out", type=Path, default=OUT)
     args = parser.parse_args(argv)
-    runs = load_runs(open_recordings(args.recordings))
+    runs = [r for path in args.recordings for r in load_runs(open_recordings(path))]
+    if len({r["id"] for r in runs}) != len(runs):
+        raise ValueError("the same recording id appears twice")
     if args.command == "fit":
         print(fit(runs).save(args.model))
         return 0

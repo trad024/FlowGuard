@@ -167,6 +167,31 @@ def test_fit_on_normal_then_score_l0_vs_l1_per_band(dev, tmp_path):
     assert out["L0"]["false_alerts_per_hour"]["episodes"] == 1  # the firing at T0 + 5000
 
 
+def test_unmeasured_l0_is_left_out_and_carry_over_is_a_sensitivity(tmp_path):
+    write_recording(tmp_path, "normal", family="normal", seconds=1800, seed=3)
+    s1 = T0 + 10_000
+    err, truth = incident(s1 + 60, "near", 0.9)
+    write_recording(  # an alert left over from the previous run fires before the fault
+        tmp_path, "carried", family="runtime", start=s1, seconds=420, seed=4, error=err,
+        truth=truth, alerts=[("ContainerOOMKilled", [s1 + 10, s1 + 25, s1 + 70])],
+    )  # fmt: skip
+    s2 = T0 + 20_000
+    err, truth = incident(s2 + 60, "near", 0.9)
+    rec = write_recording(
+        tmp_path, "old", family="runtime", start=s2, seconds=420, seed=5, error=err, truth=truth
+    )
+    (rec / "prometheus" / "alerts.json").unlink()  # recorded before the L0 rules were
+    runs = mr.load_runs(tmp_path)
+    assert [mr.carry_over(r) for r in runs if r["family"] == "runtime"] == [True, False]
+    model = mr.fit(runs, grid=TINY_GRID)
+    out = mr.score(runs, model)["runtime"]
+    assert out["label"] == "dev, in-sample"
+    assert out["not_scored"] == {"no ALERTS series recorded (L0 unmeasurable)": ["old"]}
+    assert out["L0"]["recall"] == mr.rate(1, 1)  # the leftover alert counts, as l0_baseline does
+    assert out["without_carry_over"]["excluded"] == ["carried"]
+    assert out["without_carry_over"]["L0"]["recall"]["n"] == 0
+
+
 def test_replayed_inputs_carry_no_experiment_words(dev):
     runs = {r["id"]: r for r in mr.load_runs(dev)}
     snaps = mr.snapshots(runs["rt-above"])
@@ -188,18 +213,24 @@ def gh(t):
     return iso(t)
 
 
-def ci_run(run_id, unit_s, start):
-    run = {"id": run_id, "head_branch": "dev", "status": "completed", "conclusion": "success"}
+def ci_run(run_id, unit_s, start, branch="dev", conclusion="success"):
+    run = {
+        "id": run_id,
+        "head_branch": branch,
+        "status": "completed",
+        "conclusion": conclusion,
+        "created_at": gh(start),
+    }
     jobs = [
         {"id": run_id * 10 + 1, "name": "build", "conclusion": "success",
          "started_at": gh(start), "completed_at": gh(start + 60)},
-        {"id": run_id * 10 + 2, "name": "unit", "conclusion": "success",
+        {"id": run_id * 10 + 2, "name": "unit", "conclusion": conclusion,
          "started_at": gh(start + 60), "completed_at": gh(start + 60 + unit_s)},
     ]  # fmt: skip
     return run, jobs
 
 
-def test_ci_scoring_flags_the_slow_run_before_it_ends_and_no_normal_run(tmp_path):
+def test_ci_scoring_l0_vs_l1_on_a_slow_run_and_normal_runs(tmp_path):
     for i, d in enumerate([98, 104, 100, 97, 103, 101, 99, 102]):
         write_recording(
             tmp_path,
@@ -212,9 +243,32 @@ def test_ci_scoring_flags_the_slow_run_before_it_ends_and_no_normal_run(tmp_path
     runs = mr.load_runs(tmp_path)
     model = mr.fit_ci([rj for r in runs if r["family"] != "pipeline" for rj in mr.ci_runs(r)])
     out = mr.score_ci(runs, model)
-    assert out["recall"]["k"] == 1 and out["false_flags_per_run"]["k"] == 0
-    assert out["false_flags_per_run"]["n"] == 8
-    assert 60 < out["mttd_s_median"] < 60 + 220  # while the unit job is still running
+    assert out["L0"]["recall"]["k"] == 0  # 220 s is under 3 x the 100 s median
+    assert (
+        out["L1"]["recall"]["k"] == 1
+        and out["L1"]["false_flags_per_run"] == out["L0"]["false_flags_per_run"]
+    )
+    assert out["L1"]["false_flags_per_run"]["k"] == 0 and out["L1"]["false_flags_per_run"]["n"] == 8
+    assert 60 < out["L1"]["mttd_s_median"] < 60 + 220  # while the unit job is still running
+    assert out["history"] == {"build": 8, "unit": 8}
+
+
+def test_ci_l0_rule_is_frozen():
+    assert mr.CI_L0 == {"duration_factor": 3.0, "failure_streak": 3}  # decided 2026-10-28
+    check = mr.l0_duration_check({"unit": [90.0, 100.0, 110.0]})
+    run, jobs = ci_run(1, 300, T0)
+    assert not check(run, jobs, T0 + 1e4)  # exactly 3 x the median: no alert
+    run, jobs = ci_run(1, 301, T0)
+    assert check(run, jobs, T0 + 1e4)
+    running = [{**j, "completed_at": None} for j in jobs]
+    assert not check(run, running, T0 + 60 + 300) and check(run, running, T0 + 60 + 301)
+    failed = [ci_run(i, 30, T0 + i, conclusion="failure") for i in range(1, 4)]
+    assert mr.streak_runs(failed, by_job=False, streak=3) == {3}
+    assert mr.streak_runs(failed[:2], by_job=False, streak=3) == set()
+    reset = [failed[0], failed[1], ci_run(9, 30, T0 + 2.5), failed[2]]
+    assert mr.streak_runs(reset, by_job=False, streak=3) == set()
+    other = [failed[0], failed[1], ci_run(4, 30, T0 + 3, branch="x", conclusion="failure")]
+    assert mr.streak_runs(other, by_job=False, streak=3) == set()  # per branch
 
 
 def test_held_out_material_is_refused(tmp_path):
