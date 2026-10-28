@@ -70,8 +70,8 @@ ruff format --check .
 pytest
 ```
 
-Development tooling pins Ruff 0.14.3. The newer 0.17.3 formatter also formats an existing
-Markdown example in `agents/README.md`; the pin keeps CI consistent with the local checks.
+Development tooling follows the approved D38 pin, Ruff 0.17.1. Its formatting of the
+existing Markdown example in `agents/README.md` keeps CI consistent with local checks.
 Verified: initial suite 503 passed / 3 skipped; SHAP parity on all 54 policy rows; paired
 development replay; hard rules, grey-zone scores, explanation additivity, valid proposals,
 catalog membership, human routing, ablation switching, model failure fallback and firewall.
