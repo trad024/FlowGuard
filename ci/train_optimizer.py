@@ -11,6 +11,7 @@ import shap
 from sklearn.metrics import mean_absolute_error, roc_auc_score
 
 import plan
+from optimizer.failfast import evaluate as failfast_evaluate
 from optimizer.features import FEATURES, JOBS
 from optimizer.history import observations, split_runs
 from optimizer.policy import apply
@@ -188,6 +189,10 @@ def main(argv=None):
             model, [r for r in validation if r["branch"] == "dev"], plan.load_catalog()
         ),
         "all_validation_projection": projection(model, validation, plan.load_catalog()),
+        "fail_fast_validation": failfast_evaluate(model, validation, plan.load_catalog()),
+        "fail_fast_dev_validation": failfast_evaluate(
+            model, [r for r in validation if r["branch"] == "dev"], plan.load_catalog()
+        ),
     }
     for job in JOBS:
         indices = [i for i, row in enumerate(va) if row["job"] == job]

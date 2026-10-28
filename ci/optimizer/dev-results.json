@@ -79,5 +79,107 @@
     "baseline_optional_seconds_to_failure": null,
     "optimizer_optional_seconds_to_failure": null,
     "limitation": "Execution-time sum projection, not measured wall-clock saving; unobserved jobs excluded"
+  },
+  "fail_fast_validation": {
+    "validation_commits": 12,
+    "observed_failed_runs": 3,
+    "paired_failed_runs": 3,
+    "excluded_unobserved_prefix_run_ids": [],
+    "optional_failure_cases": 1,
+    "baseline_failures_on_first_optional_job": 1,
+    "reordered_failures_on_first_optional_job": 1,
+    "failures_caught_strictly_earlier": 0,
+    "failures_caught_later": 0,
+    "baseline_mean_seconds_to_failure": 97.0,
+    "reordered_mean_seconds_to_failure": 97.0,
+    "total_seconds_saved": 0.0,
+    "cases": [
+      {
+        "run_id": 40385540979,
+        "sha": "34270beadfbca704b96bdfd1c661cb3f45df0d9e",
+        "baseline_order": [
+          "lint",
+          "integration"
+        ],
+        "likely_failure_first_order": [
+          "integration",
+          "lint"
+        ],
+        "predicted_failure_probabilities": {
+          "lint": 0.12729198139991413,
+          "integration": 0.2354999677065178
+        },
+        "optional_failure_reached": false,
+        "baseline_first_optional_failed": false,
+        "reordered_first_optional_failed": false,
+        "baseline_execution_seconds_to_failure": 125.0,
+        "reordered_execution_seconds_to_failure": 125.0,
+        "seconds_saved": 0.0,
+        "recorded_wall_seconds_to_failure": 137.0
+      },
+      {
+        "run_id": 40386000895,
+        "sha": "690d2c006f0581cf932f8af06a9e4d75353d32f1",
+        "baseline_order": [
+          "integration"
+        ],
+        "likely_failure_first_order": [
+          "integration"
+        ],
+        "predicted_failure_probabilities": {
+          "integration": 0.0026497257090768466
+        },
+        "optional_failure_reached": true,
+        "baseline_first_optional_failed": true,
+        "reordered_first_optional_failed": true,
+        "baseline_execution_seconds_to_failure": 140.0,
+        "reordered_execution_seconds_to_failure": 140.0,
+        "seconds_saved": 0.0,
+        "recorded_wall_seconds_to_failure": 179.0
+      },
+      {
+        "run_id": 40387188816,
+        "sha": "d736cbe5fdd928d696505abad978a2d7a124cab1",
+        "baseline_order": [
+          "integration",
+          "sbom",
+          "multiarch"
+        ],
+        "likely_failure_first_order": [
+          "integration",
+          "sbom",
+          "multiarch"
+        ],
+        "predicted_failure_probabilities": {
+          "integration": 0.25219342877302153,
+          "sbom": 0.25219342877302153,
+          "multiarch": 0.25219342877302153
+        },
+        "optional_failure_reached": false,
+        "baseline_first_optional_failed": false,
+        "reordered_first_optional_failed": false,
+        "baseline_execution_seconds_to_failure": 26.0,
+        "reordered_execution_seconds_to_failure": 26.0,
+        "seconds_saved": 0.0,
+        "recorded_wall_seconds_to_failure": 36.0
+      }
+    ],
+    "scope": "Reorder-only projection: descending predicted failure probability, stable ties; same baseline path-filtered jobs; observed execution durations only. Build/unit remain first; scans remain last. Queue/setup delays are excluded from projected times. Recorded wall time is descriptive and has no counterfactual measurement. Successful runs excluded from failure-time denominator; no unobserved duration is imputed. This diagnostic order differs from the production p(failure)/duration policy; unknown prior scan status still preserves the safe run-all order."
+  },
+  "fail_fast_dev_validation": {
+    "validation_commits": 8,
+    "observed_failed_runs": 0,
+    "paired_failed_runs": 0,
+    "excluded_unobserved_prefix_run_ids": [],
+    "optional_failure_cases": 0,
+    "baseline_failures_on_first_optional_job": 0,
+    "reordered_failures_on_first_optional_job": 0,
+    "failures_caught_strictly_earlier": 0,
+    "failures_caught_later": 0,
+    "baseline_mean_seconds_to_failure": null,
+    "reordered_mean_seconds_to_failure": null,
+    "total_seconds_saved": 0,
+    "cases": [],
+    "scope": "Reorder-only projection: descending predicted failure probability, stable ties; same baseline path-filtered jobs; observed execution durations only. Build/unit remain first; scans remain last. Queue/setup delays are excluded from projected times. Recorded wall time is descriptive and has no counterfactual measurement. Successful runs excluded from failure-time denominator; no unobserved duration is imputed. This diagnostic order differs from the production p(failure)/duration policy; unknown prior scan status still preserves the safe run-all order."
   }
 }

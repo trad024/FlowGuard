@@ -87,10 +87,47 @@ are `ci/optimizer/dev-results.json`.
 
 These are sums of observed job execution seconds under alternative plans, not measured
 pipeline wall-clock changes: queue delays, matrix scheduling, setup and cross-run cache
-effects can differ. The **20% duration reduction target is not met**. No reliable time-to-
-first-failure improvement is established. This is a small development experiment, not
+effects can differ. The **20% duration reduction target is not met**. This is a small development experiment, not
 final evaluation or evidence of zero future failures. More diverse dev runs and repeated
 paired baseline/optimizer runs are required before a stronger performance claim.
+
+## Fail-fast view on the same validation commits
+
+The separate reorder-only diagnostic ranks the baseline's eligible optional jobs by
+descending predicted failure probability (stable ties), keeping exactly the same jobs and
+the same build/unit prefix. It neither changes path filtering nor skips jobs. This isolates
+the requested likely-to-fail-first view from the production probability/duration heuristic
+and its safe run-all behavior when prior scan status is unknown.
+
+| Measurement | Fixed baseline | Likely failure first |
+|---|---:|---:|
+| Validation commits | 12 | 12 |
+| Paired failed runs with an observed prefix | 3 | 3 |
+| Mean projected execution time to first failure | 97.0 s | 97.0 s |
+| Failed optional-stage runs | 1 | 1 |
+| Failure on first eligible optional job | 1/1 | 1/1 |
+| Failures caught strictly earlier than baseline | ? | 0/3 |
+| Total execution seconds saved before failure | ? | 0.0 s |
+
+Per failed commit, projected times are 125/125 s (unit failure), 140/140 s
+(integration failure), and 26/26 s (build failure). The mandatory failures occur before
+optional jobs. For the integration failure, the baseline path filters already retain only
+integration, so reordering cannot improve it. The recorded wall times from run creation to
+the first failed job completion are 137, 179 and 36 seconds; these describe historical
+runs, not measured alternative schedules. The historical integration run executed extra
+optional jobs that baseline path filtering would omit.
+
+The eight validation `dev` commits contain no failures: time to first failure is undefined,
+not zero. Across all 12 validation commits, successful runs are excluded from that metric.
+Unlike complete-duration projection, fail-fast scoring only requires the prefix through
+the first failure; a missing later scans job cannot exclude an observed failure. There are
+no missing-prefix exclusions in these three cases. The JSON records run IDs, commit SHAs,
+both orders, predicted probabilities and per-run times.
+
+**Neither duration nor fail-fast benefit is demonstrated on this validation sample.**
+The sole optional failure offers no ordering comparison. Times sum observed execution
+durations, excluding queue/setup delays and counterfactual cache effects. No live paired
+workflow was run. Zero of three earlier catches does not establish zero future benefit.
 
 ## Reproduce
 
