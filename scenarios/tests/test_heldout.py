@@ -29,10 +29,12 @@ def prereg():
     return p
 
 
-def test_the_committed_draft_is_not_frozen_and_has_no_counts():
+def test_the_committed_draft_is_not_frozen_and_release_waits_for_step_8():
     p = yaml.safe_load(heldout.PREREG.read_text(encoding="utf-8"))
-    assert p["status"] == "draft"
-    assert all(f["count"] is None for f in p["families"].values())
+    assert p["status"] == "draft" and p["frozen"] is None
+    counts = {name: f["count"] for name, f in p["families"].items()}
+    assert counts.pop("release") is None  # set after Step 8 by the H4 count rule (D44)
+    assert all(isinstance(c, int) and c > 0 for c in counts.values())
     assert set(p["families"]) == set(runner.FAMILIES)
 
 
@@ -147,6 +149,33 @@ def test_generation_needs_the_eval_freeze_tag_and_unchanged_agents(tmp_path):
     (tmp_path / "agents" / "new.py").write_text("")
     with pytest.raises(SystemExit, match="changed since"):
         heldout.frozen_agents(tmp_path)
+
+
+def test_diagnose_freeze_covers_only_the_diagnose_code(tmp_path):
+    def git(*args):
+        heldout.subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    pkg = tmp_path / "agents" / "flowguard"
+    pkg.mkdir(parents=True)
+    (pkg / "diagnose.py").write_text("x = 1\n")
+    (pkg / "gate.py").write_text("y = 1\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "preregistration.yaml").write_text("status: draft\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "agents")
+    git("tag", heldout.DIAGNOSE_TAG)
+    with pytest.raises(SystemExit, match="not frozen"):
+        heldout.diagnose_frozen(tmp_path)
+    (tmp_path / "docs" / "preregistration.yaml").write_text("status: frozen\n")
+    heldout.diagnose_frozen(tmp_path)
+    (pkg / "gate.py").write_text("y = 2\n")  # Steps 6 and 8 go on: not Diagnose code
+    heldout.diagnose_frozen(tmp_path)
+    (pkg / "diagnose.py").write_text("x = 2\n")
+    with pytest.raises(SystemExit, match="changed since diagnose-freeze"):
+        heldout.diagnose_frozen(tmp_path)
 
 
 def test_the_draft_registers_effects_methods_and_intervals():

@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: draft
-version: 0.2
+version: 0.3
 drafted: 2026-10-27
 frozen: null
 amendments: []
@@ -29,16 +29,31 @@ freeze_rule:
     been seen. A fix found then is reported as a limitation, not applied to the scored run.
   - Analyses not listed in this file are labelled exploratory in the report.
   - Every amendment to this file after freezing is dated, justified and listed in the report.
+  - Staged freeze (D39). Once this file is frozen and Step 7 is done, the Diagnose code is
+    tagged `diagnose-freeze`; its runs on the test templates and on LogChunks may then start
+    while Steps 6 and 8 are built. `eval-freeze` (all agent code) still comes before the
+    held-out scenarios are generated and the rest of Step 11 runs.
+  - H4's count is the one amendment planned in advance (D44), see smallest_effect.H4.
 
 # ------------------------------------------------------------------ smallest effects of interest
 # The smallest difference worth detecting; the power analysis (D16) sizes the counts for these
 # at 80% power and alpha 0.05, paired.
 smallest_effect:
-  H1: {metric: DSO1 recall, difference: +10 percentage points, levels: [L0, L1]}
-  H2: {metric: DSO2 macro-F1, difference: +0.10, levels: [regex, L3]}
-  H3: {metric: LogChunks localization hit rate, difference: +10 percentage points, levels: [L2, L3],
-       note: confirmed (D35); the hallucination rate (secondary) keeps -10 points}
-  H4: {metric: wrong decisions, difference: -50% relative, levels: [L3, L4]}
+  H1: {metric: DSO1 recall, difference: +15 percentage points, levels: [L0, L1], decision: D43}
+  H2: {metric: DSO2 macro-F1, difference: +0.10, levels: [regex, L3],
+       role: secondary (D42), reported with n and a Wilson interval, no confirmatory test}
+  H3: {metric: LogChunks localization hit rate, difference: +15 percentage points, levels: [L2, L3],
+       decision: D43; the hallucination rate (secondary) keeps -10 points}
+  H4:
+    metric: wrong decisions
+    difference: -50% relative
+    levels: [L3, L4]           # the reference is L3, Release without collaboration (D44)
+    count_rule: >-
+      set after Step 8 from L3's wrong-decision rate measured on dev (node-stress release
+      scenarios), recorded as a dated amendment before the held-out set is generated; the
+      count gives 80% power at the Holm step for this family. If L3's dev wrong rate is
+      under 10%, H4 is reported descriptively (n, Wilson intervals, no test) and the
+      confirmatory family becomes H1 and H3.
 
 # ------------------------------------------------------------------ scenario families
 # count: null until the power analysis (D16) sets it; the v1 placeholders are noted.
@@ -50,7 +65,7 @@ smallest_effect:
 
 families:
   release:                       # DSO3, H4 (node stress), H5
-    count: null                  # v1 placeholder about 40
+    count: null                  # set after Step 8 by smallest_effect.H4.count_rule (D44)
     delivery: config
     kinds: {none: 0.4, http_errors: 0.3, latency: 0.3}
     bands:
@@ -78,6 +93,8 @@ families:
             jitter_ms: {dist: int, low: 0, high: 300}
             fraction: {dist: log_uniform, low: 0.03, high: 1.0}
     node_stress:                 # H4: one view (CPU, client latency) misleads
+      # D44: rescaled before freezing so that stress visibly distorts the canary's metrics
+      # on dev (values below are the 4b ones until the dev check is done)
       share_of_none: 0.25        # good releases under stress: must be promoted
       share_of_bad: 0.25         # bad releases under stress: must still be rolled back
       cpu_workers: {dist: int, low: 2, high: 6}
@@ -85,7 +102,7 @@ families:
     load: {rate: 10}
 
   runtime:                       # DSO1 runtime, H1
-    count: null                  # v1 placeholder about 15
+    count: 157                   # H1 needs 235 incidents (D43): 2/3 runtime, 1/3 pipeline
     delivery: runtime
     kinds: {error_burst: 1, latency_spike: 1, memory_leak: 1}
     # Bands against the DSO1 L0 alert rules (D33): 5xx > 5% and p99 > 1 s, service-wide.
@@ -147,7 +164,8 @@ families:
     load: {rate: 10}
 
   ci:                            # DSO2 live end-to-end set; the offline corpus is D6
-    count: null
+    count: 12                    # one live run per test-split variant (H2 is secondary, D42)
+    execution: parallel scenario/* branches, 4 to 5 at a time, no cluster (D44)
     delivery: commit
     kinds: {code: 1, dependency: 1, environment: 1, flaky_test: 1, infrastructure: 1}
     templates:                   # test-split variants (D6, D34; corpus-split.json)
@@ -165,13 +183,14 @@ families:
       - infrastructure-05.v3
 
   security:                      # DSO4
-    count: null
+    count: 14                    # 4b proposal, unchanged
     delivery: commit
     kinds: {leaked_secret: 1, vulnerable_dependency: 1, low_severity_finding: 1}
     # vulnerable_dependency and low_severity_finding draw from dso4_dependency_pool
 
   pipeline:                      # DSO1 CI detector
-    count: null
+    count: 79                    # the CI third of H1's 235 incidents (D43)
+    execution: parallel scenario/* branches, 4 to 5 at a time, no cluster (D44)
     delivery: commit
     kinds: {slow_step: 1}
     parameters:
@@ -265,17 +284,37 @@ ground_truth:
 external:                        # D32: no manual labelling
   logchunks:
     use: evidence localization only (no root-cause labels)
-    sample: evaluation/datasets/logchunks-sample-150.csv
+    logs: >-
+      all 797 labelled failed logs, located by evaluation/logchunks.py into
+      evaluation/datasets/logchunks-located.csv (D43): 514 located in full are used;
+      202 partly located and 81 not located are excluded and reported. The 150-log sample
+      is superseded (its earlier 130 usable counted partly located logs too)
+    not_before: step 11, after diagnose-freeze (D39)
     target: >-
       the log lines matching the human-labelled chunk (whitespace collapsed, ANSI codes and
       carriage-return overwrites removed); logs whose chunk matches no line are excluded and
-      counted (20 of 150 on 2026-10-27)
+      counted
     hit: at least one quoted line inside the target
     line_metrics: precision and recall of the quoted lines against the target
 
 # ------------------------------------------------------------------ LLM (D27, D28)
 llm:
   provider: Groq (free tier)
+  lanes: >-
+    team members' own Groq accounts (GROQ_KEY_n in .env), one lane per independent
+    organization, identical settings, each within its own free limits; seeded item-to-lane
+    assignment, all of an item's calls on one lane, lane and provider recorded per call; no
+    key rotation (D41). The report states that the calls ran on team members' individual
+    free-tier accounts
+  levels_calling: [L2, L3]      # L4 and L5 reuse L3's cached answers for identical inputs (D39)
+  openrouter: >-
+    development only (D40): openai/gpt-oss-120b:free, same settings, backend recorded; used
+    for reported results only if it matches the Groq lanes on the same validation logs
+    (per-item agreement, macro-F1) within noise
+  prompt_experiments: may use a second free Groq model; validation and final runs use the pinned model (D39)
+  request_budget: >-
+    the log shown to the model is cut to 14,000 characters (its end kept) and each L3 example
+    to 2,000, so one request stays under the free tier's 8,000 tokens per minute
   model: openai/gpt-oss-120b     # pinned; logged per call; never mixed within one result set
   temperature: 0
   reasoning_effort: low
@@ -288,7 +327,8 @@ llm:
 # Poisson interval instead.
 metrics:
   H1: {primary: DSO1 recall, secondary: [false alerts per hour of normal traffic, MTTD]}
-  H2: {primary: DSO2 macro-F1 on the generated corpus, secondary: [accuracy, cost per incident, latency per incident]}
+  H2: {secondary (D42): DSO2 macro-F1 on the generated corpus, also: [accuracy, cost per incident, latency per incident],
+       note: L0's regex scores 82% accuracy on the generated failures (dev, 61/74)}
   H3: {primary: localization hit rate on LogChunks (D32),
        secondary: [hallucination rate (quoted lines not in the log), line-level precision and recall, macro-F1 on the corpus]}
   H4: {primary: wrong decisions (false rollbacks and wrong fixes) in collaboration scenarios}
@@ -312,7 +352,8 @@ comparisons:                     # paired: same scenarios, seeds and order at ev
       - LLM zero-shot (L2)
       - LLM + retrieval (L3)
       - fine-tuned encoder
-    primary: [L3 vs regex, L3 vs TF-IDF + LR]
+    primary: none               # H2 is secondary (D42)
+    reported_first: [L3 vs regex, L3 vs TF-IDF + LR]
     secondary: [encoder vs L3, encoder vs TF-IDF + LR, L2 vs L3]
     test: >-
       paired bootstrap of the macro-F1 difference, 10000 resamples; all five methods reported
@@ -321,7 +362,9 @@ comparisons:                     # paired: same scenarios, seeds and order at ev
   H4: {levels: [L3, L4], test: exact McNemar on wrong / right decisions}
   H5: {levels: [L5 settings], test: none; Wilson interval per setting, the constraint is a count}
 time_metrics: paired bootstrap intervals, 10000 resamples (MTTD, time to rollback, durations)
-multiplicity: Holm correction across the primary tests of H1 to H4 (D31); secondary and per-band results uncorrected, labelled as such
+multiplicity: >-
+  Holm correction across the confirmatory tests H1, H3 and H4 (D31, D42); H1 and H3 only if
+  H4 is descriptive (D44). Secondary and per-band results uncorrected, labelled as such
 per_band: every release and runtime result is also reported per intensity band (descriptive)
 
 # ------------------------------------------------------------------ execution
