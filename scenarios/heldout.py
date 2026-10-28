@@ -48,6 +48,20 @@ ENV_FILE = ROOT / ".env"
 OUT = ROOT / "scenarios" / "heldout"
 SEED_VAR = "FLOWGUARD_HELDOUT_SEED"
 FREEZE_TAG = "eval-freeze"
+# D39 staged freeze: Diagnose's held-out (test templates) and LogChunks runs may start once the
+# pre-registration is frozen and this tag marks the Diagnose code, before eval-freeze.
+DIAGNOSE_TAG = "diagnose-freeze"
+DIAGNOSE_PATHS = (
+    "agents/flowguard/diagnose.py",
+    "agents/flowguard/logreduce.py",
+    "agents/flowguard/retrieval.py",
+    "agents/flowguard/classical.py",
+    "agents/flowguard/calibration.py",
+    "agents/flowguard/llm.py",
+    "agents/flowguard/lanes.py",
+    "agents/flowguard/catalog.py",
+    "agents/flowguard/contracts.py",
+)
 PILOT = ROOT / "scenarios" / "dev" / "pilot"
 PILOT_SEED = "dev-pilot-20261027"  # public: the pilot is dev data, never the held-out set
 
@@ -268,18 +282,29 @@ def run_order(seed: str, specs: list[dict]) -> list[str]:
     return ids
 
 
-def frozen_agents(root: Path = ROOT) -> None:
-    """Refuse unless the eval-freeze tag exists and agents/ is unchanged since it."""
+def frozen_agents(
+    root: Path = ROOT, tag: str = FREEZE_TAG, paths: tuple[str, ...] = ("agents",)
+) -> None:
+    """Refuse unless `tag` exists and `paths` (default agents/) are unchanged since it."""
 
     def git(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
 
-    if git("rev-parse", "-q", "--verify", f"refs/tags/{FREEZE_TAG}").returncode != 0:
-        raise SystemExit(f"tag the agent code {FREEZE_TAG} before generating the held-out set")
-    changed = git("diff", "--quiet", FREEZE_TAG, "--", "agents").returncode
-    untracked = git("ls-files", "--others", "--exclude-standard", "--", "agents").stdout.strip()
+    if git("rev-parse", "-q", "--verify", f"refs/tags/{tag}").returncode != 0:
+        raise SystemExit(f"tag the agent code {tag} before any held-out run")
+    changed = git("diff", "--quiet", tag, "--", *paths).returncode
+    untracked = git("ls-files", "--others", "--exclude-standard", "--", *paths).stdout.strip()
     if changed != 0 or untracked:
-        raise SystemExit(f"agents/ has changed since {FREEZE_TAG}")
+        raise SystemExit(f"{', '.join(paths)} changed since {tag}")
+
+
+def diagnose_frozen(root: Path = ROOT) -> None:
+    """D39: Diagnose's test-template and LogChunks runs need the frozen pre-registration and
+    the Diagnose code unchanged since diagnose-freeze."""
+    prereg = yaml.safe_load((root / "docs" / "preregistration.yaml").read_text(encoding="utf-8"))
+    if prereg.get("status") != "frozen":
+        raise SystemExit("the pre-registration is not frozen")
+    frozen_agents(root, DIAGNOSE_TAG, DIAGNOSE_PATHS)
 
 
 # ---------------------------------------------------------------- DSO4, DSO5, DSO6 sets
