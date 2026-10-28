@@ -1,0 +1,87 @@
+[
+  {
+    "id": "security-leaked-secret",
+    "run_id": 40383618943,
+    "bad_release": true,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 1
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": [
+        {
+          "RuleID": "redacted-secret"
+        }
+      ]
+    }
+  },
+  {
+    "id": "security-low-severity-finding",
+    "run_id": 40501662040,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    }
+  },
+  {
+    "id": "security-vulnerable-dependency",
+    "run_id": 40500780155,
+    "bad_release": true,
+    "counts": {
+      "trivy_high": 4,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-56851",
+                "Severity": "HIGH",
+                "FixedVersion": "0.41.0"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-56852",
+                "Severity": "HIGH",
+                "FixedVersion": "0.39.0"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-56851",
+                "Severity": "HIGH",
+                "FixedVersion": "0.41.0"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-56852",
+                "Severity": "HIGH",
+                "FixedVersion": "0.39.0"
+              }
+            ]
+          }
+        ]
+      },
+      "gitleaks": []
+    }
+  }
+]

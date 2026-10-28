@@ -1,0 +1,48 @@
+{
+  "format": 1,
+  "type": "logistic-shap",
+  "model": "security-dev-policy-v1",
+  "features": [
+    "high_runtime",
+    "high_dev",
+    "high_unknown",
+    "medium_runtime",
+    "medium_dev",
+    "medium_unknown",
+    "low",
+    "no_fix",
+    "unknown_fix"
+  ],
+  "weights": [
+    1.665561184320156,
+    0.4328518616874429,
+    1.665561184320156,
+    0.4328518616874429,
+    -0.7088495078461325,
+    0.4328518616874429,
+    -1.117134602653515,
+    -0.8559808305936885,
+    0.0
+  ],
+  "intercept": -0.6260458731845527,
+  "background_mean": [
+    0.25925925925925924,
+    0.25925925925925924,
+    0.25925925925925924,
+    0.25925925925925924,
+    0.25925925925925924,
+    0.25925925925925924,
+    0.7777777777777778,
+    1.1666666666666667,
+    0.0
+  ],
+  "threshold": 0.5,
+  "training": {
+    "source": "explicit synthetic development review-policy fixtures, not outcomes",
+    "rows": 54,
+    "sha256": "7b896a0285d22be3464638e73fad5581b3fc6b6fa8178cc6073ebe6a6e39fc81",
+    "sklearn": "1.7.2",
+    "shap": "0.49.1",
+    "seed": 17
+  }
+}

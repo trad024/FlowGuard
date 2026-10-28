@@ -1,0 +1,33 @@
+{
+  "source": "three recorded development security cases",
+  "n": 3,
+  "levels": {
+    "L0": {
+      "actions": {
+        "block_deployment": 2,
+        "allow_deployment": 1
+      },
+      "false_blocks": 0,
+      "controls": 1,
+      "false_block_rate": 0.0,
+      "false_block_wilson95": [
+        0.0,
+        0.7934506856227626
+      ]
+    },
+    "L1": {
+      "actions": {
+        "block_deployment": 1,
+        "allow_deployment": 1,
+        "request_security_review": 1
+      },
+      "false_blocks": 0,
+      "controls": 1,
+      "false_block_rate": 0.0,
+      "false_block_wilson95": [
+        0.0,
+        0.7934506856227626
+      ]
+    }
+  }
+}
