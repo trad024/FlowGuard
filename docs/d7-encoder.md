@@ -14,8 +14,8 @@ remains a draft until the real CPU run, publication and benchmark complete.
 
 ## Split and data boundary
 
-The branch starts from `dev` commit `0e3b8ca`, including the newly recorded corpus split and
-approved D37/D38 changes. The pre-registration's CI template assignment is now populated.
+The branch is based on `dev` commit `be5e4b2`, including accepted D39?D44 decisions and
+the draft 0.3 pre-registration. The CI template assignment is populated.
 `evaluation/datasets/corpus-split.json` assigns 20 training templates and 5 validation
 templates. Excluding its explicitly unverified variants leaves 60 training and 14 validation
 variants, with every root-cause class represented. No test-template contents were opened.
@@ -143,7 +143,7 @@ short log is a smoke workload, not a representative CI-log latency distribution.
 
 ## Verification and remaining work
 
-Verified locally with Python 3.11: updated-dev baseline 507 passed / 3 skipped; deterministic
+Verified with Python 3.11: deterministic
 mocked five-class predictions; report schema; all scores sum to one; valid catalog proposals;
 L0 preservation; invalid-output escalation; train/validation allowlist and pre-open rejection;
 known-value F1 calculations; checksum/unsafe-archive handling with mocked networking;
