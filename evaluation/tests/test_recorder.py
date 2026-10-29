@@ -183,3 +183,14 @@ def test_recordings_and_heldout_scenarios_are_gitignored():
     ignored = (recorder.ROOT / ".gitignore").read_text().splitlines()
     assert "evaluation/recordings/" in ignored
     assert "scenarios/heldout/" in ignored
+
+
+def test_recordings_hold_every_series_the_monitor_reads():
+    """D49: the Monitor's live queries are recorded under the same names, node series included."""
+    from flowguard import series
+
+    for name, query in series.SELECTORS.items():
+        assert recorder.SELECTORS.get(name) == query, name
+    assert {"memory_limits", "node_cpu", "node_memory", "node_allocatable"} <= set(
+        recorder.SELECTORS
+    )

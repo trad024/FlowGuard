@@ -35,7 +35,7 @@ def make_proposal(**overrides) -> ActionProposal:
 
 def test_every_contract_builds_and_round_trips_through_json():
     objects = [
-        Event(id="e1", type="ci_failure", service="podinfo", environment="staging"),
+        Event(id="e1", type="ci_run_completed", service="podinfo", environment="staging"),
         Incident(
             id="inc-1",
             source="monitor",

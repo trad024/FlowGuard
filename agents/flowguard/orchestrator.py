@@ -1,7 +1,12 @@
 """Orchestrator (Step 5): one LangGraph graph for workflows A to D, configured by ablation level.
 
-    event -> open incident -> agent -> [Monitor found an incident: Release if mid-canary, else
-    Diagnose] -> gate -> human approval (ask_human only) -> executor -> audit log
+    metrics_tick, ci_run_completed -> Monitor -> [no incident: end, nothing recorded]
+        -> open incident (Monitor's detector and score) -> Release if mid-canary, else
+        Diagnose (a CI run only when a job failed) -> gate -> ...
+    other events -> open incident -> agent -> gate -> human approval (ask_human only)
+        -> executor -> audit log
+
+Monitored events run the Monitor first and open an incident only when it reports one (D49).
 
 Levels (D10) are configuration flags of the same code:
     L0  rule baselines, no gate (DSO6's baseline): dry-run executor only
@@ -16,6 +21,7 @@ agent receives, for the agent-input leakage test (D25).
 
 from __future__ import annotations
 
+import dataclasses
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -63,15 +69,16 @@ LEVELS = {
     "L5": LevelConfig("L5", ml=True, llm=True, retrieval=True, grounding=True, collaboration=True),
 }
 
+MONITORED = {"metrics_tick", "ci_run_completed"}  # C, and B through the Monitor (D49)
 ROUTES = {
-    "ci_failure": AgentName.DIAGNOSE,  # B
+    "ci_run_completed": AgentName.MONITOR,  # B: a failed run is a Monitor incident first
     "scan_completed": AgentName.SECURITY,  # A
     "pipeline_started": AgentName.OPTIMIZER,  # A
     "rollout_step": AgentName.RELEASE,  # D
     "metrics_tick": AgentName.MONITOR,  # C
 }
 SOURCES = {
-    "ci_failure": "ci_failure",
+    "ci_run_completed": "ci_failure",
     "metrics_tick": "monitor",
     "rollout_step": "rollout",
     "scan_completed": "ci_failure",
@@ -119,21 +126,25 @@ class Orchestrator:
             AgentName.OPTIMIZER: Optimizer(),
         }
         graph = StateGraph(State)
+        graph.add_node("monitor", self._monitor)
         graph.add_node("open_incident", self._open_incident)
         graph.add_node("run_agent", self._run_agent)
         graph.add_node("follow_up", self._follow_up)
         graph.add_node("gate", self._gate)
         graph.add_node("approve", self._approve)
         graph.add_node("execute", self._execute)
-        graph.add_edge(START, "open_incident")
-        graph.add_edge("open_incident", "run_agent")
         graph.add_conditional_edges(
-            "run_agent",
-            lambda s: (
-                "follow_up" if s["agent"] == AgentName.MONITOR and s["output"].incident else "gate"
-            ),
-            {"follow_up": "follow_up", "gate": "gate"},
+            START,
+            lambda s: "monitor" if s["event"].type in MONITORED else "open_incident",
+            {"monitor": "monitor", "open_incident": "open_incident"},
         )
+        graph.add_conditional_edges(
+            "monitor",
+            lambda s: "follow_up" if s["output"].incident else END,
+            {"follow_up": "follow_up", END: END},
+        )
+        graph.add_edge("open_incident", "run_agent")
+        graph.add_edge("run_agent", "gate")
         graph.add_edge("follow_up", "gate")
         graph.add_edge("gate", "approve")
         graph.add_edge("approve", "execute")
@@ -160,9 +171,7 @@ class Orchestrator:
             evidence=self.record.evidence(incident_id),
         )
 
-    def _open_incident(self, state: State) -> State:
-        event = state["event"]
-        incident_id = f"i-{secrets.token_hex(5)}"
+    def _incident(self, event: Event, incident_id: str, out: AgentOutput | None = None) -> None:
         self.record.open(
             Incident(
                 id=incident_id,
@@ -171,9 +180,28 @@ class Orchestrator:
                 environment=event.environment,
                 in_canary=bool(event.payload.get("in_canary")),
                 ci_run_id=event.payload.get("params", {}).get("run_id"),
+                detector=out.detector if out else None,
+                anomaly_score=out.anomaly_score if out else None,
             )
         )
-        return {"incident_id": incident_id, "agent": ROUTES[event.type]}
+
+    def _open_incident(self, state: State) -> State:
+        incident_id = f"i-{secrets.token_hex(5)}"
+        self._incident(state["event"], incident_id)
+        return {"incident_id": incident_id, "agent": ROUTES[state["event"].type]}
+
+    def _monitor(self, state: State) -> State:
+        """Monitor first (D49): an incident is opened only when it reports one."""
+        event = state["event"]
+        incident_id = f"i-{secrets.token_hex(5)}"
+        inp = self._inputs(event, incident_id)
+        out = self._call(AgentName.MONITOR, inp)
+        if not out.incident:
+            return {"agent": AgentName.MONITOR, "inp": inp, "output": out}
+        self._incident(event, incident_id, out)
+        for post in out.evidence:
+            self.record.post(post)
+        return {"incident_id": incident_id, "agent": AgentName.MONITOR, "inp": inp, "output": out}
 
     def _call(self, agent: AgentName, inp: AgentInput) -> AgentOutput:
         if self.input_tap is not None:
@@ -211,9 +239,14 @@ class Orchestrator:
         return {"inp": inp, "output": out}
 
     def _follow_up(self, state: State) -> State:
-        """Workflow C: Monitor opened an incident; Release if mid-canary, else Diagnose."""
-        agent = AgentName.RELEASE if state["event"].payload.get("in_canary") else AgentName.DIAGNOSE
-        out = self._call(agent, state["inp"])
+        """Monitor opened an incident: Release if mid-canary, else Diagnose. A CI incident goes
+        to Diagnose only when a job failed (there is a log); a slow job alone stays evidence."""
+        event = state["event"]
+        if event.type == "ci_run_completed" and not event.payload.get("log"):
+            return {"agent": AgentName.MONITOR, "output": AgentOutput()}
+        agent = AgentName.RELEASE if event.payload.get("in_canary") else AgentName.DIAGNOSE
+        params = {k: v for k, v in state["inp"].params.items() if k != "ci_run"}
+        out = self._call(agent, dataclasses.replace(state["inp"], params=params))
         for post in out.evidence:
             self.record.post(post)
         return {"agent": agent, "output": out}

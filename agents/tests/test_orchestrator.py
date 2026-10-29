@@ -8,6 +8,7 @@ from flowguard.audit import AuditLog
 from flowguard.contracts import Event
 from flowguard.executor import Executor
 from flowguard.incidents import IncidentRecord
+from flowguard.monitor import ci_event
 from flowguard.orchestrator import Orchestrator, level
 
 
@@ -32,16 +33,29 @@ def event(kind, env="staging", **payload):
     return Event(id="e-1", type=kind, service="podinfo", environment=env, payload=payload)
 
 
+def ci(log="", conclusion="failure", run_id=7):
+    """A finished CI run as GitHub shows it; a failed run's first failed job has the log."""
+    jobs = [
+        {"id": 4, "name": "lint", "conclusion": "success"},
+        {"id": 5, "name": "unit", "conclusion": conclusion},
+    ]
+    run = {"id": run_id, "status": "completed", "conclusion": conclusion}
+    return ci_event(run, jobs, 1.8e9, log=log)
+
+
 def test_b_ci_failure_is_diagnosed_gated_and_executed(tmp_path):
     orch = make(tmp_path)
     log = "--- FAIL: TestRefresh (0.02s)\n    x_test.go:9: not done after 12ms (budget 10ms)"
-    out = orch.handle(event("ci_failure", log=log, params={"job_id": 5}))
+    out = orch.handle(ci(log))
     (p,) = out["output"].proposals
     assert p.action == "retry_job" and p.params["job_id"] == 5
+    assert "ci_run" not in p.params  # the run's JSON is the Monitor's input, not an action's
     assert [d.outcome for d in out["decisions"]] == ["execute"]  # low tier
     assert out["results"][0].success
     assert orch.record.incident(out["incident_id"])[1] == "resolved"
-    assert [a for a, _ in orch.taps] == ["diagnose"]
+    assert [a for a, _ in orch.taps] == ["monitor", "diagnose"]  # Monitor first (D49)
+    incident, _ = orch.record.incident(out["incident_id"])
+    assert incident.detector == "ci" and incident.ci_run_id == 7
 
 
 def test_a_security_blocks_and_optimizer_keeps_forced_jobs(tmp_path):
@@ -59,6 +73,7 @@ def test_c_monitor_incident_goes_to_release_mid_canary_else_diagnose(tmp_path):
     orch = make(tmp_path)
     quiet = orch.handle(event("metrics_tick"))
     assert quiet["output"].proposals == [] and quiet["agent"] == "monitor"
+    assert "incident_id" not in quiet  # D49: no incident unless the Monitor reports one
     canary = orch.handle(
         event(
             "metrics_tick",
@@ -70,6 +85,36 @@ def test_c_monitor_incident_goes_to_release_mid_canary_else_diagnose(tmp_path):
     assert canary["agent"] == "release" and canary["output"].proposals[0].action == "rollout_abort"
     runtime = orch.handle(event("metrics_tick", alerts=["ContainerOOMKilled"]))
     assert runtime["agent"] == "diagnose"
+    incident, _ = orch.record.incident(runtime["incident_id"])
+    assert incident.source == "monitor" and incident.detector == "alert_rule"
+
+
+def test_monitor_runs_first_and_only_its_incidents_are_opened(tmp_path):
+    """D49: quiet ticks and green CI runs open nothing; the Monitor fills detector and score."""
+    orch = make(tmp_path)
+    assert "incident_id" not in orch.handle(ci(conclusion="success"))
+    assert "incident_id" not in orch.handle(event("metrics_tick"))
+    with orch.record._connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM incidents").fetchone()[0] == 0
+    again = orch.handle(ci("./a.go:3:2: undefined: foo", run_id=8))
+    incident, _ = orch.record.incident(again["incident_id"])
+    assert incident.detector == "ci" and incident.anomaly_score is None
+    assert any("CI run 8 failed: unit" in e.claim for e in orch.record.evidence(incident.id))
+
+
+def test_a_runtime_detection_carries_its_score(tmp_path):
+    from flowguard.stubs import AgentOutput
+
+    orch = make(tmp_path)
+
+    class Scored:
+        def run(self, inp, cfg):
+            return AgentOutput(incident=True, detector="runtime", anomaly_score=0.83)
+
+    orch.agents["monitor"] = Scored()
+    out = orch.handle(event("metrics_tick"))
+    incident, _ = orch.record.incident(out["incident_id"])
+    assert (incident.detector, incident.anomaly_score) == ("runtime", 0.83)
 
 
 def test_d_p1_holds_a_rollback_when_the_node_is_under_stress(tmp_path):
@@ -118,7 +163,7 @@ def test_l5_sweeps_the_threshold():
 
 def test_everything_is_audited(tmp_path):
     orch = make(tmp_path)
-    orch.handle(event("ci_failure", log="./a.go:3:2: undefined: foo"))
+    orch.handle(ci("./a.go:3:2: undefined: foo"))
     counts = {
         t: len(orch.audit.query(f"SELECT 1 FROM {t}")) for t in ("proposals", "gate_decisions")
     }

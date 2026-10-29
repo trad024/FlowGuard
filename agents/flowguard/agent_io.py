@@ -28,3 +28,6 @@ class AgentOutput:
     label_scores: dict[str, dict[str, float]] = field(default_factory=dict)  # proposal id -> scores
     evidence: list[EvidencePost] = field(default_factory=list)
     incident: bool = False
+    # Monitor only (D49): which detector reported the incident, and its score in [0, 1]
+    detector: str | None = None  # "alert_rule", "runtime" or "ci"
+    anomaly_score: float | None = None

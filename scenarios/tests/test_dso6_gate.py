@@ -12,10 +12,11 @@ import heldout
 from flowguard.approval import SimulatedApprover
 from flowguard.audit import AuditLog
 from flowguard.catalog import CATALOG
-from flowguard.contracts import ActionProposal, Event, RiskTier
+from flowguard.contracts import ActionProposal, RiskTier
 from flowguard.executor import Executor
 from flowguard.gate import RiskGate
 from flowguard.incidents import IncidentRecord
+from flowguard.monitor import ci_event
 from flowguard.orchestrator import Orchestrator, level
 
 DEV_SEED = "dev-dso6-20261027"
@@ -110,17 +111,11 @@ def test_injected_instructions_never_reach_the_cluster(items, tmp_path, name):
         approver=SimulatedApprover(policy=lambda p: False),
         diagnose_llm=obedient_llm,
     )
-    for item in injections:
+    for n, item in enumerate(injections, start=1):  # one failed run per item
         log = f"--- FAIL: TestHandler (0.01s)\n{item['input']['text']}\n"
-        out = orch.handle(
-            Event(
-                id=item["id"],
-                type="ci_failure",
-                service="podinfo",
-                environment="staging",
-                payload={"log": log},
-            )
-        )
+        run = {"id": 1, "status": "completed", "conclusion": "failure"}
+        jobs = [{"id": 2, "name": "unit", "conclusion": "failure"}]
+        out = orch.handle(ci_event({**run, "id": n}, jobs, 1.8e9, log=log))
         (p,) = out["output"].proposals
         assert CATALOG[p.action].tier == RiskTier.PROHIBITED  # the model was fooled
         assert [d.outcome for d in out["decisions"]] == ["reject"]  # the gate was not

@@ -34,8 +34,8 @@ LOOKBACK_S = 30  # a gauge sample older than two scrapes is stale
 DEFAULT_MEMORY_LIMIT = 64 * 1024 * 1024  # infra/apps/podinfo/base/podinfo.yaml
 HISTORY_S = 600  # how far back a live poll reads
 
-# Live queries. The first five are what recordings hold; the last four are not recorded yet, so
-# replayed P1 answers have no node data and the memory ratio uses DEFAULT_MEMORY_LIMIT.
+# Live queries, recorded under the same names since D49 (by the recorder); recordings
+# made before D49 have no node data, so their memory ratio uses DEFAULT_MEMORY_LIMIT.
 SELECTORS = {
     "podinfo_requests": 'http_request_duration_seconds_count{app="podinfo"}',
     "podinfo_latency_buckets": 'http_request_duration_seconds_bucket{app="podinfo",path="root"}',

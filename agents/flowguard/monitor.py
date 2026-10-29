@@ -404,6 +404,7 @@ class Monitor:
         self.alerts: set[str] = set()
         self.flagged: set[str] = set()
         self.last: tuple[float, dict] | None = None
+        self.failed_runs: set[int] = set()
         self.hash_seen: dict[str, float] = {}
 
     @property
@@ -418,31 +419,61 @@ class Monitor:
             parts = series.split_key(str(key))
             if parts and "/" in parts[0] and (h := series.pod_hash(parts[0].split("/", 1)[1])):
                 self.hash_seen.setdefault(h, t)
-        posts = [self._alert_post(inp, a, t) for a in sorted(set(inp.alerts) - self.alerts)]
+        found: list[tuple[str, EvidencePost]] = [
+            ("alert_rule", self._alert_post(inp, a, t))
+            for a in sorted(set(inp.alerts) - self.alerts)
+        ]
         self.alerts = set(inp.alerts)
+        found += [("ci", p) for p in self._failed_run(inp)]  # at every level, as L0
+        score = None
         if cfg.ml:
-            posts += self._detect(inp, t)
+            detected, score = self._detect(inp, t)
+            found += detected
             off = [n for n, d in (("runtime", self.runtime), ("ci", self.ci)) if d is None]
-            if posts and off:
-                posts.append(
-                    self._post(inp, f"detectors off, no fitted model: {', '.join(off)}", [])
-                )
-        return AgentOutput(incident=bool(posts), evidence=posts)
+            if found and off:
+                note = self._post(inp, f"detectors off, no fitted model: {', '.join(off)}", [])
+                found.append(("", note))
+        detector = next((k for k, _ in found if k), None)
+        return AgentOutput(
+            incident=bool(found),
+            evidence=[p for _, p in found],
+            detector=detector,
+            anomaly_score=score if detector == "runtime" else None,
+        )
 
-    def _detect(self, inp: AgentInput, t: float) -> list[EvidencePost]:
-        posts = []
+    def _failed_run(self, inp: AgentInput) -> list[EvidencePost]:
+        """A completed CI run with a failed job is an incident (L0's CI detection)."""
+        ci = inp.params.get("ci_run")
+        run = ci.get("run", {}) if isinstance(ci, dict) else {}
+        run_id = int(run.get("id", 0) or 0)
+        if run.get("conclusion") != "failure" or run_id in self.failed_runs:
+            return []
+        self.failed_runs.add(run_id)
+        failed = [j for j in ci.get("jobs", []) if j.get("conclusion") == "failure"]
+        names = ", ".join(j["name"] for j in failed) or "unknown job"
+        refs = [f"ci:run/{run_id}/job/{j.get('id')}" for j in failed] or [f"ci:run/{run_id}"]
+        return [self._post(inp, f"CI run {run_id} failed: {names}", refs)]
+
+    def _detect(
+        self, inp: AgentInput, t: float
+    ) -> tuple[list[tuple[str, EvidencePost]], float | None]:
+        """(detector, evidence) per finding, and the highest isolation score flagged now."""
+        posts: list[tuple[str, EvidencePost]] = []
+        score = None
         if self.runtime is not None:
             flagged = {s.entity: s for s in self.runtime.step(inp.metrics, t) if s.flagged}
             # One episode per namespace: its pods and the namespace row are one incident
             known = {e.split("/")[0] for e in self.flagged}
             new = sorted(e for e in flagged if e.split("/")[0] not in known)
-            posts += [self._runtime_post(inp, flagged[e]) for e in new]
+            posts += [("runtime", self._runtime_post(inp, flagged[e])) for e in new]
             self.flagged = set(flagged)
+            if new:
+                score = min(1.0, max(0.0, max(flagged[e].score or 0.0 for e in new)))
         run = inp.params.get("ci_run")
         if self.ci is not None and isinstance(run, dict):
             for f in self.ci.check(run.get("run", {}), run.get("jobs", []), t):
-                posts.append(self._ci_post(inp, f))
-        return posts
+                posts.append(("ci", self._ci_post(inp, f)))
+        return posts, score
 
     # ------------------------------------------------------------ evidence
 
@@ -550,19 +581,41 @@ def tick_event(
     *,
     environment: str = "staging",
     service: str = "podinfo",
-    ci_run: dict | None = None,
     in_canary: bool = False,
 ) -> Event:
-    """One Monitor poll as the orchestrator's metrics_tick event."""
+    """One Monitor poll as the orchestrator's metrics_tick event (CI results come as
+    ci_run_completed events, see ci_event)."""
     params: dict = {"ts": t}
-    if ci_run is not None:
-        params.update(ci_run=ci_run, run_id=ci_run.get("run", {}).get("id"))
     return Event(
         id=f"tick-{int(t)}",
         type="metrics_tick",
         service=service,
         environment=environment,
         payload={"metrics": snapshot, "alerts": alerts, "params": params, "in_canary": in_canary},
+        received_at=datetime.fromtimestamp(t, UTC),
+    )
+
+
+def ci_event(
+    run: dict,
+    jobs: list[dict],
+    t: float,
+    *,
+    log: str = "",
+    environment: str = "staging",
+    service: str = "podinfo",
+) -> Event:
+    """A finished CI run (GitHub's run and jobs JSON) and, if a job failed, its log (D49)."""
+    failed = next((j for j in jobs if j.get("conclusion") == "failure"), None)
+    params: dict = {"ts": t, "ci_run": {"run": run, "jobs": jobs}, "run_id": run.get("id")}
+    if failed:
+        params["job_id"] = failed.get("id")
+    return Event(
+        id=f"ci-{run.get('id')}",
+        type="ci_run_completed",
+        service=service,
+        environment=environment,
+        payload={"log": log, "params": params},
         received_at=datetime.fromtimestamp(t, UTC),
     )
 

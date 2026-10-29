@@ -53,6 +53,17 @@ SELECTORS = {
     # The DSO1 L0 alert rules (D33), pending and firing, as Prometheus evaluated them live
     "alerts": 'ALERTS{alertname=~"HighErrorRatio|HighLatencyP99|ContainerOOMKilled'
     '|PodCrashLooping|ContainerHighMemory"}',
+    # D49: memory limits and node load, so replayed P1 answers see node stress; the same
+    # names and queries as flowguard.series. Node usage is cAdvisor's root cgroup (no
+    # node-exporter in the stack)
+    "memory_limits": (
+        'kube_pod_container_resource_limits{namespace=~"staging|prod",container="podinfo",'
+        'resource="memory"}'
+    ),
+    "node_cpu": 'container_cpu_usage_seconds_total{id="/"}',
+    "node_memory": 'container_memory_working_set_bytes{id="/"}',
+    "node_allocatable": 'kube_node_status_allocatable{resource=~"cpu|memory"}',
+    "node_capacity": 'kube_node_status_capacity{resource=~"cpu|memory"}',
 }
 
 

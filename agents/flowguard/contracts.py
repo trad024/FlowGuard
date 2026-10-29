@@ -47,7 +47,7 @@ Confidence = Field(ge=0.0, le=1.0)
 
 EventType = Literal[
     "metrics_tick",  # Prometheus poll or Alertmanager alert
-    "ci_failure",  # GitHub Actions run failed
+    "ci_run_completed",  # GitHub Actions run finished: run, jobs, the failed job's log
     "rollout_step",  # Argo Rollouts canary step began
     "scan_completed",  # CI scan job finished
     "pipeline_started",  # first "plan" job of a CI run
