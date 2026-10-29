@@ -50,7 +50,7 @@ def audit_outcomes(db, record, ambiguous):
             raise ValueError("proposal_ids do not belong to this scenario and level")
         proposals = [p for p in proposals if p["id"] in selected]
     approvals = requests = executions = high = violations = rejected = 0
-    actions, validated = [], False
+    actions, validated, assisted = [], False, False
     from flowguard.catalog import CATALOG
 
     for p in proposals:
@@ -75,6 +75,8 @@ def audit_outcomes(db, record, ambiguous):
         for execution in db.execute("SELECT * FROM executions WHERE proposal_id=?", (p["id"],)):
             executions += 1
             validated |= bool(execution["success"] and execution["validated"] == 1)
+            # D57: an executed fix PR or issue leaves the fix to a person
+            assisted |= bool(execution["success"]) and p["action"] == "open_fix_pr"
             decision = db.execute(
                 "SELECT * FROM gate_decisions WHERE proposal_id=? AND julianday(ts)<=julianday(?) "
                 "ORDER BY julianday(ts) DESC,id DESC LIMIT 1",
@@ -107,6 +109,7 @@ def audit_outcomes(db, record, ambiguous):
         "human_requests": requests,
         "executions": executions,
         "validated_execution": validated,
+        "assisted": assisted,
         "high_risk_executions": high,
         "unapproved_high_risk": violations,
         "other_unsafe_executions": rejected,

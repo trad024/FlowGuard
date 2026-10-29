@@ -2,8 +2,11 @@
 
 pin_dependency is a generic "set module X to version Y" in app/podinfo/go.mod. It is proposed
 only for a dependency diagnosis whose evidence names the failing module and version, and only
-where a pin fixes the failure: Y is the version the build used before, different from the one
-that fails. `set_version` is the go.mod edit. go.sum is not recomputed: `go mod tidy` would
+where a pin fixes the failure: Y is X's version in go.mod at the last commit whose CI passed,
+different from the one that fails. Y is looked up after the diagnosis
+(github_actions.plan_fix), never shown to Diagnose: a go.mod diff would point every level at
+"dependency". If X is not found there, there is no pin and the diagnosis goes out as an issue
+(open_fix_pr). `set_version` is the go.mod edit. go.sum is not recomputed: `go mod tidy` would
 add X@Y's two hashes (the module's and its go.mod's) and drop the lines nothing needs any
 more, which takes the go toolchain and the module graph. So a pin is complete only when go.sum
 already holds both hashes for X@Y; otherwise the go.mod edit goes into a draft PR for a person
@@ -24,6 +27,7 @@ import re
 from collections.abc import Iterable, Mapping
 
 GO_MOD = "app/podinfo/go.mod"
+GO_SUM = "app/podinfo/go.sum"
 MAX_QUOTES = 5
 MAX_QUOTE_CHARS = 300
 MAX_FIX_CHARS = 1_000
@@ -53,12 +57,31 @@ def named(lines: Iterable[str]) -> list[tuple[str, str]]:
     return found
 
 
+def required(go_mod: str, module: str) -> str | None:
+    """The version go.mod requires `module` at; None if it is not required exactly once or is
+    replaced (no pin can come from it)."""
+    try:
+        lines, i = _require_line(go_mod.split("\n"), module)
+    except ValueError:
+        return None
+    return lines[i].split("//", 1)[0].split()[-1]
+
+
 def set_version(go_mod: str, module: str, version: str) -> str:
     """go.mod with `module` required at `version`. Refuses a module that is not required, is
     required twice, is already at that version, or is replaced (a pin would not take effect)."""
     if not MODULE.fullmatch(module) or not VERSION.fullmatch(version):
         raise ValueError(f"not a module path and version: {module} {version}")
-    lines = go_mod.split("\n")
+    lines, i = _require_line(go_mod.split("\n"), module)
+    m = re.match(rf"(\s*(?:require\s+)?{re.escape(module)}\s+)(\S+)", lines[i])
+    if m[2] == version:
+        raise ValueError(f"{module} is already at {version}")
+    lines[i] = m[1] + version + lines[i][m.end() :]
+    return "\n".join(lines)
+
+
+def _require_line(lines: list[str], module: str) -> tuple[list[str], int]:
+    """The index of the one line requiring `module` (single or in a block)."""
     hits, block = [], None
     for i, line in enumerate(lines):
         words = line.split("//", 1)[0].split()
@@ -82,12 +105,7 @@ def set_version(go_mod: str, module: str, version: str) -> str:
             hits.append(i)
     if len(hits) != 1:
         raise ValueError(f"{module} is required {len(hits)} times in go.mod, expected once")
-    i = hits[0]
-    m = re.match(rf"(\s*(?:require\s+)?{re.escape(module)}\s+)(\S+)", lines[i])
-    if m[2] == version:
-        raise ValueError(f"{module} is already at {version}")
-    lines[i] = m[1] + version + lines[i][m.end() :]
-    return "\n".join(lines)
+    return lines, hits[0]
 
 
 def sum_has(go_sum: str, module: str, version: str) -> bool:
@@ -98,8 +116,8 @@ def sum_has(go_sum: str, module: str, version: str) -> bool:
 
 def pin(evidence: Iterable[str], used: Mapping[str, str]) -> dict | None:
     """The first pin the evidence supports: a module it names at a failing version, set back
-    to the version the build used before (`used`: module -> version). None if no pin fixes
-    the failure."""
+    to its version at the last commit whose CI passed (`used`: module -> version). None if no
+    pin fixes the failure."""
     for module, failing in named(evidence):
         good = used.get(module)
         if good and good != failing:

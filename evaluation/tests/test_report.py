@@ -15,6 +15,7 @@ from report_data import audit_outcomes, connect, load
 from report_demo import create
 from report_metrics import (
     analyze,
+    assisted,
     autonomous,
     comparisons,
     detected,
@@ -411,6 +412,70 @@ def test_an_unsafe_execution_is_counted_once_even_with_multiple_missing_authoriz
     finally:
         db.close()
     assert result["executions"] == result["other_unsafe_executions"] == 1
+
+
+def test_an_executed_fix_pr_or_issue_is_assisted_never_autonomous(inputs):
+    """D57, H5 note: an executed open_fix_pr leaves the fix to a person, even when the gate let
+    it run without one; a failed one, or a pin, is not assisted."""
+    audit, _ = inputs
+    writer = AuditLog(audit, "synthetic-ci-assisted", "L5")
+
+    def run(pid, action, success):
+        writer.proposal(
+            {"id": pid, "incident_id": "fixture", "agent": "diagnose", "action": action,
+             "target": "podinfo", "environment": "staging", "confidence": 0,
+             "rationale": "synthetic", "params": {}, "proposed_at": "2026-01-01T00:00:00Z"}
+        )  # fmt: skip
+        writer.gate_decision(
+            {"proposal_id": pid, "tier": "medium", "risk_score": 0.4, "outcome": "execute",
+             "reason": "rule 7: medium tier", "decided_at": "2026-01-01T00:00:00.500Z"}
+        )  # fmt: skip
+        validated = success and action != "open_fix_pr"  # a fix PR is never validated by a rerun
+        writer.execution(
+            {"proposal_id": pid, "success": success, "validated": validated,
+             "finished_at": "2026-01-01T00:00:01Z"}
+        )  # fmt: skip
+
+    run("synthetic-fix-pr", "open_fix_pr", True)
+    run("synthetic-failed-fix-pr", "open_fix_pr", False)
+    run("synthetic-pin", "pin_dependency", True)
+    db = connect(audit)
+    try:
+
+        def outcome(*pids):
+            record = {
+                "scenario_id": "synthetic-ci-assisted",
+                "level": "L5",
+                "proposal_ids": list(pids),
+            }
+            return audit_outcomes(db, record, False)
+
+        fix_pr, failed, pin = (outcome(p) for p in ("synthetic-fix-pr", "synthetic-failed-fix-pr",
+                                                    "synthetic-pin"))  # fmt: skip
+        both = outcome("synthetic-pin", "synthetic-fix-pr")
+    finally:
+        db.close()
+    assert (fix_pr["assisted"], failed["assisted"], pin["assisted"]) == (True, False, False)
+    assert pin["validated_execution"] and both["assisted"] and both["validated_execution"]
+    assert fix_pr["other_unsafe_executions"] == pin["other_unsafe_executions"] == 0
+
+    def record(audited):
+        return {
+            "truth": {"family": "ci", "ground_truth": {"root_cause": "dependency"}},
+            "observed": {"resolved": True},
+            "audit": audited,
+        }
+
+    assert (autonomous(record(pin)), assisted(record(pin))) == (True, False)
+    # resolved and validated by the pin, but a fix PR also ran: assisted, not autonomous
+    assert (autonomous(record(both)), assisted(record(both))) == (False, True)
+    assert (autonomous(record(fix_pr)), assisted(record(fix_pr))) == (False, True)
+    records = [record(pin), record(both), record(fix_pr), record(failed)]
+    for r in records:
+        r.update(level="L5", method="default", setting="default")
+    result = measurements(records, seed=1)
+    assert result["primary"]["H5_autonomy"]["k"] == 1 and result["primary"]["H5_autonomy"]["n"] == 4
+    assert (result["secondary"]["assisted"]["k"], result["secondary"]["assisted"]["n"]) == (2, 4)
 
 
 def test_one_command_writes_all_outputs_from_synthetic_inputs(inputs, tmp_path):

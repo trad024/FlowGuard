@@ -97,11 +97,11 @@ def detected(record):
     return record["observed"].get("detected")
 
 
-def autonomous(record):
-    observed, audited = record["observed"], record["audit"]
+def h5_incident(record):
+    """H5's denominator: an incident the scenario's ground truth says needs resolving."""
     truth = record["truth"]
     gt = truth["ground_truth"]
-    incident = (
+    return (
         truth["family"] == "ci"
         and gt.get("root_cause") in CLASSES
         or truth["family"] == "runtime"
@@ -112,18 +112,30 @@ def autonomous(record):
         and gt.get("bad_release") is True
         or gt.get("collaboration_case") is True
     )
-    if not incident:
-        return None
-    if "resolved" not in observed:
+
+
+def autonomous(record):
+    """Resolved without a human. An executed open_fix_pr (a draft PR or an issue) is assisted,
+    never autonomous (D57, H5 note)."""
+    observed, audited = record["observed"], record["audit"]
+    if not h5_incident(record) or "resolved" not in observed:
         return None
     return bool(
         observed["resolved"]
+        and not audited.get("assisted")
         and audited["validated_execution"]
         and audited["approvals"] == 0
         and audited["human_requests"] == 0
         and audited["unapproved_high_risk"] == 0
         and audited["other_unsafe_executions"] == 0
     )
+
+
+def assisted(record):
+    """An H5 incident where an open_fix_pr executed: a person finishes the fix (D57)."""
+    if not h5_incident(record) or "resolved" not in record["observed"]:
+        return None
+    return bool(record["audit"].get("assisted"))
 
 
 def mttd(record):
@@ -185,6 +197,7 @@ def measurements(records, seed):
     hours = sum(float(r["truth"]["spec"]["hours"]) for r in normal)
     secondary = {
         "accuracy": proportion([a == b for a, b in diagnoses]),
+        "assisted": proportion(eligible(assisted)),  # H5's denominator; never in its numerator
         "hallucination_rate": proportion(
             [r["observed"]["hallucinated"] for r in records if "hallucinated" in r["observed"]]
         ),
