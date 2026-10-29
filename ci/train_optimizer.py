@@ -48,6 +48,7 @@ def projection(model, runs, catalog):
     comparable, missing, missed, observed_failures = 0, 0, 0, 0
     order_before = order_after = 0.0
     failure_cases = 0
+    per_run = []
     for run in runs:
         paths = [f["filename"] for f in run["files"]]
         stats = {f["filename"]: f for f in run["files"]}
@@ -62,11 +63,25 @@ def projection(model, runs, catalog):
         # Sum observed job execution seconds, excluding scheduling/runner queue delays.
         # No duration is imputed for a job that was not actually observed.
         required = {"build", "unit", "scans"} | set(baseline) | set(proposed)
+        detail = {
+            "run_id": run["run_id"],
+            "branch": run["branch"],
+            "previous_security": run["previous_security"],
+            "baseline_optional": baseline,
+            "optimizer_optional": proposed,
+            "comparable": required <= set(jobs),
+            "baseline_job_seconds": None,
+            "optimizer_job_seconds": None,
+        }
+        per_run.append(detail)
         if not required <= set(jobs):
             missing += 1
             continue
         comparable += 1
         mandatory = sum(jobs[j]["duration"] for j in ("build", "unit", "scans"))
+        detail["mandatory_job_seconds"] = mandatory
+        detail["baseline_job_seconds"] = mandatory + sum(jobs[j]["duration"] for j in baseline)
+        detail["optimizer_job_seconds"] = mandatory + sum(jobs[j]["duration"] for j in proposed)
         before += mandatory + sum(jobs[j]["duration"] for j in baseline)
         after += mandatory + sum(jobs[j]["duration"] for j in proposed)
         if failures & set(baseline) and failures & set(proposed):
@@ -84,6 +99,8 @@ def projection(model, runs, catalog):
             failure_cases += 1
     return {
         "n_commits": len(runs),
+        "unknown_prior_baseline_runs": sum(r["previous_security"] == "unknown" for r in runs),
+        "per_run": per_run,
         "comparable_complete_runs": comparable,
         "excluded_incomplete_runs": missing,
         "baseline_job_seconds": before,

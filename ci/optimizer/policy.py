@@ -1,20 +1,27 @@
-"""Planning policy: model failures run all checks, P2 overrides predicted skips."""
-
-import fnmatch
+"""Planning policy: baseline work bound, baseline fallback, P2 overrides eligible skips."""
 
 from optimizer.features import FEATURES, JOBS, dependencies_changed, extract
 from optimizer.portable import explain, predict, validate
+from plan import baseline_plan
 
 MANDATORY = frozenset({"build", "unit", "scan", "scans"})
 
 
 def apply(model, catalog, changed, stats=None, security_status="unknown", explanations=True):
-    validate(model)
     order = catalog["order"]
     if set(order) & MANDATORY or not set(order) <= set(JOBS):
         raise ValueError("invalid optional job catalog")
     if security_status not in ("clean", "flagged", "unknown"):
         raise ValueError("invalid previous security status")
+    if security_status == "unknown":
+        fallback = baseline_plan(catalog, changed)
+        return (
+            fallback.run,
+            fallback.skipped,
+            {},
+            ["previous security status unknown; used baseline order and filters"],
+        )
+    validate(model)
     if changed is None:
         return list(order), {}, {}, ["changes unknown; ran all"]
     predictions, vectors = {}, {}
@@ -26,20 +33,13 @@ def apply(model, catalog, changed, stats=None, security_status="unknown", explan
         if explanations:
             predictions[job]["duration_shap"] = explain(model["duration"], row, model["background"])
             predictions[job]["failure_shap"] = explain(model["failure"], row, model["background"])
-    if security_status == "unknown":
-        return list(order), {}, predictions, ["previous security status unknown; ran all"]
     forced = {"sbom"} if dependencies_changed(changed) or security_status == "flagged" else set()
-    skipped = {}
-    for job in order:
+    baseline = baseline_plan(catalog, changed)
+    skipped = dict(baseline.skipped)
+    # Optional work is always a subset of L0's eligible jobs. P2 prevents predictive
+    # skipping within that set; unrelated dependency files cannot add image work.
+    for job in baseline.run:
         if job in forced:
-            continue
-        relevant = any(
-            fnmatch.fnmatchcase(path, pattern)
-            for path in changed
-            for pattern in catalog["jobs"][job]["paths"]
-        )
-        if not relevant:
-            skipped[job] = "no changed file matches its paths"
             continue
         support = model["policy"]["support"][job]
         row = vectors[job]

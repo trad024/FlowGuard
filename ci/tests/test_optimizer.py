@@ -99,7 +99,7 @@ def test_exact_tree_shap_has_analytically_known_interaction_values():
 
 
 @pytest.mark.parametrize(
-    "changed,status", [(["app/podinfo/go.mod"], "clean"), (["docs/x.md"], "flagged")]
+    "changed,status", [(["app/podinfo/go.mod"], "clean"), (["app/podinfo/Dockerfile"], "flagged")]
 )
 def test_p2_overrides_even_a_model_that_wants_to_skip_everything(changed, status):
     model = numeric_model()
@@ -126,10 +126,38 @@ def test_predictive_skipping_needs_size_support_and_no_historical_failures():
     assert "lint" in run
 
 
-def test_unknown_changes_and_security_run_everything(model):
-    for changed, status in ((None, "clean"), ([], "unknown")):
-        run, skipped, _, warnings = apply(model, CATALOG, changed, security_status=status)
-        assert run == CATALOG["order"] and not skipped and warnings
+def test_unknown_changes_run_everything(model):
+    run, skipped, _, warnings = apply(model, CATALOG, None, security_status="clean")
+    assert run == CATALOG["order"] and not skipped and warnings
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        None,
+        [],
+        ["docs/x.md"],
+        ["app/podinfo/main.go"],
+        ["app/podinfo/go.sum"],
+        ["app/podinfo/Dockerfile.xx"],
+    ],
+)
+def test_unknown_security_exactly_matches_baseline_even_without_a_model(
+    changed, monkeypatch, tmp_path
+):
+    def refuse(*args, **kwargs):
+        raise AssertionError("unknown status invoked prediction")
+
+    monkeypatch.setattr("optimizer.policy.predict", refuse)
+    baseline = plan.baseline_plan(CATALOG, changed)
+    run, skipped, predictions, warnings = apply({}, CATALOG, changed, security_status="unknown")
+    assert (run, skipped) == (baseline.run, baseline.skipped)
+    assert not predictions and warnings
+    planned = plan.make_plan("optimizer", changed, CATALOG, tmp_path / "missing.json")
+    assert (planned.run, planned.skipped) == (baseline.run, baseline.skipped)
+    assert planned.mode == "baseline"
+    durations = {job: (i + 1) * 11 for i, job in enumerate(CATALOG["order"])}
+    assert sum(durations[job] for job in run) == sum(durations[job] for job in baseline.run)
 
 
 def test_mandatory_jobs_cannot_become_optional():
@@ -157,7 +185,7 @@ def test_reorders_by_failure_probability_per_second_without_skipping():
     "mutation",
     ["nan", "leaf", "feature", "threshold", "background", "support", "deep", "objective"],
 )
-def test_bad_models_always_fall_back_to_all_jobs(tmp_path, mutation):
+def test_bad_models_always_fall_back_to_baseline(tmp_path, mutation):
     model = numeric_model()
     if mutation == "nan":
         model["duration"]["trees"][0]["value"] = float("nan")
@@ -181,14 +209,25 @@ def test_bad_models_always_fall_back_to_all_jobs(tmp_path, mutation):
     path = tmp_path / "bad.json"
     path.write_text(json.dumps(model))
     p = plan.make_plan("optimizer", [], CATALOG, path, security_status="clean")
-    assert p.run == CATALOG["order"] and not p.skipped and p.warnings
+    assert p.run == [] and set(p.skipped) == set(CATALOG["order"]) and p.warnings
 
 
 def test_legacy_run_all_model_remains_supported(tmp_path):
     path = tmp_path / "old.json"
     path.write_text(json.dumps({"model": "old", "policy": {"type": "run-all"}}))
-    p = plan.make_plan("optimizer", [], CATALOG, path)
-    assert p.run == CATALOG["order"] and not p.warnings
+    p = plan.make_plan("optimizer", [], CATALOG, path, security_status="clean")
+    assert p.run == [] and not p.warnings
+
+
+@pytest.mark.parametrize("status", ["clean", "flagged", "unknown"])
+@pytest.mark.parametrize(
+    "paths", [["pyproject.toml"], ["docs/x.md"], ["app/podinfo/go.mod"], ["app/podinfo/main.go"]]
+)
+def test_optimizer_never_adds_work_outside_baseline(model, status, paths):
+    baseline = plan.baseline_plan(CATALOG, paths)
+    run, skipped, _, _ = apply(model, CATALOG, paths, security_status=status, explanations=False)
+    assert set(run) <= set(baseline.run)
+    assert not {"build", "unit", "scans"} & set(skipped)
 
 
 def test_previous_security_status_uses_annotation_without_network():

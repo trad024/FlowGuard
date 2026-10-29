@@ -12,8 +12,9 @@ the default, optimizer. The branch rule lets scenario runs pick a mode without a
 which GitHub only offers for workflows on the default branch.
 
 Build, unit tests and scans are not optional jobs and cannot be planned away. If the model
-file is missing, unreadable or of an unknown type, the plan falls back to running everything:
-a planning failure must never skip a check.
+file is missing, unreadable or of an unknown type, the plan uses baseline order and path
+filters. Unknown prior scan status also uses that baseline before model loading. Build, unit
+and scans remain mandatory; optional work never expands beyond the baseline eligible set.
 
     python ci/plan.py --branch "$GITHUB_REF_NAME" --changed-files changed.txt \
         --github-output "$GITHUB_OUTPUT"
@@ -91,16 +92,23 @@ def optimizer_plan(
     stats: dict | None = None,
     security_status: str = "unknown",
 ) -> Plan:
-    """Read a portable LightGBM policy; every invalid model falls back to running all."""
-    everything = list(catalog["order"])
+    """Read a portable model; failures retain L0's order and eligible work."""
+
+    def fallback(reason):
+        result = baseline_plan(catalog, changed)
+        result.warnings.append(reason)
+        return result
+
+    if security_status == "unknown":
+        return fallback("previous security status unknown; used baseline order and filters")
     try:
         model = json.loads(model_path.read_text(encoding="utf-8"))
         policy = model["policy"]["type"]
         name = model.get("model", "unnamed")
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        return Plan("optimizer", None, everything, warnings=[f"model unreadable ({exc}); ran all"])
+        return fallback(f"model unreadable ({exc}); used baseline order and filters")
     if policy == "run-all":
-        return Plan("optimizer", name, everything)
+        return baseline_plan(catalog, changed)
     if policy == "lightgbm-json-v1":
         from optimizer.policy import apply
 
@@ -112,8 +120,8 @@ def optimizer_plan(
                 "optimizer", name, run, skipped=skipped, predictions=predictions, warnings=warnings
             )
         except (ValueError, KeyError, TypeError, AttributeError, IndexError, OverflowError) as exc:
-            return Plan("optimizer", name, everything, warnings=[f"invalid model ({exc}); ran all"])
-    return Plan("optimizer", name, everything, warnings=[f"unknown policy {policy!r}; ran all"])
+            return fallback(f"invalid model ({exc}); used baseline order and filters")
+    return fallback(f"unknown policy {policy!r}; used baseline order and filters")
 
 
 def make_plan(

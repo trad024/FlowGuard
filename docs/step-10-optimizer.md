@@ -17,10 +17,11 @@ per model. Background rows come only from training.
 ## Safety and integration
 
 - Build, unit and scans remain outside the optional catalog and cannot be skipped.
-- P2 forces SBOM after dependency changes or a previous security flag; scans always run.
+- P2 prevents skipping baseline-eligible SBOM after dependency changes or a previous
+  security flag; scans always run. Optional work never expands beyond baseline path filters.
 - The workflow reads prior completed scan-count annotations with read-only Actions/checks
-  permissions. Missing history, denied API access, failed scans or unknown status run all
-  optional jobs. A first run on a new branch therefore runs everything.
+  permissions. Missing history, denied API access, failed scans or unknown status use the
+  exact baseline order and path filters, without loading or predicting with the model.
 - A job can be predictively skipped only below the fixed 0.01 failure threshold, with at least
   eight observed training outcomes, no observed training failures for that job, known change
   size and all features within observed training ranges. These are conservative heuristics,
@@ -28,8 +29,10 @@ per model. Background rows come only from training.
 - The existing path filters may omit unrelated optional jobs. Retained optional jobs are
   ordered by predicted failure probability divided by predicted duration. Baseline mode
   retains its fixed order and original path filters.
-- Missing, unreadable, corrupt, nonfinite, overly deep or incompatible models run every
-  optional job. Legacy `run-all` models remain supported.
+- Missing, unreadable, corrupt, nonfinite, overly deep or incompatible models also use
+  baseline order and path filters. Legacy `run-all` means all baseline-eligible optional jobs.
+  This applies the architect's no-extra-work bound to every fallback path, not just unknown
+  status. Mandatory build, unit and scans are unchanged.
 
 The workflow passes `git diff --numstat` for change size. Missing stats disable predictive
 skipping. Runtime agent stubs, the gate, executor, orchestrator and frozen files are unchanged.
@@ -74,13 +77,14 @@ job. The pooled AUC is not a substitute for these per-job results.
 
 **Projected saving on validation `dev` commits:** 8/8 have complete observed durations for
 both plans. The fixed-order/path-filter baseline totals 1,038 job-seconds; the Optimizer
-totals 1,036: **2 seconds, or 0.1927% saved**. None of these eight commits failed, so this
+totals 1,018: **20 seconds, or 1.9268% saved**. None of these eight commits failed, so this
 subset cannot estimate failure recall. Mandatory jobs account for 975 of those 1,038 baseline
 seconds, leaving 63 optional seconds. Even removing every optional job would save at most
 **6.0694%** on this sample, so it cannot demonstrate the 20% target under the safety rules.
 Across the broader validation set, 9/12 runs have
-complete timings for both plans: baseline 1,248 job-seconds versus Optimizer 1,380,
-**10.5769% more time**, mainly because unknown prior scan status runs everything.
+complete timings for both plans: baseline 1,248 job-seconds versus Optimizer 1,228,
+**1.6026% projected saving**. The four unknown-prior runs match baseline exactly.
+Every comparable individual run costs no more job-seconds than its baseline.
 The three incomplete runs are excluded from duration comparison but included in the
 observed-failures-skipped count; no durations are imputed. The machine-readable results
 are `ci/optimizer/dev-results.json`.
@@ -97,7 +101,7 @@ The separate reorder-only diagnostic ranks the baseline's eligible optional jobs
 descending predicted failure probability (stable ties), keeping exactly the same jobs and
 the same build/unit prefix. It neither changes path filtering nor skips jobs. This isolates
 the requested likely-to-fail-first view from the production probability/duration heuristic
-and its safe run-all behavior when prior scan status is unknown.
+and its exact-baseline fallback when prior scan status is unknown.
 
 | Measurement | Fixed baseline | Likely failure first |
 |---|---:|---:|
@@ -158,3 +162,19 @@ job predictions with P2 enforced in 0.203 seconds on this machine. This is a smo
 not a latency benchmark. Not verified: live execution of the changed workflow,
 paired live pipeline savings, final evaluation or integration tests (skipped by default).
 No frozen-file changes or proposals are needed.
+
+## Architect review: baseline work bound
+
+Unknown prior status returns the baseline before any model read or prediction, retaining
+fixed order and path filters even with a missing model. All other model failure fallbacks
+use that same baseline. For known status, P2 prevents predictive skipping within the
+baseline-eligible set; it never adds an image SBOM for unrelated `pyproject.toml` changes.
+This fixes a second observed regression: that commit previously spent 128 versus 110 seconds.
+No workflow, mandatory job, baseline path filter, history split or timing metric changed.
+The model JSON is unchanged; results were recomputed from the same history. Per-run plans
+and timings are included in `dev-results.json`. Unknown-status jobs equal L0's jobs/order;
+known-status retained work is a subset. This bounds summed job work, not runner queue delays.
+
+The honest result remains negative against DSO5: mandatory work is 975/1,038 seconds, so
+even deleting all optional work saves at most 6.0694%. The 20% target is not met and cannot
+be met in this pipeline under this metric. Fail-fast still shows 0/3 earlier catches.

@@ -54,11 +54,113 @@
   "shap_reference_rows_per_model": 3,
   "dev_validation_projection": {
     "n_commits": 8,
+    "unknown_prior_baseline_runs": 0,
+    "per_run": [
+      {
+        "run_id": 40420788548,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 113.0,
+        "optimizer_job_seconds": 113.0,
+        "mandatory_job_seconds": 113.0
+      },
+      {
+        "run_id": 40421399231,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [
+          "lint",
+          "integration"
+        ],
+        "optimizer_optional": [
+          "integration"
+        ],
+        "comparable": true,
+        "baseline_job_seconds": 151.0,
+        "optimizer_job_seconds": 131.0,
+        "mandatory_job_seconds": 121.0
+      },
+      {
+        "run_id": 40423475125,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [
+          "lint",
+          "integration"
+        ],
+        "optimizer_optional": [
+          "integration",
+          "lint"
+        ],
+        "comparable": true,
+        "baseline_job_seconds": 159.0,
+        "optimizer_job_seconds": 159.0,
+        "mandatory_job_seconds": 126.0
+      },
+      {
+        "run_id": 40562637345,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 127.0,
+        "optimizer_job_seconds": 127.0,
+        "mandatory_job_seconds": 127.0
+      },
+      {
+        "run_id": 40571357410,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 129.0,
+        "optimizer_job_seconds": 129.0,
+        "mandatory_job_seconds": 129.0
+      },
+      {
+        "run_id": 40573598976,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 110.0,
+        "optimizer_job_seconds": 110.0,
+        "mandatory_job_seconds": 110.0
+      },
+      {
+        "run_id": 40576270330,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 133.0,
+        "optimizer_job_seconds": 133.0,
+        "mandatory_job_seconds": 133.0
+      },
+      {
+        "run_id": 40578368148,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 116.0,
+        "optimizer_job_seconds": 116.0,
+        "mandatory_job_seconds": 116.0
+      }
+    ],
     "comparable_complete_runs": 8,
     "excluded_incomplete_runs": 0,
     "baseline_job_seconds": 1038.0,
-    "optimizer_job_seconds": 1036.0,
-    "projected_saving_fraction": 0.0019267822736030828,
+    "optimizer_job_seconds": 1018.0,
+    "projected_saving_fraction": 0.019267822736030827,
     "observed_failures": 0,
     "observed_failures_skipped": 0,
     "optional_failure_order_cases": 0,
@@ -68,11 +170,178 @@
   },
   "all_validation_projection": {
     "n_commits": 12,
+    "unknown_prior_baseline_runs": 4,
+    "per_run": [
+      {
+        "run_id": 40385540979,
+        "branch": "scenario/ci-flaky-test-20261026-191819",
+        "previous_security": "unknown",
+        "baseline_optional": [
+          "lint",
+          "integration"
+        ],
+        "optimizer_optional": [
+          "lint",
+          "integration"
+        ],
+        "comparable": false,
+        "baseline_job_seconds": null,
+        "optimizer_job_seconds": null
+      },
+      {
+        "run_id": 40386000895,
+        "branch": "scenario/ci-infrastructure-20261026-192120",
+        "previous_security": "unknown",
+        "baseline_optional": [
+          "integration"
+        ],
+        "optimizer_optional": [
+          "integration"
+        ],
+        "comparable": false,
+        "baseline_job_seconds": null,
+        "optimizer_job_seconds": null
+      },
+      {
+        "run_id": 40387188816,
+        "branch": "scenario/ci-environment-20261026-192919",
+        "previous_security": "unknown",
+        "baseline_optional": [
+          "integration",
+          "sbom",
+          "multiarch"
+        ],
+        "optimizer_optional": [
+          "integration",
+          "sbom",
+          "multiarch"
+        ],
+        "comparable": false,
+        "baseline_job_seconds": null,
+        "optimizer_job_seconds": null
+      },
+      {
+        "run_id": 40388445834,
+        "branch": "scenario/release-commit-errors-10-20261026-193745",
+        "previous_security": "unknown",
+        "baseline_optional": [
+          "lint",
+          "integration"
+        ],
+        "optimizer_optional": [
+          "lint",
+          "integration"
+        ],
+        "comparable": true,
+        "baseline_job_seconds": 210.0,
+        "optimizer_job_seconds": 210.0,
+        "mandatory_job_seconds": 167.0
+      },
+      {
+        "run_id": 40420788548,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 113.0,
+        "optimizer_job_seconds": 113.0,
+        "mandatory_job_seconds": 113.0
+      },
+      {
+        "run_id": 40421399231,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [
+          "lint",
+          "integration"
+        ],
+        "optimizer_optional": [
+          "integration"
+        ],
+        "comparable": true,
+        "baseline_job_seconds": 151.0,
+        "optimizer_job_seconds": 131.0,
+        "mandatory_job_seconds": 121.0
+      },
+      {
+        "run_id": 40423475125,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [
+          "lint",
+          "integration"
+        ],
+        "optimizer_optional": [
+          "integration",
+          "lint"
+        ],
+        "comparable": true,
+        "baseline_job_seconds": 159.0,
+        "optimizer_job_seconds": 159.0,
+        "mandatory_job_seconds": 126.0
+      },
+      {
+        "run_id": 40562637345,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 127.0,
+        "optimizer_job_seconds": 127.0,
+        "mandatory_job_seconds": 127.0
+      },
+      {
+        "run_id": 40571357410,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 129.0,
+        "optimizer_job_seconds": 129.0,
+        "mandatory_job_seconds": 129.0
+      },
+      {
+        "run_id": 40573598976,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 110.0,
+        "optimizer_job_seconds": 110.0,
+        "mandatory_job_seconds": 110.0
+      },
+      {
+        "run_id": 40576270330,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 133.0,
+        "optimizer_job_seconds": 133.0,
+        "mandatory_job_seconds": 133.0
+      },
+      {
+        "run_id": 40578368148,
+        "branch": "dev",
+        "previous_security": "clean",
+        "baseline_optional": [],
+        "optimizer_optional": [],
+        "comparable": true,
+        "baseline_job_seconds": 116.0,
+        "optimizer_job_seconds": 116.0,
+        "mandatory_job_seconds": 116.0
+      }
+    ],
     "comparable_complete_runs": 9,
     "excluded_incomplete_runs": 3,
     "baseline_job_seconds": 1248.0,
-    "optimizer_job_seconds": 1380.0,
-    "projected_saving_fraction": -0.10576923076923077,
+    "optimizer_job_seconds": 1228.0,
+    "projected_saving_fraction": 0.016025641025641024,
     "observed_failures": 3,
     "observed_failures_skipped": 0,
     "optional_failure_order_cases": 0,
