@@ -104,6 +104,46 @@ def test_no_executable_action_reaches_faults_secrets_or_env():
     assert catalog.CATALOG["delete_secret"].tier == RiskTier.PROHIBITED
 
 
+def test_no_agent_query_can_reach_flowguard_metrics():
+    """D25: the Prometheus the agents read also scrapes the dashboard's exporters, and the
+    scored results there come from the evaluation side. Every selector an agent uses names one
+    metric literally, never a flowguard_* one; no PromQL in the modules that read Prometheus
+    (the Monitor and its P1 answers, Release, the service) names one or matches on __name__."""
+    import re
+
+    from flowguard import series, service
+
+    selectors = {**series.SELECTORS, **service.ROLLOUT_SELECTORS}
+    assert selectors and all(series.checked_selector(s) == s for s in selectors.values())
+    pkg = AGENTS / "flowguard"
+    for name in ("series", "service", "monitor", "release"):
+        tree = ast.parse((pkg / f"{name}.py").read_text(encoding="utf-8"))
+        strings = [
+            n.value
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        ]
+        assert not [s for s in strings if re.search(r"flowguard_[a-z]|__name__\s*=~", s)], name
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [
+        "flowguard_result",
+        'flowguard_result{objective="DSO1"}',
+        "flowguard_proposals_total",  # the agents' own audit counts are not an input either
+        '{__name__=~"flowguard_.*"}',
+        'up{__name__=~"flowguard_result"}',
+        "sum(flowguard_result)",
+    ],
+)
+def test_prometheus_source_refuses_flowguard_metrics(selector):
+    from flowguard import series
+
+    with pytest.raises(ValueError):
+        series.PrometheusSource(get=lambda url: {}, selectors={"x": selector})
+
+
 def test_the_fault_admin_port_has_no_service():
     docs = yaml.safe_load_all((ROOT / "infra/apps/podinfo/base/podinfo.yaml").read_text())
     services = [d for d in docs if d and d.get("kind") == "Service"]

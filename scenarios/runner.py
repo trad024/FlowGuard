@@ -42,6 +42,7 @@ import sys
 import tempfile
 import time
 import urllib.parse
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -172,7 +173,7 @@ def new_run_id() -> str:
 
 def l0_correct(expected: str, observed: str) -> bool | None:
     """True or False when L0's decision can be judged; None when it is measured later."""
-    if expected == "detect":
+    if expected == "detect" or observed == "offline":  # D54: L0 replayed from the recording
         return None
     return {
         "promote": "promoted",
@@ -471,6 +472,112 @@ def wait_outcome(cluster, image: str, timeout: int, sleep=time.sleep, clock=time
     return "timeout"
 
 
+# ---------------------------------------------------------------- agents-mode canary (D53, D54)
+
+PODINFO = ROOT / "infra" / "apps" / "podinfo"
+HOLD_S = 120  # D54: an indefinite pause is held past Release's fourth look (step + 120 s)
+AGENTS_OBSERVE_S = 900  # two held steps and the 100% step, with slow pod starts under stress
+
+
+def canary_steps(mode: str) -> list[dict]:
+    """The canary steps the repo defines: the base Rollout's (L0, inline analysis) or the
+    agents-mode component's (D53: an indefinite pause where L0 runs its analysis)."""
+    if mode == "agents":
+        component = yaml.safe_load(
+            (PODINFO / "agents-mode" / "kustomization.yaml").read_text(encoding="utf-8")
+        )
+        (op,) = yaml.safe_load(component["patches"][0]["patch"])
+        return op["value"]
+    docs = yaml.safe_load_all((PODINFO / "base" / "podinfo.yaml").read_text(encoding="utf-8"))
+    rollout = next(d for d in docs if d and d.get("kind") == "Rollout")
+    return rollout["spec"]["strategy"]["canary"]["steps"]
+
+
+def canary_mode(rollout: dict) -> str:
+    """'l0' (inline analysis), 'agents' (indefinite pauses, no analysis) or 'other'."""
+    steps = rollout.get("spec", {}).get("strategy", {}).get("canary", {}).get("steps", [])
+    if any("analysis" in s for s in steps):
+        return "l0"
+    return "agents" if any(s.get("pause") == {} for s in steps) else "other"
+
+
+def set_canary_mode(namespace: str, mode: str) -> None:
+    """Replace only the Rollout's canary steps; the pod template is untouched, so no canary
+    starts (the agents-mode overlay applied in full would also reset the image)."""
+    ops = [{"op": "replace", "path": "/spec/strategy/canary/steps", "value": canary_steps(mode)}]
+    kubectl("-n", namespace, "patch", "rollout", "podinfo", "--type", "json", "-p", json.dumps(ops))
+
+
+def indefinite_pause(rollout: dict) -> int | None:
+    """The step index while the Rollout waits at an indefinite pause, else None."""
+    status = rollout.get("status", {})
+    steps = rollout["spec"]["strategy"]["canary"]["steps"]
+    i = status.get("currentStepIndex")
+    if i is None or i >= len(steps) or steps[i].get("pause") != {}:
+        return None
+    reasons = {c.get("reason") for c in status.get("pauseConditions") or []}
+    return i if "CanaryPauseStep" in reasons else None
+
+
+def resume(namespace: str) -> None:
+    """Resume a paused canary, as `kubectl argo rollouts promote` does."""
+    kubectl(
+        "-n",
+        namespace,
+        "patch",
+        "rollout",
+        "podinfo",
+        "--type",
+        "merge",
+        "-p",
+        '{"spec":{"paused":false}}',
+    )
+    kubectl(
+        "-n",
+        namespace,
+        "patch",
+        "rollout",
+        "podinfo",
+        "--subresource=status",
+        "--type",
+        "merge",
+        "-p",
+        '{"status":{"pauseConditions":null}}',
+    )
+
+
+def pace_canary(
+    cluster,
+    image: str,
+    timeout: int,
+    resume_fn,
+    hold_s: float = HOLD_S,
+    on_resume=None,
+    sleep=time.sleep,
+    clock=time.monotonic,
+) -> str:
+    """Agents-mode recording (D54): nothing is decided live. Each indefinite pause is held for
+    `hold_s`, then resumed, so every canary reaches 100% and L0 (replayed), L3 and L4 are judged
+    offline on the same path. A resume that has not taken effect is retried after 30 s."""
+    deadline = clock() + timeout
+    held: dict[int, float] = {}
+    while clock() < deadline:
+        rollout = cluster.rollout()
+        outcome = deployer.rollout_outcome(rollout, image)
+        if outcome:
+            return outcome
+        i = indefinite_pause(rollout)
+        if i is not None:
+            since = held.setdefault(i, clock())
+            if clock() - since >= hold_s:
+                resume_fn()
+                if on_resume:
+                    on_resume(i)
+                held[i] = clock() - hold_s + 30
+        sleep(5)
+    return "timeout"
+
+
 QUIET_S = 120  # D50: every L0 alert resolved for at least this long before a scenario starts
 QUIET_TIMEOUT_S = 900
 NO_CLUSTER = {"ci", "pipeline"}
@@ -486,6 +593,41 @@ def firing_within(seconds: int, base: str = recorder.PROMETHEUS) -> list[str]:
     url = f"{base}/api/v1/query?" + urllib.parse.urlencode({"query": query})
     result = recorder.http_json(url).get("data", {}).get("result", [])
     return sorted(r["metric"].get("alertname", "") for r in result)
+
+
+RESULT_METRICS = "flowguard_result"  # the scored results (evaluation/results_exporter.py)
+
+
+def results_in_prometheus(base: str = recorder.PROMETHEUS) -> int:
+    """How many series of the scored results Prometheus holds now (one instant query). The
+    agents read this Prometheus, so a run must not start while any is there (D25)."""
+    query = f'count({{__name__=~"{RESULT_METRICS}.*"}})'
+    url = f"{base}/api/v1/query?" + urllib.parse.urlencode({"query": query})
+    result = recorder.http_json(url).get("data", {}).get("result", [])
+    return int(float(result[0]["value"][1])) if result else 0
+
+
+@contextmanager
+def run_lock(run_id: str):
+    """recorder.RUN_LOCK for the length of a cluster run: one run at a time, and no results
+    exporter started meanwhile. A lock left by a run that died must be removed by hand."""
+    path = recorder.RUN_LOCK
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8") as f:
+            f.write(
+                json.dumps({"run_id": run_id, "pid": os.getpid(), "since": recorder.iso(utc())})
+            )
+    except FileExistsError:
+        held = path.read_text(encoding="utf-8")[:200]
+        raise RuntimeError(
+            f"{path} is held ({held}): another evaluation run is under way, or one died and "
+            "left it; remove it only if no run is going on"
+        ) from None
+    try:
+        yield
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def wait_alerts_quiet(
@@ -606,8 +748,9 @@ STRESS_POD = {
 
 
 class Runner:
-    def __init__(self, spec: dict, run_id: str | None = None):
+    def __init__(self, spec: dict, run_id: str | None = None, mode: str = "l0"):
         self.spec = spec
+        self.mode = mode  # "agents": recorded under the agents-mode canary (D54)
         self.run_id = run_id or new_run_id()
         self.rng = random.Random(self.run_id)
         self.env = spec.get("environment", "staging")
@@ -635,6 +778,19 @@ class Runner:
         print(json.dumps({"ts": recorder.iso(utc()), "event": kind, **payload}), flush=True)
 
     def run(self) -> Path:
+        """A cluster run starts only when Prometheus holds no scored result and no other run
+        holds the lock; branch-only families (ci, pipeline) need neither."""
+        if self.spec["family"] in NO_CLUSTER:
+            return self._run()
+        if found := results_in_prometheus():
+            raise RuntimeError(
+                f"Prometheus holds {found} {RESULT_METRICS} series: stop "
+                "evaluation/results_exporter.py and wait for them to go stale before a run (D25)"
+            )
+        with run_lock(self.run_id):
+            return self._run()
+
+    def _run(self) -> Path:
         delivery = self.spec["fault"]["delivery"]
         start = utc()
         self.event(
@@ -648,6 +804,8 @@ class Runner:
         try:
             # D50: no fault while an L0 alert from an earlier run may still be firing (the ci
             # and pipeline families run on branches, without the cluster: D44)
+            if self.mode == "agents" and delivery != "config":
+                raise ValueError("agents-mode recording is for config-delivered releases (D54)")
             if self.spec["family"] not in NO_CLUSTER and (still := self.wait_quiet()):
                 self.observed["alerts_not_quiet"] = still
                 self.event("alerts_not_quiet", alerts=still, quiet_s=QUIET_S)
@@ -665,6 +823,9 @@ class Runner:
                 # nothing about L0. The run is kept but must be excluded from scoring.
                 self.observed["host_suspended"] = gaps
                 correct = None
+            if self.mode == "agents" and self.observed.get("canary") != "promoted":
+                # D54: the canary did not reach 100%, so the recording lacks part of its path
+                self.observed["canary_incomplete"] = True
             if "alerts_not_quiet" in self.observed:
                 correct = None
             self.event(
@@ -685,7 +846,8 @@ class Runner:
                 "spec": self.spec,
                 "observed": self.observed,
                 "l0_correct": correct,
-                "valid": not {"host_suspended", "alerts_not_quiet"} & set(self.observed),
+                "valid": not {"host_suspended", "alerts_not_quiet", "canary_incomplete"}
+                & set(self.observed),
             },
             truth_db=self.truth_db,
             github=recorder.GitHubReader(cfg.repo, cfg.token),
@@ -704,6 +866,8 @@ class Runner:
             "currentPodHash"
         ):
             raise RuntimeError(f"{self.env} Rollout is not Healthy and stable; refusing to start")
+        if (canary_mode(rollout) == "agents") != (self.mode == "agents"):
+            raise RuntimeError(f"{self.env} Rollout is not in {self.mode} mode; refusing to start")
         return rollout
 
     def run_config(self) -> Path:
@@ -723,8 +887,12 @@ class Runner:
             self.release(image, command, env_from(secret), log)
             self.event("fault_injected", delivery="config", secret=secret, settings=settings)
             outcome = self.wait_release(image)
-            self.observed["l0"] = outcome
-            self.event("l0_outcome", outcome=outcome)
+            if self.mode == "agents":  # D54: L0 is replayed offline from the recording
+                self.observed.update(mode="agents", canary=outcome, l0="offline")
+                self.event("canary_outcome", outcome=outcome)
+            else:
+                self.observed["l0"] = outcome
+                self.event("l0_outcome", outcome=outcome)
             time.sleep(self.timing["cooldown_s"])
         finally:
             if stress:
@@ -745,8 +913,18 @@ class Runner:
         extra = {"load_log": str(log)} if log else {}
         self.deploys.write("deploy_started", environment=self.env, image=image, **extra)
 
-    def wait_release(self, image: str) -> str:
-        outcome = wait_outcome(self.cluster, image, self.timing["observe_s"])
+    def wait_release(self, image: str, hold_s: float = HOLD_S) -> str:
+        if self.mode == "agents":
+            outcome = pace_canary(
+                self.cluster,
+                image,
+                max(self.timing["observe_s"], AGENTS_OBSERVE_S),
+                lambda: resume(self.env),
+                hold_s,
+                on_resume=lambda step: self.event("canary_resumed", step=step),
+            )
+        else:
+            outcome = wait_outcome(self.cluster, image, self.timing["observe_s"])
         self.deploys.write(
             "deploy_finished",
             environment=self.env,
@@ -765,7 +943,7 @@ class Runner:
         for attempt in (1, 2):
             if not self.loadgen.alive():
                 self.loadgen.start(f"{self.run_id}-restore-{attempt}")
-            outcome = self.wait_release(image)
+            outcome = self.wait_release(image, hold_s=0)  # agents-mode: not measured
             if outcome == "promoted" or attempt == 2:
                 break
             self.event("restore_retried", outcome=outcome)

@@ -36,6 +36,9 @@ ROOT = Path(__file__).resolve().parents[1]
 RECORDINGS = ROOT / "evaluation" / "recordings"
 RUNS_DIR = ROOT / "evaluation" / "runs"
 PROMETHEUS = "http://localhost:9090"
+# Held by the scenario runner during a cluster run; results_exporter.py will not start while
+# it exists, so no scored result reaches the Prometheus the agents read during a run (D25)
+RUN_LOCK = ROOT / "state" / "run.lock"
 
 # Raw series, so a replay can compute any metric later (rates, ratios, quantiles, per pod).
 SELECTORS = {

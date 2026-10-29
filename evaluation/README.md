@@ -74,6 +74,36 @@ on the normal-traffic half the model never saw, plus the paired L0 vs L1 compari
 McNemar, bootstrap interval of the MTTD gain). Dev recall is in-sample (the grid was tuned on
 those incidents); H1 is tested on the held-out set at Step 11.
 
+## DSO3 by replay (D15, step 8)
+
+`release_replay.py` runs Release on the dev release recordings (folders or zips; held-out
+paths are refused) inside the real orchestrator, at L3 (Release alone) and L4 (with P1), and
+L0 on the same recording (D54): `l0_canary.py` replays the frozen `analysis-l0.yaml` (its
+settings read from the file, its two queries evaluated as Prometheus 3 does) after each step's
+30 s pause, and is checked against L0's live outcome where one was recorded:
+
+```powershell
+py evaluation\release_replay.py score evaluation\recordings       # writes runs\dso3-replay.json
+py evaluation\release_replay.py calibrate evaluation\recordings   # also writes agents\flowguard\models\release-calibration.json
+```
+
+The canary's steps come from the Rollout's own step changes when they were logged
+(`state/rollout-steps.jsonl`, every 5 s), otherwise from the pods up per pod-template hash
+(moved half a scrape earlier: a pod is Ready before its first `up` sample); `score` lists the
+recordings on that fallback (`step_source_fallback`). Release looks where L0 measures (30 to 120 s
+into each step) on 30 s windows of per-hash counts since the 20% step began. Release
+scenarios are recorded under the agents-mode Rollout (D54), so each canary runs its full
+window; on a recording made under the L0 Rollout a level that has not decided where the
+canary stopped is "truncated" (not caught), and `needs_rerecording` lists those recordings
+with their spec files. `test_l0_canary.py` checks the offline L0 against the live outcome on
+the dev recordings when `FLOWGUARD_DEV_RECORDINGS` points at them (skipped otherwise). `score` gives bad releases caught before 100% and false
+rollbacks (Wilson), escalations, wrong decisions and the median time to rollback, per level
+and per band; L0 vs L3 and L3 vs L4 paired (exact McNemar, bootstrap interval of the rollback
+time gain); and L3's wrong-decision rate on the node-stress recordings (H4's count, D44).
+`calibrate` fits the conformal calibrator of Release's proposals (D9) on the L3 promote and
+rollback decisions, labelled by the recording, and reports coverage leave-one-recording-out.
+Everything is labelled "dev, in-sample".
+
 ## External datasets (D14, step 4a)
 
 ```powershell
