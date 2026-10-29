@@ -111,6 +111,9 @@ app's Go 1.26 toolchain. Raw JSON, mapping status and enriched Trivy JSON are re
 scan-reports. Vulnerability findings do not themselves fail CI; the Security gate still
 decides. A failed/unsupported scan leaves reachability unknown.
 
+The scan uses `CGO_ENABLED=0`, `GOOS=linux`, `GOARCH=amd64` and the two shipped entry points
+`./cmd/podinfo ./cmd/podcli`, matching the Docker image's build configuration and binaries.
+
 The offline adapter maps each finding's Go advisory ID through OSV CVE aliases. In a
 completed source/symbol scan, a function trace establishes reachable; explicit module or
 package findings without a called function establish unreachable. Any positive trace wins

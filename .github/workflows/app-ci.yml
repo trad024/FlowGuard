@@ -206,8 +206,12 @@ jobs:
       - name: Install pinned govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
       - name: Go source reachability (JSON)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
         run: |
-          if (cd "$APP_DIR" && govulncheck -json -scan=symbol ./...) > reports/govulncheck.json; then
+          if (cd "$APP_DIR" && govulncheck -json -scan=symbol ./cmd/podinfo ./cmd/podcli) > reports/govulncheck.json; then
             scan_status=0
           else
             scan_status=$?
