@@ -1,0 +1,128 @@
+{
+  "format": 1,
+  "scope": "development only; deliberately selected coverage cases, not an independent evaluation sample",
+  "development_seed": 31,
+  "seed_usage": "public development seed determines case order only; vulnerability selection is deliberate",
+  "base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+  "epss": {
+    "date": "2026-10-28",
+    "csv_sha256": "16ff6e9063ce2e2b31efbfa9bf98b574d501f84f22056861d31f3610665b5d06",
+    "gzip_sha256": "aa9eefe4155babd88985c26528087bba5053405d4d64aed85ea5dc5c2e16c4e9",
+    "rows": 396966,
+    "low_probability_at_most": 0.01,
+    "high_probability_at_least": 0.1
+  },
+  "requirements": {
+    "reachable": 2,
+    "unreachable": 2,
+    "fixed": 2,
+    "no_fix": 2,
+    "low_epss": 2,
+    "high_epss": 2
+  },
+  "status": "pre-scan plan; intended coverage is not observed evidence",
+  "cases": [
+    {
+      "id": "dev-sec-text-called",
+      "module": "golang.org/x/text",
+      "version": "v0.40.0",
+      "cve": "CVE-2026-56851",
+      "epss": 0.00466,
+      "intent": "reachable",
+      "expected_fix": true,
+      "probe": "precis-called",
+      "advisory": "https://pkg.go.dev/vuln/GO-2026-6629"
+    },
+    {
+      "id": "dev-sec-text-uncalled",
+      "module": "golang.org/x/text",
+      "version": "v0.40.0",
+      "cve": "CVE-2026-56851",
+      "epss": 0.00466,
+      "intent": "unreachable",
+      "expected_fix": true,
+      "probe": "precis-uncalled",
+      "advisory": "https://pkg.go.dev/vuln/GO-2026-6629"
+    },
+    {
+      "id": "dev-sec-http2-022",
+      "module": "golang.org/x/net",
+      "version": "v0.22.0",
+      "cve": "CVE-2023-45288",
+      "epss": 0.91969,
+      "intent": "reachable through existing HTTP/2 server",
+      "expected_fix": true,
+      "probe": "existing-http2",
+      "advisory": "https://pkg.go.dev/vuln/GO-2024-2687",
+      "compatibility_pins": {
+        "google.golang.org/grpc": "v1.74.3"
+      }
+    },
+    {
+      "id": "dev-sec-http2-016",
+      "module": "golang.org/x/net",
+      "version": "v0.16.0",
+      "cve": "CVE-2023-44487",
+      "epss": 0.99999,
+      "intent": "reachable through existing HTTP/2 server",
+      "expected_fix": true,
+      "probe": "existing-http2",
+      "advisory": "https://github.com/advisories/GHSA-qppj-fm5r-hxr3",
+      "compatibility_pins": {
+        "google.golang.org/grpc": "v1.74.3"
+      }
+    },
+    {
+      "id": "dev-sec-jwt4-called",
+      "module": "github.com/golang-jwt/jwt/v4",
+      "version": "v4.5.1",
+      "cve": "CVE-2025-30204",
+      "epss": 0.00811,
+      "intent": "reachable through existing token parsing",
+      "expected_fix": true,
+      "probe": "existing-jwt4",
+      "advisory": "https://pkg.go.dev/vuln/GO-2025-3553"
+    },
+    {
+      "id": "dev-sec-jwt5-uncalled",
+      "module": "github.com/golang-jwt/jwt/v5",
+      "version": "v5.2.1",
+      "cve": "CVE-2025-30204",
+      "epss": 0.00811,
+      "intent": "unreachable vulnerable parser; only token constructor called",
+      "expected_fix": true,
+      "probe": "jwt5-uncalled",
+      "advisory": "https://pkg.go.dev/vuln/GO-2025-3553"
+    },
+    {
+      "id": "dev-sec-legacy-jwt-320",
+      "module": "github.com/golang-jwt/jwt",
+      "version": "v3.2.0+incompatible",
+      "cve": "CVE-2025-30204",
+      "epss": 0.00811,
+      "intent": "legacy module, no known fixed version; reachability may be unknown",
+      "expected_fix": false,
+      "probe": "legacy-jwt",
+      "advisory": "https://vuln.go.dev/ID/GO-2025-3553.json"
+    },
+    {
+      "id": "dev-sec-legacy-jwt-322",
+      "module": "github.com/golang-jwt/jwt",
+      "version": "v3.2.2+incompatible",
+      "cve": "CVE-2025-30204",
+      "epss": 0.00811,
+      "intent": "legacy module, no known fixed version; reachability may be unknown",
+      "expected_fix": false,
+      "probe": "legacy-jwt",
+      "advisory": "https://vuln.go.dev/ID/GO-2025-3553.json"
+    }
+  ],
+  "decision_effects": {
+    "epss": "Actual L1 action versus the same full case with every observed EPSS probability set to zero; missing data and hard rules preserved.",
+    "reachability": "Actual L1 action versus the same full case with measured reachability replaced by unknown; hard rules preserved.",
+    "aggregation": "Whole case, maximum over all real findings; no target-CVE-only decision substituted for the whole image.",
+    "planned_positive_contrast": "Fixed, CVSS 7.5, low EPSS, explicitly unreachable finding scores about 0.476 and can allow_with_findings, versus about 0.526 with unknown reachability. Other findings can mask this; report actual whole-case results.",
+    "high_epss_limitation": "Existing podinfo HTTP/2 calls can make these high-EPSS cases request review even with EPSS zero. They measure high-risk cases but may not isolate an EPSS-only action change. Do not claim they do."
+  },
+  "compatibility_note": "grpc 1.83.2 calls HTTP/2 Framer APIs absent from old x/net. HTTP/2 cases also pin grpc 1.74.3; build failures are excluded, never counted as security blocks."
+}
