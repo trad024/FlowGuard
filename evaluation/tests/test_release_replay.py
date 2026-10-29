@@ -26,8 +26,7 @@ def canary_pods(s, abort_at):
 
 
 def write_recording(root, rid, *, bad, band=None, l0="promoted", abort_at=None, errors=0.0,
-                    slow=0.0, stable_errors=0.0, node_cpu=None, node_stress=False,
-                    mode=None):  # fmt: skip
+                    slow=0.0, stable_errors=0.0, node_cpu=None, node_stress=False):  # fmt: skip
     """A 10-minute staging canary at 10 requests/s: 20% at 60 s, 50% at 210 s, 100% at 360 s,
     or the canary gone `abort_at` s into its 20% step. Counters grow by their expected values."""
     rec = root / rid
@@ -85,11 +84,8 @@ def write_recording(root, rid, *, bad, band=None, l0="promoted", abort_at=None, 
     if node_stress:
         spec["node_stress"] = {"cpu_workers": 8, "cpu_request": 7.0}
     gt = {"bad_release": bad, **({"band": band} if band else {})}
-    observed = {"l0": l0}
-    if mode == "agents":  # D54: the canary was held and resumed to 100%; L0 is replayed
-        observed = {"mode": "agents", "canary": "promoted", "l0": "offline"}
     (rec / "ground_truth.json").write_text(
-        json.dumps({"spec": spec, "ground_truth": gt, "observed": observed, "valid": True})
+        json.dumps({"spec": spec, "ground_truth": gt, "observed": {"l0": l0}, "valid": True})
     )
     (rec / "manifest.json").write_text(
         json.dumps(
@@ -109,7 +105,9 @@ def test_timeline_reads_the_steps_and_how_the_canary_ended(tmp_path):
     runs = {r["id"]: r for r in rr.release_runs([tmp_path])}
     good = rr.timeline(rr.load_index(runs["r-good"]), "staging", *runs["r-good"]["window"])
     assert (good["stable"], good["canary"], good["how"]) == ("old", "new", "promoted")
-    assert {w: t - T0 for w, t in good["steps"].items()} == {20: STEP_20, 50: STEP_50}
+    # Pods are Ready about half a scrape before their first `up` sample
+    lag = rr.READY_LAG_S
+    assert {w: t - T0 for w, t in good["steps"].items()} == {20: STEP_20 - lag, 50: STEP_50 - lag}
     assert good["end"] - T0 == FULL
     bad = rr.timeline(rr.load_index(runs["r-bad"]), "staging", *runs["r-bad"]["window"])
     assert bad["how"] == "aborted" and STEP_20 + 70 <= bad["end"] - T0 <= STEP_20 + 70 + 25
@@ -126,28 +124,40 @@ def scored(tmp_path_factory):
     return rr.score(rr.release_runs([root]))
 
 
-def test_levels_are_scored_per_band_against_the_recorded_l0(scored):
+def test_every_level_is_scored_per_band_on_the_same_recording(scored):
     rec = scored["per_recording"]
     assert scored["label"] == "dev, in-sample" and scored["scored"] == 4
+    # Release's first look and L0's (offline) first measurement are both 30 s into the step;
+    # L0 needs a second failure
     assert rec["r-above"]["L3"]["outcome"] == "rollback" and rec["r-above"]["L3"]["t"] == 30
-    assert rec["r-above"]["L0"]["outcome"] == "rollback" and rec["r-above"]["L0"]["t"] >= 70
-    assert rec["r-slow"]["L3"]["outcome"] == "rollback"  # slow requests, invisible to L0's p99
-    assert rec["r-good"]["L3"]["outcome"] == "promoted"
+    assert rec["r-above"]["L0"]["outcome"] == "rollback" and rec["r-above"]["L0"]["t"] == 60
+    assert [s["metric"] for s in rec["r-above"]["L0"]["steps"]] == ["error-ratio-5xx"]
+    # Slow requests: the p99 L0 reads stays at the 0.5 s bucket bound, Release counts them
+    assert rec["r-slow"]["L0"]["outcome"] == "promoted"
+    assert rec["r-slow"]["L3"]["outcome"] == "rollback"
+    assert rec["r-good"]["L0"]["outcome"] == rec["r-good"]["L3"]["outcome"] == "promoted"
     assert [d["action"] for d in rec["r-good"]["L3"]["decisions"]] == (
         [None, None, None, "rollout_promote"] * 2  # holds, then a promotion per step
     )
-    # L0 stopped the canary before Release's horizon on a canary that showed nothing:
-    # truncated, counted as not caught
-    assert rec["r-invisible"]["L3"]["outcome"] == "truncated"
+    # Recorded under the L0 Rollout and aborted live on a canary that showed nothing: no level
+    # can decide on what is left of it
+    assert rec["r-invisible"]["L0"]["outcome"] == rec["r-invisible"]["L3"]["outcome"] == "truncated"
     l0, l3 = scored["levels"]["L0"], scored["levels"]["L3"]
-    assert (l0["bad_caught_before_100"]["k"], l3["bad_caught_before_100"]["k"]) == (2, 2)
-    assert l3["bad_truncated"] == 1 and l3["false_rollbacks"]["k"] == 0
+    assert (l0["bad_caught_before_100"]["k"], l3["bad_caught_before_100"]["k"]) == (1, 2)
+    assert l3["bad_truncated"] == l0["bad_truncated"] == 1 and l3["false_rollbacks"]["k"] == 0
     assert l3["bad_caught_by_band"]["near"]["k"] == 1 and l0["bad_caught_by_band"]["near"]["k"] == 0
-    assert (
-        scored["L0_vs_L3"]["right_only_first"] == 1 and scored["L0_vs_L3"]["right_only_second"] == 1
-    )
-    assert scored["L0_vs_L3"]["both_rolled_back"] == 1
-    assert scored["L0_vs_L3"]["rollback_time_gain_s_median"] > 0  # Release decides earlier
+    paired = scored["L0_vs_L3"]
+    assert (paired["right_only_first"], paired["right_only_second"]) == (0, 1)
+    assert paired["both_rolled_back"] == 1 and paired["rollback_time_gain_s_median"] == 30
+
+
+def test_offline_l0_is_checked_against_live_l0_and_short_recordings_are_listed(scored):
+    agreement = scored["l0_live_agreement"]
+    assert (agreement["agree"]["k"], agreement["agree"]["n"]) == (3, 4)
+    assert agreement["differ"] == {"r-invisible": {"offline": "truncated", "live": "rollback"}}
+    listed = {x["recording"]: x["reasons"] for x in scored["needs_rerecording"]}
+    assert set(listed) == {"r-above", "r-invisible"}  # aborted live: no full window
+    assert "a level is truncated" in listed["r-invisible"]
 
 
 def test_p1_at_l4_under_node_stress_gives_h4_its_count(tmp_path):
@@ -191,45 +201,46 @@ def test_held_out_and_duplicate_recordings_are_refused(tmp_path):
         rr.release_runs([tmp_path / "dev", tmp_path / "dev"])
 
 
-# ---------------------------------------------------------------- L0 replayed offline (D54)
+# ---------------------------------------------------------------- logged step times (D54)
 
 
-def test_rate_extrapolates_as_prometheus_does():
-    from flowguard.series import Series
-
-    times = [T0 + 15 * k for k in range(9)]
-    steady = Series({}, times, [15.0 * k for k in range(9)])  # 1 per second
-    assert rr.prom_rate(steady, T0 + 120) == pytest.approx(1.0)
-    assert rr.prom_rate(steady, T0 + 127) == pytest.approx(1.0)  # samples not on the range
-    reset = Series({}, times, [100, 115, 130, 145, 160, 15, 30, 45, 60])  # restarted at 75 s
-    assert rr.prom_rate(reset, T0 + 120) == pytest.approx(1.0)
-    assert rr.prom_rate(steady, T0) is None  # one sample in (t - 60, t]: no output
-    assert rr.prom_rate(steady, T0 + 15) == pytest.approx(0.25)  # no extrapolation below 0
+def logged(path, rows):
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return path
 
 
-def test_l0_is_replayed_offline_on_an_agents_mode_recording(tmp_path):
-    # Under agents-mode every canary reaches 100%: the bad one is still on its pods
-    write_recording(tmp_path, "r-bad", bad=True, band="above", errors=0.05, mode="agents")
-    write_recording(tmp_path, "r-good", bad=False, mode="agents")
-    write_recording(tmp_path, "r-edge", bad=True, band="near", errors=0.012, mode="agents")
-    result = rr.score(rr.release_runs([tmp_path]))
-    rec = result["per_recording"]
-    assert result["agents_mode"] == 3 and result["l0_replay_vs_live"]["n"] == 0
-    # second failed measurement of the 5xx ratio, 60 s into the 20% step
-    assert rec["r-bad"]["L0"] == {"outcome": "rollback", "t": 60, "weight": 20, "failed": ["5xx"]}
-    assert rec["r-edge"]["L0"]["outcome"] == "rollback"  # 1.2% is over 1% at every look
-    assert rec["r-good"]["L0"]["outcome"] == "promoted"
-    assert rec["r-bad"]["L3"]["outcome"] == "rollback"  # nothing truncates the other levels
-    assert result["classes"] == {"bad / above": 1, "bad / near": 1, "good / dev": 1}
+def test_logged_rollout_steps_replace_the_half_scrape_shift(tmp_path, monkeypatch):
+    rec = tmp_path / "recordings"
+    write_recording(rec, "r-good", bad=False)
+    rows = [
+        {"ts": iso(T0 + s), "namespace": "staging", "canary_hash": h, "step_index": i}
+        for s, h, i in [
+            (10, "old", 7),  # the previous rollout, done
+            (52, "new", 0),  # setWeight 20 in progress
+            (57, "new", 1),  # 20% reached
+            (90, "new", 2),
+            (205, "new", 3),
+            (209, "new", 4),  # 50% reached
+        ]
+    ]
+    monkeypatch.setattr(rr, "STEPS_LOG", logged(tmp_path / "steps.jsonl", rows))
+    (run,) = rr.release_runs([rec])
+    line = rr.timeline(rr.load_index(run), "staging", *run["window"])
+    assert line["step_source"] == "logged"
+    assert {w: t - T0 for w, t in line["steps"].items()} == {20: 57, 50: 209}
+    result = rr.score([run])
+    assert result["step_source"] == {"logged": 1} and result["step_source_fallback"] == []
+    assert result["classes"] == {"good / dev": 1}
 
 
-def test_no_canary_data_fails_an_l0_measurement():
-    idx = {"podinfo_requests": [], "podinfo_latency_buckets": []}
-    assert rr.l0_measure(idx, T0, "staging", "new") == {"5xx": False, "p99": False}
-
-
-def test_the_replay_is_checked_against_l0s_live_decisions(scored):
-    check = scored["l0_replay_vs_live"]
-    # r-invisible: L0 aborted a canary that showed nothing, gone before a second failure
-    assert check["n"] == 4 and check["agree"] == 3
-    assert check["disagree"] == {"r-invisible": {"live": "rollback", "replay": "truncated"}}
+def test_without_a_logged_transition_the_shift_is_used(tmp_path, monkeypatch):
+    rec = tmp_path / "recordings"
+    write_recording(rec, "r-good", bad=False)
+    # the logger started mid-canary: 20% was never seen being reached
+    rows = [{"ts": iso(T0 + 100), "namespace": "staging", "canary_hash": "new", "step_index": 2}]
+    monkeypatch.setattr(rr, "STEPS_LOG", logged(tmp_path / "steps.jsonl", rows))
+    (run,) = rr.release_runs([rec])
+    line = rr.timeline(rr.load_index(run), "staging", *run["window"])
+    assert line["step_source"] == "up_minus_7.5s"
+    assert line["steps"][20] - T0 == STEP_20 - rr.READY_LAG_S
+    assert rr.score([run])["step_source_fallback"] == ["r-good"]
