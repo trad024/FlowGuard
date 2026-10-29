@@ -23,10 +23,13 @@ commit whose app-ci passed on the failing branch (else on dev), reads module X's
 go.mod there and go.sum at the failing commit, and returns the proposal's action and params
 (fixes.fix_action). It needs only a read token.
 
-pin_dependency writes the go.mod edit to a new branch fix/<proposal id> from the failing
-commit and starts app-ci there through its workflow_dispatch (app-ci runs on push only for
-dev, main and scenario/**); that run validates the pin. open_fix_pr opens an issue, or, when it
-carries a pin patch, a draft PR from fix/<proposal id> into the failing branch.
+pin_dependency writes the go.mod edit to a new branch fix/flowguard-eval-<proposal id> from the
+failing commit and starts app-ci there through its workflow_dispatch (app-ci runs on push only
+for dev, main and scenario/**); that run validates the pin. open_fix_pr opens an issue, or, when
+it carries a pin patch, a draft PR from that branch into the failing branch.
+
+Every branch, issue and draft PR the handlers create carries the marker flowguard-eval: in the
+branch name, and as a label on issues and PRs, so a cleanup can find them all.
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ from flowguard import fixes
 GITHUB_API = "https://api.github.com"
 WORKFLOW = "app-ci.yml"
 FIX_ACTIONS = ("pin_dependency", "open_fix_pr")
+MARKER = "flowguard-eval"  # branch name prefix and label of everything the handlers create
 # fix/<name> or scenario/<name>, path segments of safe characters only
 BRANCH = re.compile(r"(?:fix|scenario)(?:/[A-Za-z0-9][A-Za-z0-9._-]*)+")
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -107,6 +111,11 @@ def check_branch(name: str) -> str:
     if name.endswith((".lock", ".")):
         raise GitHubError(f"{name!r}: not a valid branch name")
     return name
+
+
+def fix_branch(proposal_id: str) -> str:
+    """The branch a fix for this proposal is committed on, with the marker in its name."""
+    return check_branch(f"fix/{MARKER}-{proposal_id}")
 
 
 def _sha(value: Any) -> str:
@@ -217,7 +226,7 @@ def _commit_pin(client: Transport, repo: str, branch: str, head_sha: str, patch:
 
 
 def pin_dependency(client: Transport, repo: str, proposal_id: str, params: dict) -> str:
-    branch = check_branch(f"fix/{proposal_id}")
+    branch = fix_branch(proposal_id)
     head = _sha(params.get("head_sha"))
     sha = _commit_pin(client, repo, branch, head, params)
     dispatch = {"ref": branch}
@@ -234,16 +243,23 @@ def open_fix_pr(client: Transport, repo: str, proposal_id: str, params: dict) ->
     if not text["title"] or not text["body"]:
         raise GitHubError("a fix request needs a title and a body")
     if kind == "issue":
-        data = _ok(client("POST", f"/repos/{repo}/issues", text), "open an issue")
+        issue = {**text, "labels": [MARKER]}
+        data = _ok(client("POST", f"/repos/{repo}/issues", issue), "open an issue")
         return f"opened issue #{data.get('number')}"
     if kind != "draft_pr" or not isinstance(params.get("patch"), dict):
         raise GitHubError(f"unknown fix request kind {kind!r}")
     base = check_branch(params.get("base_branch"))
-    branch = check_branch(f"fix/{proposal_id}")
+    branch = fix_branch(proposal_id)
     _commit_pin(client, repo, branch, _sha(params.get("head_sha")), params["patch"])
     pull = {**text, "head": branch, "base": base, "draft": True}
     data = _ok(client("POST", f"/repos/{repo}/pulls", pull), f"open a draft PR into {base}")
-    return f"opened draft PR #{data.get('number')} from {branch} into {base}"
+    number = data.get("number") if isinstance(data, dict) else None
+    if type(number) is not int:
+        raise GitHubError(f"GitHub gave no number for the draft PR into {base}")
+    # A PR takes labels only through the issues API; its head branch already has the marker
+    label = {"labels": [MARKER]}
+    _ok(client("POST", f"/repos/{repo}/issues/{number}/labels", label), f"label PR #{number}")
+    return f"opened draft PR #{number} from {branch} into {base}"
 
 
 HANDLERS: dict[str, Callable[[Transport, str, str, dict], str]] = {

@@ -176,6 +176,8 @@ class FakeGitHub:
             return 201, {"number": 7}
         if method == "POST" and route == "pulls":
             return 201, {"number": 8}
+        if method == "POST" and route == "issues/8/labels":
+            return 200, [{"name": body["labels"][0]}]
         return 404, {"message": f"no route {method} {route}"}
 
     def writes(self):
@@ -260,17 +262,19 @@ def pin_params(**kw):
 def test_pin_dependency_commits_the_edit_on_a_fix_branch_and_starts_app_ci_there():
     client = github()
     out = gha.HANDLERS["pin_dependency"](client, REPO, "p-1a2b", pin_params())
-    assert out == f"set github.com/gorilla/websocket to v1.5.3 on fix/p-1a2b ({'c' * 12}); " + (
+    branch = "fix/flowguard-eval-p-1a2b"
+    assert gha.fix_branch("p-1a2b") == branch
+    assert out == f"set github.com/gorilla/websocket to v1.5.3 on {branch} ({'c' * 12}); " + (
         "app-ci started"
     )
     (ref, put, dispatch) = client.writes()
-    assert ref == ("POST", f"/repos/{REPO}/git/refs", {"ref": "refs/heads/fix/p-1a2b", "sha": HEAD})
+    assert ref == ("POST", f"/repos/{REPO}/git/refs", {"ref": f"refs/heads/{branch}", "sha": HEAD})
     method, path, body = put
     assert (method, urllib.parse.unquote(path)) == ("PUT", f"/repos/{REPO}/contents/{fixes.GO_MOD}")
-    assert body["branch"] == "fix/p-1a2b" and body["sha"] == "blob-aaaa"
+    assert body["branch"] == branch and body["sha"] == "blob-aaaa"
     assert base64.b64decode(body["content"]).decode() == GO_MOD  # websocket back to v1.5.3
     assert dispatch == (
-        "POST", f"/repos/{REPO}/actions/workflows/app-ci.yml/dispatches", {"ref": "fix/p-1a2b"}
+        "POST", f"/repos/{REPO}/actions/workflows/app-ci.yml/dispatches", {"ref": branch}
     )  # fmt: skip
 
 
@@ -280,19 +284,21 @@ def test_open_fix_pr_opens_an_issue_or_a_draft_pr_into_the_failing_branch():
     assert gha.HANDLERS["open_fix_pr"](client, REPO, "p-1", issue) == "opened issue #7"
     ((method, path, body),) = client.writes()
     assert (method, path) == ("POST", f"/repos/{REPO}/issues")
-    assert body == {"title": issue["title"], "body": issue["body"]}
+    assert body == {"title": issue["title"], "body": issue["body"], "labels": ["flowguard-eval"]}
 
     patch = {"file": fixes.GO_MOD, "module": "github.com/gorilla/websocket", "version": "v1.5.3"}
     draft = {**fixes.request("dependency", [UNKNOWN], "pin", patch), "head_sha": HEAD,
              "base_branch": "scenario/r-1"}  # fmt: skip
     client = github()
     out = gha.HANDLERS["open_fix_pr"](client, REPO, "p-2", draft)
-    assert out == "opened draft PR #8 from fix/p-2 into scenario/r-1"
-    pull = client.writes()[-1]
+    assert out == "opened draft PR #8 from fix/flowguard-eval-p-2 into scenario/r-1"
+    ref, _put, pull, label = client.writes()
+    assert ref[2]["ref"] == "refs/heads/fix/flowguard-eval-p-2"
     assert pull[1] == f"/repos/{REPO}/pulls"
     assert {k: pull[2][k] for k in ("head", "base", "draft")} == {
-        "head": "fix/p-2", "base": "scenario/r-1", "draft": True
+        "head": "fix/flowguard-eval-p-2", "base": "scenario/r-1", "draft": True
     }  # fmt: skip
+    assert label == ("POST", f"/repos/{REPO}/issues/8/labels", {"labels": ["flowguard-eval"]})
 
 
 def test_handlers_refuse_before_writing_anything_they_may_not_write():
@@ -319,11 +325,19 @@ def test_handlers_refuse_before_writing_anything_they_may_not_write():
 
 def test_a_github_refusal_fails_the_handler():
     client = github(fail={("POST", "git/refs")})
-    with pytest.raises(gha.GitHubError, match="422 to create fix/p-1: Unprocessable"):
+    with pytest.raises(gha.GitHubError, match="422 to create fix/flowguard-eval-p-1: Unproc"):
         gha.pin_dependency(client, REPO, "p-1", pin_params())
     client = github(fail={("POST", "actions/workflows")})
     with pytest.raises(gha.GitHubError, match="start app-ci.yml"):
         gha.pin_dependency(client, REPO, "p-1", pin_params())
+    # the PR is open but unlabelled: a failed execution, and the cleanup still finds the PR
+    # by its marked head branch
+    patch = {"file": fixes.GO_MOD, "module": "github.com/gorilla/websocket", "version": "v1.5.3"}
+    draft = {**fixes.request("dependency", [UNKNOWN], "pin", patch), "head_sha": HEAD,
+             "base_branch": "scenario/r-1"}  # fmt: skip
+    client = github(fail={("POST", "issues/8/labels")})
+    with pytest.raises(gha.GitHubError, match="label PR #8"):
+        gha.open_fix_pr(client, REPO, "p-2", draft)
 
 
 # ---------------------------------------------------------------- through the gate and executor

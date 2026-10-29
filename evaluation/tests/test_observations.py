@@ -10,7 +10,9 @@ import observations
 import stats
 from flowguard.audit import AuditLog
 from report_data import connect, validate_observed
-from report_metrics import hallucination_rate, measurements, pairs_for
+from report_metrics import hallucination_rate, measurements, pairs_for, per_quote
+
+SEED = 20261028  # the public analysis seed (report.py --seed default)
 
 
 def answer(quotes, ungrounded, rejected, method="llm_zero_shot", **extra):
@@ -129,14 +131,43 @@ def test_the_rate_is_per_quote_and_the_boolean_feeds_mcnemar(audit):
     l2 = [r for r in records if r["level"] == "L2"]
     l3 = [r for r in records if r["level"] == "L3"]
     # L2: (1 + 2) of (4 + 5) quotes; L3: (0 + 2) of (3 + 2); the boolean would say 2/2 and 1/2
-    rate = hallucination_rate(l2)
+    rate = hallucination_rate(l2, SEED)
     assert (rate["k"], rate["n"], rate["items"], rate["unit"]) == (3, 9, 2, "quote")
-    assert rate["ci95"] == list(stats.wilson(3, 9)) and rate["interval"] == "Wilson"
-    assert (hallucination_rate(l3)["k"], hallucination_rate(l3)["n"]) == (2, 5)
+    assert rate["estimate"] == 3 / 9 and rate["seed"] == SEED
+    assert (hallucination_rate(l3, SEED)["k"], hallucination_rate(l3, SEED)["n"]) == (2, 5)
     assert measurements(l3, seed=1)["secondary"]["hallucination_rate"]["n"] == 5
-    assert hallucination_rate([r for r in records if r["level"] == "L1"])["n"] == 0
+    assert measurements(l3, seed=1)["secondary"]["hallucination_rate"]["seed"] == 1
+    none = hallucination_rate([r for r in records if r["level"] == "L1"], SEED)
+    assert (none["n"], none["estimate"], none["ci95"]) == (0, None, None)
     # exact McNemar on the per-item boolean, paired by scenario (s1, s2)
     left, right = pairs_for(records, "L3", "L2", lambda r: r["observed"].get("hallucinated"),
                             "default")  # fmt: skip
     assert (left, right) == ([False, True], [True, True])
     assert stats.mcnemar_paired(left, right)["right_only"] == 1
+
+
+def observed(ungrounded, quotes):
+    return {"observed": {"diagnose_quotes": quotes, "diagnose_ungrounded": ungrounded,
+                         "hallucinated": ungrounded > 0}}  # fmt: skip
+
+
+def test_the_rate_interval_resamples_whole_answers_not_quotes():
+    # Clustered: 2 answers wholly ungrounded, 18 wholly grounded, 10 quotes each, and one
+    # answer without a quote. Per quote 20/200 = 0.10, but only 20 answers carry information.
+    records = [observed(10, 10)] * 2 + [observed(0, 10)] * 18 + [observed(0, 0)]
+    rate = hallucination_rate(records, SEED)
+    assert (rate["k"], rate["n"], rate["estimate"]) == (20, 200, 0.1)
+    assert (rate["items"], rate["answers_with_quotes"], rate["resamples"]) == (21, 20, 10000)
+    assert rate["interval"] == "percentile bootstrap over answers"
+    answers = [(10, 10)] * 2 + [(0, 10)] * 18
+    assert rate["ci95"] == stats.bootstrap_interval(answers, per_quote, seed=SEED)["ci95"]
+    # A resample holds 0 to 20 bad answers, so the interval spans from 0 to about 0.25; the
+    # Wilson interval on 200 independent quotes would be about 0.07 to 0.15
+    low, high = rate["ci95"]
+    wilson = stats.wilson(20, 200)
+    assert low == 0.0 and high >= 0.2
+    assert high - low > 2 * (wilson[1] - wilson[0])
+    # One answer resampled is always that answer: no spread, however many quotes it has
+    assert hallucination_rate([observed(3, 9)], SEED)["ci95"] == [3 / 9, 3 / 9]
+    # The same seed gives the same interval
+    assert hallucination_rate(records, SEED) == rate

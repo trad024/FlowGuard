@@ -6,7 +6,16 @@ Scenario specs and the runner that executes, records and cleans them up (Step 4a
 py scenarios\runner.py --validate scenarios\dev\*.yaml     # check every spec
 py scenarios\runner.py scenarios\dev\release-errors-05.yaml # run one scenario
 py scenarios\verify_templates.py                           # check the CI failure templates locally
+py scenarios\cleanup_fixes.py [--apply]                     # list (or close and delete) fix issues, PRs, branches
 ```
+
+Fix actions (D57): every issue, draft PR and `fix/flowguard-eval-<proposal id>` branch the fix
+handlers create carries the `flowguard-eval` marker (label or branch name). `cleanup_fixes.py`
+lists them, and with `--apply` closes the issues and PRs and deletes the branches; it needs
+`GITHUB_TOKEN_WRITE`. For each `pin_dependency` executed during a `ci` run, the runner polls the
+app-ci run the pin started on its fix branch (at most the 40-minute CI timeout, shared by all
+pins) and logs its conclusion to the audit log as `fix_ci_completed` at the pin's level; scoring
+counts the pin as resolved only if that run succeeded.
 
 Each run gets an opaque run id (`r-<8 hex>`), writes audit events under it, and is recorded
 into `evaluation/recordings/<run id>/` (see `evaluation/README.md`) with the ground truth and

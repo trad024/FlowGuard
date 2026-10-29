@@ -60,6 +60,7 @@ import ci_failures  # noqa: E402
 import deployer  # noqa: E402
 import groundtruth  # noqa: E402
 import recorder  # noqa: E402
+from flowguard import github_actions  # noqa: E402
 from flowguard.audit import AuditLog  # noqa: E402
 
 FAMILIES = {
@@ -80,6 +81,7 @@ EXPECTED_L0 = {"promote", "abort", "block", "ci_failure", "detect"}
 BASE_COMMAND = ["./podinfo", "--port=9898", "--level=info", "--port-metrics=9797"]
 GOMOD, GOSUM = "app/podinfo/go.mod", "app/podinfo/go.sum"
 RUNS = ROOT / "evaluation" / "runs"
+CI_TIMEOUT_S = 2400  # the longest a scenario waits for an app-ci run to complete
 
 
 # ---------------------------------------------------------------- spec
@@ -1110,6 +1112,7 @@ class Runner:
             if self.spec["family"] == "ci":
                 self.observed["l0"] = self.observed["ci"]
                 self.event("l0_outcome", outcome=self.observed["l0"], run_id=ci_runs[:1])
+                self.record_fix_ci(github)
                 return ci_runs, []
             if run and self.spec["family"] == "pipeline":
                 self.observed["job_seconds"] = job_seconds(github, run["id"])
@@ -1154,24 +1157,76 @@ class Runner:
             )
             self.event("branch_deleted", branch=branch, pushed=pushed)
 
-    def wait_ci(self, github, sha: str, timeout: int = 2400, sleep=time.sleep) -> dict | None:
+    def wait_ci(
+        self, github, sha: str, timeout: int = CI_TIMEOUT_S, sleep=time.sleep
+    ) -> dict | None:
         """Poll until the commit's app-ci run completes; network hiccups are retried."""
-        deadline = time.monotonic() + timeout
+        return self._poll(lambda: github.run_for_commit(sha), time.monotonic() + timeout, sleep)
+
+    def record_fix_ci(
+        self, github, timeout: int = CI_TIMEOUT_S, sleep=time.sleep, clock=time.monotonic
+    ) -> dict[str, str]:
+        """D57: for each pin_dependency executed in this run, the conclusion of the app-ci run
+        it started on its fix branch, polled until it completes or the scenario's CI timeout
+        (shared by all pins) ends. Written to the audit log at the pin's level, as the CI result
+        a real system sees: "no run" or "timeout" when there is none, and scoring counts only
+        "success" (report_data)."""
+        pins = self.audit.query(
+            "SELECT DISTINCT p.id, p.level FROM proposals p JOIN executions e "
+            "ON e.proposal_id = p.id WHERE p.scenario_id = ? AND p.action = 'pin_dependency' "
+            "AND e.success = 1 ORDER BY p.id",
+            (self.run_id,),
+        )
+        deadline = clock() + timeout
+        conclusions = {}
+        for pin in pins:
+            branch = github_actions.fix_branch(pin["id"])
+            path = (
+                f"/repos/{github.cfg.repo}/actions/workflows/{github_actions.WORKFLOW}/runs"
+                f"?branch={urllib.parse.quote(branch, safe='')}&event=workflow_dispatch&per_page=1"
+            )
+            run = self._poll(
+                lambda path=path: next(iter(github.get(path).get("workflow_runs") or []), None),
+                deadline,
+                sleep,
+                clock,
+            )
+            if run is None:
+                conclusion = "no run"
+            elif run.get("status") != "completed":
+                conclusion = "timeout"
+            else:
+                conclusion = run.get("conclusion") or "unknown"
+            AuditLog(self.audit.path, self.run_id, pin["level"]).event(
+                "ci",
+                "fix_ci_completed",
+                proposal_id=pin["id"],
+                branch=branch,
+                run_id=run.get("id") if run else None,
+                conclusion=conclusion,
+            )
+            conclusions[pin["id"]] = conclusion
+        return conclusions
+
+    def _poll(self, fetch, deadline: float, sleep=time.sleep, clock=time.monotonic):
+        """The run `fetch` returns, polled until it completes or the deadline passes. It is
+        fetched at least once, so a run that completed while another was awaited is seen."""
         run = None
-        while time.monotonic() < deadline:
+        while True:
             try:
-                run = github.run_for_commit(sha)
+                run = fetch()
             except deployer.RateLimited as exc:
-                sleep(max(30, exc.reset_at - int(time.time()) + 5))
-                continue
+                wait = max(30, exc.reset_at - int(time.time()) + 5)
             except OSError as exc:  # URLError, timeouts, TLS handshake failures
                 self.event("poll_retry", detail=str(exc)[:200])
-                sleep(30)
-                continue
-            if run and run.get("status") == "completed":
+                wait = 30
+            else:
+                if run and run.get("status") == "completed":
+                    return run
+                wait = 30
+            if clock() >= deadline:
                 return run
-            sleep(30)
-        return run
+            sleep(wait)
 
 
 def job_seconds(github, run_id: int) -> dict[str, float]:

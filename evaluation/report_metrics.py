@@ -45,14 +45,33 @@ def proportion(values):
     }
 
 
-def hallucination_rate(records):
+def per_quote(answers):
+    """Ungrounded quotes over all quotes, for (ungrounded, quotes) pairs."""
+    return sum(u for u, _ in answers) / sum(q for _, q in answers)
+
+
+def hallucination_rate(records, seed):
     """Per quote (pre-registration metrics.H3.hallucination): raw quotes not found in the log
-    over all raw quotes, summed over the records that have them, with a Wilson interval. The
-    per-item boolean `hallucinated` is only for the paired exact McNemar."""
+    over all raw quotes, summed over the records that have them. Quotes from one answer are not
+    independent, so the interval is a percentile bootstrap resampling whole answers; an answer
+    without a quote holds nothing to resample. The per-item boolean `hallucinated` is only for
+    the paired exact McNemar."""
     counted = [r["observed"] for r in records if "diagnose_quotes" in r["observed"]]
-    k = sum(o["diagnose_ungrounded"] for o in counted)
-    n = sum(o["diagnose_quotes"] for o in counted)
-    return {**proportion([True] * k + [False] * (n - k)), "items": len(counted), "unit": "quote"}
+    answers = [(o["diagnose_ungrounded"], o["diagnose_quotes"]) for o in counted]
+    answers = [a for a in answers if a[1]]
+    boot = stats.bootstrap_interval(answers, per_quote, seed=seed)
+    return {
+        "k": sum(u for u, _ in answers),
+        "n": sum(q for _, q in answers),
+        "estimate": boot["estimate"],
+        "ci95": boot["ci95"],
+        "interval": "percentile bootstrap over answers",
+        "items": len(counted),
+        "answers_with_quotes": boot["n"],
+        "resamples": boot["resamples"],
+        "seed": boot["seed"],
+        "unit": "quote",
+    }
 
 
 def macro_f1(pairs):
@@ -126,13 +145,15 @@ def h5_incident(record):
 
 def autonomous(record):
     """Resolved without a human. An executed open_fix_pr (a draft PR or an issue) is assisted,
-    never autonomous (D57, H5 note)."""
+    never autonomous; an executed pin counts only if app-ci passed on its fix branch (D57, H5
+    note)."""
     observed, audited = record["observed"], record["audit"]
     if not h5_incident(record) or "resolved" not in observed:
         return None
     return bool(
         observed["resolved"]
         and not audited.get("assisted")
+        and audited.get("pins_green", 0) == audited.get("pins", 0)
         and audited["validated_execution"]
         and audited["approvals"] == 0
         and audited["human_requests"] == 0
@@ -207,7 +228,7 @@ def measurements(records, seed):
     hours = sum(float(r["truth"]["spec"]["hours"]) for r in normal)
     secondary = {
         "accuracy": proportion([a == b for a, b in diagnoses]),
-        "hallucination_rate": hallucination_rate(records),
+        "hallucination_rate": hallucination_rate(records, seed),
         "false_alerts_per_hour": {
             "k": alerts,
             "n": len(normal),
