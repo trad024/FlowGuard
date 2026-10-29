@@ -7,6 +7,10 @@ and Monitor incidents, plus the DSO6 safety counts (executions without a require
 after a reject, both must stay 0) and approvals per incident. No rationale, log or parameter
 text leaves the database. The file is opened read-only (FLOWGUARD_AUDIT_DB, else
 state/audit.db); a missing file gives flowguard_audit_up 0. Standard library only.
+
+It listens on one address, never on all interfaces: 127.0.0.1 by default, or the address k3d
+reaches the host on (host.k3d.internal, see docs/demo.md); 0.0.0.0, :: and an empty host are
+refused (bind_address, which the scored-results exporter uses too).
 """
 
 from __future__ import annotations
@@ -23,6 +27,19 @@ from pathlib import Path
 from flowguard.audit import DEFAULT_PATH
 
 PORT = 9464
+WILDCARDS = {"", "0.0.0.0", "::", "[::]", "*", "0:0:0:0:0:0:0:0"}
+
+
+def bind_address(host: str) -> str:
+    """One interface to listen on; every-interface addresses are refused, so the counts are
+    never served to the whole network."""
+    if host.strip() in WILDCARDS:
+        raise ValueError(
+            f"refusing to listen on all interfaces ({host!r}): use 127.0.0.1, or the address "
+            "k3d reaches the host on (docs/demo.md)"
+        )
+    return host.strip()
+
 
 # name, help, type, query: label columns then a `value` column
 COUNTS = (
@@ -161,7 +178,7 @@ def serve(host: str = "127.0.0.1", port: int = PORT, path: Path | str | None = N
         def log_message(self, *args):
             pass
 
-    return ThreadingHTTPServer((host, port), Handler)
+    return ThreadingHTTPServer((bind_address(host), port), Handler)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -169,7 +186,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=PORT)
     args = parser.parse_args(argv)
-    server = serve(args.host, args.port)
+    try:
+        server = serve(args.host, args.port)
+    except ValueError as exc:
+        parser.error(str(exc))
     print(f"serving http://{args.host}:{server.server_address[1]}/metrics", flush=True)
     server.serve_forever()
     return 0
