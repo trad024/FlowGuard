@@ -2,5 +2,5 @@
   "model": "distilbert/distilbert-base-uncased",
   "revision": "12040accade4e8a0f71eabdb258fecc2e7e948be",
   "split_sha256": "a1003ffa6cfefe6f80588ce22f7cbac3231e4cf070580c893b74dcb9ccaa2beb",
-  "status": "CPU training pending verified corpus export"
+  "status": "CPU trained: seed 31, 3 epochs; see results and artifact.json; negative validation result"
 }

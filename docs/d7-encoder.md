@@ -1,20 +1,52 @@
-# D7: CPU encoder preparation ? verified logs pending
+# D7: measured CPU encoder development checkpoint
 
-The predictor, strict loader, CPU training script, train/validation exporter, cleared
-notebook, verified artifact downloader and CPU benchmark are implemented. CPU training here
-is now authorized and is the configured workflow. **No training has run yet** because the
-verified corpus logs are absent from this machine and have not been published in the
-repository, releases or Actions artifacts. The latest upstream documentation reports an
-L0 development score on 74 logs, suggesting the corpus is available on its generating
-machine; the split alone does not supply those log bytes.
+CPU training completed on 2026-10-29: three epochs, seed 31, two threads, batch size two,
+with the classifier and last two DistilBERT blocks trainable. The actual training log,
+validation predictions, corpus provenance, package versions and CPU benchmarks are committed
+under `ci/encoder/results/`. No held-out test templates were used.
 
-No trained weights, validation F1, training log from an actual run, hosted weight checksum,
-or measured trained-model CPU RAM/latency exist yet. These values are not fabricated. PR #3
-remains a draft until the real CPU run, publication and benchmark complete.
+**This is a negative validation result:** macro-F1 0.2533, accuracy 5/14 (35.7%). It misses
+three of five classes entirely. The checkpoint is delivered for review/comparison, not
+adopted as a reliable deployment diagnosis model. No extra tuning run was performed.
+
+| Class | Validation support | F1 |
+|---|---:|---:|
+| code | 2 | 0.0000 |
+| dependency | 3 | 0.6000 |
+| environment | 4 | 0.0000 |
+| flaky_test | 2 | 0.6667 |
+| infrastructure | 3 | 0.0000 |
+
+| Epoch | Training loss | Validation macro-F1 | Accuracy |
+|---|---:|---:|---:|
+| 1 | 1.5966 | 0.0706 | 3/14 |
+| 2 | 1.4235 | 0.2256 | 5/14 |
+| 3 (selected) | 1.1912 | 0.2533 | 5/14 |
+
+Measured training wall time: 155.94 seconds (excluding base-model download/load); peak
+Windows process working set: 1137.24 MiB. Hardware: Intel i5-11300H, 4 physical cores,
+8 logical processors, 7.7 GiB usable RAM. Training used only two CPU threads.
+
+| CPU inference workload | Calls after 5 warmups | Median | p95 | Sampled peak process RSS |
+|---|---:|---:|---:|---:|
+| Fixed short-log smoke | 30 | 38.95 ms | 46.90 ms | 449.93 MiB |
+| 14 validation logs, 3 cycles | 42 | 372.35 ms | 468.56 ms | 510.42 MiB |
+
+RSS is sampled every 10 ms and includes checkpoint loading. This measures one encoder
+process, not the entire FlowGuard/Docker footprint. The small validation workload does not
+establish production latency or the whole-system 4 GB budget.
+
+Weights remain outside git, on the public fork's
+[development release](https://github.com/aziz696902/FlowGuard/releases/tag/encoder-d7-cpu-v1).
+The actual URL, SHA-256 and size are pinned in `ci/encoder/artifact.json`:
+
+```text
+470d1b0fb40a106d1567e80c747329bf171bcbd45aac6409a77b93d6f90b964d
+```
 
 ## Split and data boundary
 
-The branch is based on `dev` commit `be5e4b2`, including accepted D39?D44 decisions and
+The branch is based on `dev` commit `be5e4b2`, including accepted D39-D44 decisions and
 the draft 0.3 pre-registration. The CI template assignment is populated.
 `evaluation/datasets/corpus-split.json` assigns 20 training templates and 5 validation
 templates. Excluding its explicitly unverified variants leaves 60 training and 14 validation
@@ -35,7 +67,8 @@ Labels come from the recorded split metadata, never from filenames or user-suppl
 No agent code imports or references experiment-data directories.
 
 Training requires an export of only the verified train/validation reduced logs.
-That export is not present in this clone. The index is JSON Lines containing metadata only:
+The supplied `flowguard-corpus-dev.zip` was validated and imported locally; raw logs remain
+outside git. Its SHA-256 is recorded in `results/corpus-provenance.json`. The index is JSON Lines containing metadata only:
 
 ```json
 {"variant_id": "code-02", "log_path": "code-02/reduced.log"}
@@ -104,11 +137,12 @@ The existing side channel already supplies D9 without it.
 The base is [DistilBERT](https://huggingface.co/distilbert/distilbert-base-uncased), pinned to
 revision `12040accade4e8a0f71eabdb258fecc2e7e948be`. Dependencies are pinned separately in
 `ci/encoder/requirements.txt`; ordinary tests neither install Torch nor download a model.
-From the checkout, after receiving the verified export:
+From the checkout, after importing the verified export:
 
 ```powershell
 pip install -e .
 pip install -r ci/encoder/requirements.txt
+python ci/import_encoder.py --archive PATH_TO/flowguard-corpus-dev.zip --out state/encoder-corpus
 python ci/train_encoder.py --index state/encoder-corpus/index.jsonl --log-root state/encoder-corpus --output state/encoder-training
 ```
 
@@ -118,6 +152,9 @@ transformer blocks are updated; embeddings and earlier blocks are frozen to redu
 memory/work on this tiny dataset. `--unfreeze-layers` records any explicit alternative.
 Training and inference use the same preprocessing, left truncation and 512-token limit.
 The best checkpoint is chosen by validation macro-F1; test templates are never opened.
+Loading phases and batch loss/elapsed time are printed live. The importer validates all CSV
+labels and ZIP membership before reading log bytes, accepts the source optional-job naming
+convention, and rejects excluded, incomplete, mislabeled or unsafe exports.
 
 Every epoch records training loss, elapsed time, validation macro-F1 and per-class
 precision/recall/F1/support in `training-log.json`. Final metadata adds split/log checksums,
@@ -127,19 +164,18 @@ process memory. The script saves safetensors, validation predictions and `encode
 training log and metrics, publish the weight ZIP outside git (for example, on the fork's release),
 and record its real public URL/checksum. The optional notebook remains cleared and unrun.
 
-After publication, use the actual artifact URL and checksum:
+Download the published checkpoint with checksum verification:
 
 ```powershell
-python ci/download_encoder.py --url ACTUAL_HTTPS_URL --sha256 ACTUAL_SHA256 --destination state/encoder
-python ci/benchmark_encoder.py --model state/encoder --output state/encoder-cpu.json
+python ci/download_encoder.py --url https://github.com/aziz696902/FlowGuard/releases/download/encoder-d7-cpu-v1/encoder-weights.zip --sha256 470d1b0fb40a106d1567e80c747329bf171bcbd45aac6409a77b93d6f90b964d --destination state/encoder-downloaded
+python ci/benchmark_encoder.py --model state/encoder-downloaded --output state/encoder-cpu.json
+python ci/benchmark_encoder.py --model state/encoder-downloaded --index state/encoder-corpus/index.jsonl --log-root state/encoder-corpus --iterations 42 --output state/encoder-cpu-validation.json
 ```
 
-The downloader checks the SHA-256 before extraction and rejects unexpected paths, duplicate
-files, symlinks and oversized artifacts. There is no invented download URL or weight checksum
-in this branch. The benchmark records median/p95 CPU latency after five warmups, sampled
-process RSS including model load, incremental RSS, platform and thread count. Run it on the
-target laptop before deciding whether the complete system fits the 4 GB budget. Its fixed
-short log is a smoke workload, not a representative CI-log latency distribution.
+The downloader verifies SHA-256 before extraction and rejects unexpected paths, duplicate
+files, symlinks and oversized artifacts. Validation-log benchmarking uses the same complete
+strict loader and selects only validation examples. The artifact is a development checkpoint;
+its poor accuracy is not repaired by low latency or passing interface tests.
 
 ## Verification and remaining work
 
@@ -150,10 +186,17 @@ known-value F1 calculations; checksum/unsafe-archive handling with mocked networ
 cleared notebook; firewall; Python syntax compilation and all three CLI help commands.
 The PR records final full-suite, Ruff 0.17.1 lint and formatting results.
 
-Not verified: actual CPU training, training dependency installation, trained-model loading,
-validation performance, hosted weight download, CPU RAM/latency or live integration. There
-is no claimed model result from configuring a training command or testing a mocked backend.
+Also verified on the real verified training/validation export: CPU training, local
+safetensors loading, independently recomputed validation metrics, artifact checksum and both
+CPU workloads above. Committed JSON files record the measurements, including per-class
+support and all epoch losses. The source archive manifest's provenance is retained; no
+held-out file was opened or new corpus generated here.
 
-Remaining blocker: obtain the verified export. Then run CPU training, commit its real log
-and validation scores, publish/download the weights with their actual checksum, measure CPU
-RAM/latency, and mark the PR ready. Frozen files remain unchanged.
+Not verified: held-out accuracy, calibrated encoder coverage, live orchestrator integration,
+production effectiveness or the complete system's memory budget. No follow-up tuning was
+performed after seeing validation. Twenty training templates is a small set; these results
+must not be generalized to independent incidents.
+
+Remaining: review and integration on the other machine, then the separately authorized final
+evaluation. Frozen files remain unchanged. The checkpoint remains optional and should not
+replace the stronger existing methods on the strength of this result.

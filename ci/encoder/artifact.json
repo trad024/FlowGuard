@@ -1,0 +1,8 @@
+{
+  "file": "encoder-weights.zip",
+  "sha256": "470d1b0fb40a106d1567e80c747329bf171bcbd45aac6409a77b93d6f90b964d",
+  "size_bytes": 247318246,
+  "url": "https://github.com/aziz696902/FlowGuard/releases/download/encoder-d7-cpu-v1/encoder-weights.zip",
+  "release": "https://github.com/aziz696902/FlowGuard/releases/tag/encoder-d7-cpu-v1",
+  "status": "development checkpoint; low validation accuracy; not adopted for deployment"
+}

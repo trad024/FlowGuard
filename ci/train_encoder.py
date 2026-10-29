@@ -44,6 +44,12 @@ def main():
         raise SystemExit("both training and validation must contain every class")
     if args.output.exists():
         raise SystemExit("output already exists; choose a new directory")
+    print(
+        f"Data verified: {len(train)} training logs, {len(validation)} validation logs. "
+        f"CPU: {args.threads} threads; {args.epochs} epochs; batch size {args.batch_size}.",
+        flush=True,
+    )
+    print("Loading training libraries...", flush=True)
 
     import psutil
     import torch
@@ -54,10 +60,12 @@ def main():
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.use_deterministic_algorithms(True)
+    print("Loading tokenizer (downloads on first use)...", flush=True)
     tokenizer = AutoTokenizer.from_pretrained(
         base["model"], revision=base["revision"], trust_remote_code=False
     )
     tokenizer.truncation_side = "left"
+    print("Loading pinned base model (downloads on first use)...", flush=True)
     model = AutoModelForSequenceClassification.from_pretrained(
         base["model"],
         revision=base["revision"],
@@ -106,17 +114,25 @@ def main():
     args.output.mkdir(parents=True)
     checkpoint = args.output / "checkpoint"
     history, best = [], -1.0
+    print(f"Model ready. Starting training: {len(train_loader)} batches per epoch.", flush=True)
     for epoch in range(1, args.epochs + 1):
         epoch_started = time.perf_counter()
         training_loss = 0.0
         model.train()
-        for batch in train_loader:
+        for step, batch in enumerate(train_loader, 1):
             optimizer.zero_grad(set_to_none=True)
             loss = model(**batch).loss
             training_loss += loss.item() * len(batch["labels"])
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+            if step == 1 or step % 5 == 0 or step == len(train_loader):
+                print(
+                    f"Epoch {epoch}/{args.epochs} | batch {step}/{len(train_loader)} | "
+                    f"loss {loss.item():.4f} | elapsed {time.perf_counter() - epoch_started:.1f}s",
+                    flush=True,
+                )
+        print(f"Epoch {epoch}: validating...", flush=True)
         model.eval()
         predicted, probabilities = [], []
         with torch.inference_mode():
@@ -194,6 +210,7 @@ def main():
     manifest = {"file": bundle.name, "sha256": digest, "size_bytes": bundle.stat().st_size}
     (args.output / "artifact.json").write_text(json.dumps(manifest, indent=2))
     print(json.dumps(manifest))
+    print(f"Training complete. Results and weights: {args.output.resolve()}", flush=True)
 
 
 if __name__ == "__main__":
