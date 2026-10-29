@@ -1,0 +1,531 @@
+[
+  {
+    "id": "recorded-security-40587937880",
+    "run_id": 40587937880,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12771304458,
+      "run_id": 40587937880,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "scenario/r-071e874b",
+      "sha": "c9f1f0a29b7ffce046de2b446fcfd0ba125737a3",
+      "conclusion": "success",
+      "created_at": "2026-10-27T21:34:45Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "16a0997124157b68ddf1939a6042ce0f7bfde6e3870ac5ea7d1644b587786bda",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40578368148",
+    "run_id": 40578368148,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12768751426,
+      "run_id": 40578368148,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "dev",
+      "sha": "657bbaacf106e9dde15ee4036b592c4d863236ec",
+      "conclusion": "success",
+      "created_at": "2026-10-27T20:28:32Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "e4b992847153f4dc5ec28fcd671fe762ac6530ed321b6093d333b8d86bc03a79",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40576270330",
+    "run_id": 40576270330,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12766984965,
+      "run_id": 40576270330,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "dev",
+      "sha": "ade19d3916ed443c95b7c83e7bc7a440b1feb196",
+      "conclusion": "success",
+      "created_at": "2026-10-27T20:14:35Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "608ffa21b75381c188d37180a55a1109e4183bc23f24f34a499be0afce404a41",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40571357410",
+    "run_id": 40571357410,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12766120356,
+      "run_id": 40571357410,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "dev",
+      "sha": "7aae07e0c200c36b1c8aa0d8592d6261c7cf6095",
+      "conclusion": "success",
+      "created_at": "2026-10-27T19:41:20Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "9fe0ce050efdcde5359b1f0ef15aa0a964ab2943e23bd2c80dd7ea006b93842d",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40573598976",
+    "run_id": 40573598976,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12765529841,
+      "run_id": 40573598976,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "dev",
+      "sha": "b8bf3902ce9685793c5245bf0878b625db5c8c2a",
+      "conclusion": "success",
+      "created_at": "2026-10-27T19:56:35Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "855ee7f2153d4db04105401ad385d70b49ce83cd98dc4aaa3e2263c1a1538a2f",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40562637345",
+    "run_id": 40562637345,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12761372550,
+      "run_id": 40562637345,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "dev",
+      "sha": "7fcd40e6b1b90b5228060ccccb92f0509be6170e",
+      "conclusion": "success",
+      "created_at": "2026-10-27T18:43:41Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "00daeac5ceea12f6a1a1031b026b729e041fc713bc6196497d62960ff5dc47ab",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40500780155",
+    "run_id": 40500780155,
+    "bad_release": true,
+    "counts": {
+      "trivy_high": 4,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-56851",
+                "Severity": "HIGH",
+                "FixedVersion": "0.41.0",
+                "PkgName": "golang.org/x/text",
+                "InstalledVersion": "v0.19.0",
+                "CVSS": {
+                  "redhat": {
+                    "V3Score": 7.5
+                  }
+                }
+              },
+              {
+                "VulnerabilityID": "CVE-2026-56852",
+                "Severity": "HIGH",
+                "FixedVersion": "0.39.0",
+                "PkgName": "golang.org/x/text",
+                "InstalledVersion": "v0.19.0",
+                "CVSS": {
+                  "redhat": {
+                    "V3Score": 7.5
+                  }
+                }
+              },
+              {
+                "VulnerabilityID": "CVE-2026-56851",
+                "Severity": "HIGH",
+                "FixedVersion": "0.41.0",
+                "PkgName": "golang.org/x/text",
+                "InstalledVersion": "v0.19.0",
+                "CVSS": {
+                  "redhat": {
+                    "V3Score": 7.5
+                  }
+                }
+              },
+              {
+                "VulnerabilityID": "CVE-2026-56852",
+                "Severity": "HIGH",
+                "FixedVersion": "0.39.0",
+                "PkgName": "golang.org/x/text",
+                "InstalledVersion": "v0.19.0",
+                "CVSS": {
+                  "redhat": {
+                    "V3Score": 7.5
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12733410878,
+      "run_id": 40500780155,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "scenario/r-11d5028a",
+      "sha": "6e11ca4b31f0f7ca071196f56894b33eaf872386",
+      "conclusion": "success",
+      "created_at": "2026-10-27T12:03:22Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "ad7fa84476298918b39b37273cadd5894e5a55542e90c44b5a5807490fbea758",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40501662040",
+    "run_id": 40501662040,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12733287463,
+      "run_id": 40501662040,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "scenario/r-bb3d6cfe",
+      "sha": "8e32e8586b25f1bb84436c0c7863e44d621e62a8",
+      "conclusion": "success",
+      "created_at": "2026-10-27T12:10:14Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "b103a78b3a7a95e77dd25a95ddd1d24fc17e9fd4b08ec4166da99afab10505e0",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40423475125",
+    "run_id": 40423475125,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12699466966,
+      "run_id": 40423475125,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "dev",
+      "sha": "5ccd7fe9902bd6f7d08d826ee18307c9f158ec63",
+      "conclusion": "success",
+      "created_at": "2026-10-26T23:59:50Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "fe26c5411bc45c6d375589f289fbb1246af92e61defd4440faef613a1e4cdcda",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40421399231",
+    "run_id": 40421399231,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12698375258,
+      "run_id": 40421399231,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "dev",
+      "sha": "bc059be10d1ea9936b81cb93b2976e16467959d6",
+      "conclusion": "success",
+      "created_at": "2026-10-26T23:40:59Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "f78b94261c41584a97336b45071976fb09ff4b59882e7fd5b2208d67fd4907fe",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40420788548",
+    "run_id": 40420788548,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12696718864,
+      "run_id": 40420788548,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "dev",
+      "sha": "2e563d0a567b8f6268b8ba79add26defbf532774",
+      "conclusion": "success",
+      "created_at": "2026-10-26T23:35:24Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "6857d88ac12b98e42ba1f784506f5f3fc81e04e8e20e7b187e777eadd3f2790b",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40388445834",
+    "run_id": 40388445834,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12681439993,
+      "run_id": 40388445834,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "scenario/release-commit-errors-10-20261026-193745",
+      "sha": "5575265ec3c37bafde1eeda624c6208a5add194e",
+      "conclusion": "success",
+      "created_at": "2026-10-26T19:37:49Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "708c832921b0c581bc2c1f675aba4668f989773ce15cccbda8581a4bf3932ae0",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40383618943",
+    "run_id": 40383618943,
+    "bad_release": true,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 1
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": [
+        {
+          "RuleID": "generic-api-key"
+        }
+      ]
+    },
+    "source": {
+      "id": 12680645324,
+      "run_id": 40383618943,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "scenario/security-leaked-secret-20261026-190545",
+      "sha": "7507abf67ff095d12947664d5cd5efc88b5e8b87",
+      "conclusion": "success",
+      "created_at": "2026-10-26T19:05:48Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "5e3c1331d9d53ec430109f22ed04859f3d7109516f23362fa1b635b723989f80",
+      "raw_gitleaks_sha256": "fbc7683a9411386a913ec11eaf97a34a2934da352f158ad2a94efa484d3b7216",
+      "reachability": "not measured in these historical artifacts"
+    }
+  },
+  {
+    "id": "recorded-security-40380155697",
+    "run_id": 40380155697,
+    "bad_release": false,
+    "counts": {
+      "trivy_high": 0,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "source": {
+      "id": 12678747150,
+      "run_id": 40380155697,
+      "name": "scan-reports",
+      "expired": false,
+      "branch": "dev",
+      "sha": "95224df82a8a4a8ab2daa4d5c46d898018d3e8e0",
+      "conclusion": "success",
+      "created_at": "2026-10-26T18:42:44Z",
+      "scope": "development CI history; not held-out",
+      "raw_trivy_sha256": "a2658b779def0fa16f86fa0de83ca82271bfa9ccad6cb92276c900e832cfd3d0",
+      "raw_gitleaks_sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "reachability": "not measured in these historical artifacts"
+    }
+  }
+]
