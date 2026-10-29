@@ -7,7 +7,10 @@ for calibration (D9) and evidence posts. Steps 6 to 10 replace the logic, not th
 - Monitor: the real agent since Step 6 (`flowguard.monitor`), re-exported here so the
   orchestrator's Monitor slot uses it.
 - Diagnose: L0 the frozen regex classifier and playbook (D3); L2+ an injected LLM; with
-  grounding (L3+) quoted lines that are not in the log are dropped (D8).
+  grounding (L3+) quoted lines that are not in the log are dropped (D8). Without a log (empty
+  or absent) every level takes one path: no model is asked, no class is guessed, the incident
+  record gets "no diagnosis (no log)" and the incident goes to a human (escalate_to_human, no
+  label scores) (D60).
 - Release: the real agent since Step 8 (`flowguard.release`), re-exported here: a sequential
   test on canary vs stable counts; with collaboration (L4+) P1 before any rollback.
 - Security: block on any HIGH, CRITICAL or leaked secret, else allow.
@@ -30,6 +33,7 @@ from flowguard.release import Release
 __all__ = ["AgentInput", "AgentOutput", "Diagnose", "Monitor", "Optimizer", "Release", "Security"]
 
 CLASSES = ("code", "dependency", "environment", "flaky_test", "infrastructure")
+NO_LOG = "no diagnosis (no log)"  # D60
 FORCED_JOBS = ("sbom", "scans")  # P2: never skipped after a dependency change or a flag
 
 
@@ -68,6 +72,10 @@ class Diagnose:
         return cls, scores, lines, ""
 
     def run(self, inp: AgentInput, cfg) -> AgentOutput:
+        if not inp.log.strip():  # D60: the same at every level, and no LLM call
+            post = EvidencePost(incident_id=inp.incident_id, agent=self.name, claim=NO_LOG)
+            p = proposal(self.name, "escalate_to_human", inp, NO_LOG)
+            return AgentOutput(proposals=[p], evidence=[post])
         cls, scores, lines, proposed = self.classify(inp, cfg)
         # An LLM may propose any action; the gate, not the agent, decides what may run (D20)
         action = proposed or baselines.playbook(cls if cls in CLASSES else "unclear")
