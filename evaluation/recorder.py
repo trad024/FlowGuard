@@ -13,6 +13,11 @@ writes evaluation/recordings/<recording-id>/ (gitignored):
     prometheus/<name>.json   raw samples of each selector over the window (not resampled)
     loadgen.jsonl            per-request log lines inside the window
     deployer-events.jsonl    deployer events inside the window
+    rollout-events.jsonl     every Rollout step change inside the window, logged by the runner
+                             from the Rollout's status while it waits on a release
+                             (RolloutStepLog): step index and kind, the setWeight in effect,
+                             pause start (Argo's own startTime) and end, abort (Argo's abortedAt
+                             when it has one), phase, canary and stable hashes; no message
     audit-events.jsonl       audit-log events inside the window
     ci/<run>/                run, jobs (with step results), annotations; job logs when the
                              GitHub token may read them (otherwise marked unavailable)
@@ -68,6 +73,79 @@ SELECTORS = {
     "node_allocatable": 'kube_node_status_allocatable{resource=~"cpu|memory"}',
     "node_capacity": 'kube_node_status_capacity{resource=~"cpu|memory"}',
 }
+
+
+ROLLOUT_EVENTS = "rollout-events.jsonl"
+
+
+def rollout_view(rollout: dict) -> dict:
+    """What the step log keeps of a Rollout: where it is in its steps, with Argo's own times."""
+    steps = (((rollout.get("spec") or {}).get("strategy") or {}).get("canary") or {}).get(
+        "steps"
+    ) or []
+    status = rollout.get("status") or {}
+    index = status.get("currentStepIndex")
+    step = steps[index] if isinstance(index, int) and 0 <= index < len(steps) else None
+    weight = None
+    if isinstance(index, int):  # the last setWeight reached so far (100 once all steps ran)
+        for s in steps[: index + 1]:
+            weight = s.get("setWeight", weight)
+    pauses = [
+        p for p in status.get("pauseConditions") or [] if p.get("reason") == "CanaryPauseStep"
+    ]
+    return {
+        "step_index": index,
+        "step": next(iter(step), None) if step else None,  # setWeight, pause or analysis
+        "set_weight": weight,
+        "pause_start": pauses[0].get("startTime") if pauses else None,
+        "abort": bool(status.get("abort")),
+        "aborted_at": status.get("abortedAt"),
+        "phase": status.get("phase"),
+        "canary_hash": status.get("currentPodHash"),
+        "stable_hash": status.get("stableRS"),
+    }
+
+
+def step_changes(view: dict, last: dict) -> list[str]:
+    """What changed between two step views (rollout_view), in a fixed order."""
+    return [
+        kind
+        for kind, changed in (
+            ("step", view["step_index"] != last.get("step_index")),
+            ("revision", view["canary_hash"] != last.get("canary_hash")),
+            (
+                "pause_start",
+                bool(view["pause_start"]) and view["pause_start"] != last.get("pause_start"),
+            ),
+            ("pause_end", bool(last.get("pause_start")) and not view["pause_start"]),
+            ("abort", view["abort"] and not last.get("abort")),
+            ("phase", view["phase"] != last.get("phase")),
+        )  # fmt: skip
+        if changed
+    ]
+
+
+class RolloutStepLog:
+    """Appends a row to `path` whenever the Rollout's step, pause, abort or phase changes."""
+
+    def __init__(self, path: Path, namespace: str, now=lambda: datetime.now(UTC)):
+        self.path, self.namespace, self.now = path, namespace, now
+        self.last: dict = {}
+
+    def observe(self, rollout: dict) -> dict | None:
+        view = rollout_view(rollout)
+        changes = step_changes(view, self.last)
+        self.last = view
+        if not changes:
+            return None
+        ts = self.now().astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        # Argo's own pause startTime and abortedAt (step_log_import.py marks its rows "poll")
+        row = {"ts": ts, "namespace": self.namespace, "changes": changes, "time_source": "argo"}
+        row.update(view)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, sort_keys=True) + "\n")
+        return row
 
 
 def parse_ts(value: str) -> datetime:
@@ -286,6 +364,11 @@ def record(
             "lines": write_jsonl(
                 out / "deployer-events.jsonl",
                 filter_jsonl([RUNS_DIR / "deployer-events.jsonl"], start, end),
+            )
+        },
+        "rollout_events": {
+            "lines": write_jsonl(
+                out / ROLLOUT_EVENTS, filter_jsonl([RUNS_DIR / ROLLOUT_EVENTS], start, end)
             )
         },
         "audit_events": {

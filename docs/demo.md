@@ -18,10 +18,12 @@ in the code yet:
   comes with Step 7.
 - **A bad canary:** every Rollout step runs the frozen L0 AnalysisTemplate. It aborts a bad
   canary about 90 s in, before the Monitor's alert (1-minute rate, `for: 1m`) fires. Release
-  deciding a canary in agents mode is a Step 8 design point.
+  deciding a canary needs the agents-mode Rollout (`infra/apps/podinfo/prod-agents`, D53),
+  which this demo does not deploy.
 
-Each loop below is real: no agent logic is scripted. Release is still the Step 5 stub: it
-promotes a canary that is no worse than stable.
+Each loop below is real: no agent logic is scripted. Release (Step 8) runs its sequential test
+on the canary's and the stable pods' counts and promotes a canary with no evidence against it
+after a step's four looks.
 
 ## Before you start
 
@@ -53,6 +55,34 @@ is its own Monitor tick, so an incident is tagged and followed up in the namespa
 human, the loop waits too, for at most 10 minutes; no answer counts as a denial.
 
 Without `--live` the executor is a dry run: everything happens except the write to the cluster.
+
+### Following up an aborted Rollout (optional, D44)
+
+An abort is in the Rollout's status, which Prometheus does not carry. To let the service see
+it, give it a short-lived token of the read-only `flowguard-reader` account (D59: get, list and
+watch on Rollouts in staging and prod, `infra/base/flowguard-reader.yaml`) and the cluster's
+CA. Both go to `state/`, which is gitignored; the token expires after `--duration` (create a
+new one for the next session).
+
+```powershell
+New-Item -ItemType Directory -Force state | Out-Null
+kubectl -n monitoring create token flowguard-reader --duration 8h | Set-Content -NoNewline state\kube-token
+$ca = kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}'
+[IO.File]::WriteAllBytes("$PWD\state\kube-ca.crt", [Convert]::FromBase64String($ca))
+py -m flowguard.service --level L1 --live --kube-token-file state\kube-token --kube-ca-file state\kube-ca.crt
+```
+
+```bash
+mkdir -p state
+kubectl -n monitoring create token flowguard-reader --duration 8h > state/kube-token
+kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
+  | base64 -d > state/kube-ca.crt
+python -m flowguard.service --level L1 --live --kube-token-file state/kube-token --kube-ca-file state/kube-ca.crt
+```
+
+The start line then says `"abort_follow_up": "on"`. When a watched Rollout is aborted, Release
+proposes `rollout_undo` once for that revision; it is high tier, so the approval page always
+asks.
 
 ## Grafana (T2, optional)
 
@@ -119,9 +149,11 @@ runner deploys a good release. It holds the Rollout (`spec.paused`) once the can
 and keeps prod load running. Expected:
 
 1. T3: `{"step": "held", "canary": "…", "weight": 20, …}`
-2. Within 30 s, the service sees the held canary and sends Release a `rollout_step` with the
-   canary's and the stable pods' 5xx ratios. Release proposes `rollout_promote`, and the gate
-   answers `ask_human`: medium tier in prod, rule 5.
+2. After the step's 30 s warm-up, the service sends Release one look per poll (a
+   `rollout_step` with the canary's and the stable pods' count windows). Release holds for
+   three looks (nothing printed: a hold opens no incident) and at the fourth, about 2.5 minutes
+   after the hold began, proposes `rollout_promote`; the gate answers `ask_human`: medium tier
+   in prod, rule 5.
 3. Open http://127.0.0.1:8765/ and approve the proposal.
 4. T1: `"gate": ["ask_human/approved"], "executed": [true]`. The executor unpauses the Rollout
    and clears its pause conditions.

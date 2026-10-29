@@ -245,6 +245,38 @@ class FakeCluster:
         return ["podinfo-release-old"]
 
 
+def test_waiting_on_a_release_shows_every_status_to_the_step_log(tmp_path):
+    def state(index, **status):
+        return {
+            "metadata": {"generation": 2},
+            "spec": {"template": {"spec": {"containers": [{"image": "img:2"}]}},
+                     "strategy": {"canary": {"steps": [{"setWeight": 20}, {"pause": {}}]}}},
+            "status": {"currentStepIndex": index, "currentPodHash": "new", "stableRS": "old",
+                       "observedGeneration": "2", **status},
+        }  # fmt: skip
+
+    class Sequence:
+        states = iter([state(0), state(1, phase="Paused"), state(1, abort=True, phase="Degraded")])
+
+        def rollout(self):
+            return next(self.states)
+
+    log = runner.recorder.RolloutStepLog(tmp_path / "steps.jsonl", "staging")
+    seen, slept = [], []
+    clock = iter(range(0, 100))
+    outcome = runner.wait_outcome(
+        Sequence(),
+        "img:2",
+        60,
+        sleep=slept.append,
+        clock=lambda: next(clock),
+        watch=lambda r: seen.append(log.observe(r)),
+    )
+    assert outcome == "aborted" and len(seen) == 3 and slept == [runner.ROLLOUT_POLL_S] * 2
+    rows = [json.loads(line) for line in (tmp_path / "steps.jsonl").read_text().splitlines()]
+    assert [r["changes"][0] for r in rows] == ["step", "step", "abort"]
+
+
 def test_an_aborted_restore_is_retried_once_with_live_load(monkeypatch, stores):
     r = runner.Runner(spec(), run_id="r-0000abcd")
     r.cluster = FakeCluster()
@@ -252,7 +284,7 @@ def test_an_aborted_restore_is_retried_once_with_live_load(monkeypatch, stores):
     calls = []
     monkeypatch.setattr(runner, "patch_template", lambda *a: calls.append(("patch", a[3])))
     monkeypatch.setattr(runner, "retry_rollout", lambda ns: calls.append("retry"))
-    monkeypatch.setattr(runner, "wait_outcome", lambda *a: next(outcomes))
+    monkeypatch.setattr(runner, "wait_outcome", lambda *a, **k: next(outcomes))
 
     class DeadLoad:
         def alive(self):
@@ -290,7 +322,7 @@ def test_config_release_keeps_the_injection_out_of_the_audit_log(monkeypatch, st
 
     monkeypatch.setattr(runner.deployer, "create_release_settings", create)
     monkeypatch.setattr(runner, "patch_template", lambda *a: patches.append(a))
-    monkeypatch.setattr(runner, "wait_outcome", lambda *a: "aborted")
+    monkeypatch.setattr(runner, "wait_outcome", lambda *a, **k: "aborted")
     monkeypatch.setattr(runner, "retry_rollout", lambda ns: retries.append(ns))
     monkeypatch.setattr(runner.time, "sleep", lambda s: None)
     retries = []
