@@ -162,7 +162,7 @@ def test_generation_needs_the_eval_freeze_tag_and_unchanged_agents(tmp_path):
         heldout.frozen_agents(tmp_path)
 
 
-def test_diagnose_freeze_covers_only_the_diagnose_code(tmp_path):
+def test_diagnose_freeze_covers_the_diagnose_code_and_its_artifacts(tmp_path, monkeypatch):
     def git(*args):
         heldout.subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
 
@@ -171,20 +171,48 @@ def test_diagnose_freeze_covers_only_the_diagnose_code(tmp_path):
     git("config", "user.name", "t")
     pkg = tmp_path / "agents" / "flowguard"
     pkg.mkdir(parents=True)
-    (pkg / "diagnose.py").write_text("x = 1\n")
-    (pkg / "gate.py").write_text("y = 1\n")
+    for name in ("diagnose.py", "stubs.py", "gate.py"):
+        (pkg / name).write_text("x = 1\n")
     (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "preregistration.yaml").write_text("status: draft\n")
+    (tmp_path / "docs" / "preregistration.yaml").write_text("status: frozen\n")
+    (tmp_path / "scenarios").mkdir()
+    # untracked artifacts (state/ is gitignored in the real repo)
+    (tmp_path / ".gitignore").write_text("state/\n")
+    models = tmp_path / "state" / "models"
+    models.mkdir(parents=True)
+    (models / "diagnose-l1.pkl").write_bytes(b"model")
+    encoder = tmp_path / "state" / "encoder"
+    encoder.mkdir()
+    (encoder / "model.safetensors").write_bytes(b"weights")
+    artifacts = ("state/models/diagnose-l1.pkl", "state/encoder")
+    monkeypatch.setattr(heldout, "DIAGNOSE_ARTIFACTS", artifacts)
     git("add", ".")
     git("commit", "-q", "-m", "agents")
     git("tag", heldout.DIAGNOSE_TAG)
-    with pytest.raises(SystemExit, match="not frozen"):
+    with pytest.raises(SystemExit, match="no frozen artifact hashes"):
         heldout.diagnose_frozen(tmp_path)
-    (tmp_path / "docs" / "preregistration.yaml").write_text("status: frozen\n")
+    hashes = heldout.freeze_diagnose(tmp_path)
+    assert {line.split("  ")[1] for line in hashes.read_text().splitlines()} == {
+        "state/models/diagnose-l1.pkl",
+        "state/encoder/model.safetensors",
+    }
+    with pytest.raises(SystemExit, match="changed since diagnose-freeze"):  # not committed yet
+        heldout.diagnose_frozen(tmp_path)
+    git("add", ".")
+    git("commit", "-q", "-m", "freeze")
+    git("tag", "-f", heldout.DIAGNOSE_TAG)
     heldout.diagnose_frozen(tmp_path)
-    (pkg / "gate.py").write_text("y = 2\n")  # Steps 6 and 8 go on: not Diagnose code
+    (pkg / "gate.py").write_text("x = 2\n")  # Steps 6 and 8 go on: not Diagnose code
     heldout.diagnose_frozen(tmp_path)
-    (pkg / "diagnose.py").write_text("x = 2\n")
+    (encoder / "model.safetensors").write_bytes(b"other weights")
+    with pytest.raises(SystemExit, match="artifacts changed"):
+        heldout.diagnose_frozen(tmp_path)
+    (encoder / "model.safetensors").write_bytes(b"weights")
+    (models / "diagnose-l1.pkl").unlink()
+    with pytest.raises(SystemExit, match="missing"):
+        heldout.diagnose_frozen(tmp_path)
+    (models / "diagnose-l1.pkl").write_bytes(b"model")
+    (pkg / "stubs.py").write_text("x = 2\n")  # the Diagnose agent itself
     with pytest.raises(SystemExit, match="changed since diagnose-freeze"):
         heldout.diagnose_frozen(tmp_path)
 

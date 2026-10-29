@@ -52,6 +52,10 @@ FREEZE_TAG = "eval-freeze"
 # pre-registration is frozen and this tag marks the Diagnose code, before eval-freeze.
 DIAGNOSE_TAG = "diagnose-freeze"
 DIAGNOSE_PATHS = (
+    "agents/flowguard/stubs.py",  # the Diagnose agent (methods per level, D60)
+    "agents/flowguard/encoder.py",
+    "agents/flowguard/baselines.py",  # L0's regex
+    "agents/flowguard/agent_io.py",
     "agents/flowguard/diagnose.py",
     "agents/flowguard/logreduce.py",
     "agents/flowguard/retrieval.py",
@@ -61,6 +65,19 @@ DIAGNOSE_PATHS = (
     "agents/flowguard/lanes.py",
     "agents/flowguard/catalog.py",
     "agents/flowguard/contracts.py",
+)
+# What Diagnose's results depend on that git does not track (D39): the fitted L1 model, the
+# conformal calibrations, the retrieval index's manifest (it pins the embedding model) and the
+# encoder weights. `freeze-diagnose` writes their SHA-256 to DIAGNOSE_HASHES, committed with the
+# diagnose-freeze tag; diagnose_frozen() refuses if any is missing or different.
+DIAGNOSE_HASHES = ROOT / "scenarios" / "diagnose-freeze.sha256"
+DIAGNOSE_ARTIFACTS = (
+    "state/models/diagnose-l1.pkl",
+    "state/models/diagnose-calibration-L1.json",
+    "state/models/diagnose-calibration-L2.json",
+    "state/models/diagnose-calibration-L3.json",
+    "state/chroma/index-manifest.json",
+    "state/encoder",  # every file under it
 )
 PILOT = ROOT / "scenarios" / "dev" / "pilot"
 PILOT_SEED = "dev-pilot-20261027"  # public: the pilot is dev data, never the held-out set
@@ -306,13 +323,45 @@ def frozen_agents(
         raise SystemExit(f"{', '.join(paths)} changed since {tag}")
 
 
+def artifact_hashes(root: Path = ROOT, artifacts: tuple[str, ...] | None = None) -> dict:
+    """Path -> SHA-256 of each artifact file (every file under a directory entry)."""
+    out = {}
+    for entry in DIAGNOSE_ARTIFACTS if artifacts is None else artifacts:
+        p = root / entry
+        files = sorted(f for f in p.rglob("*") if f.is_file()) if p.is_dir() else [p]
+        if not files or not all(f.is_file() for f in files):
+            raise SystemExit(f"{entry}: missing, so it cannot be frozen or checked")
+        for f in files:
+            out[f.relative_to(root).as_posix()] = hashlib.sha256(f.read_bytes()).hexdigest()
+    return out
+
+
+def freeze_diagnose(root: Path = ROOT, path: Path | None = None) -> Path:
+    """Write the artifacts' hashes (commit this file together with the diagnose-freeze tag)."""
+    path = path or root / DIAGNOSE_HASHES.relative_to(ROOT)
+    lines = [f"{h}  {name}" for name, h in sorted(artifact_hashes(root).items())]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
 def diagnose_frozen(root: Path = ROOT) -> None:
-    """D39: Diagnose's test-template and LogChunks runs need the frozen pre-registration and
-    the Diagnose code unchanged since diagnose-freeze."""
+    """D39: Diagnose's test-template and LogChunks runs need the frozen pre-registration, the
+    Diagnose code unchanged since diagnose-freeze, and its untracked artifacts unchanged since
+    their hashes were frozen."""
     prereg = yaml.safe_load((root / "docs" / "preregistration.yaml").read_text(encoding="utf-8"))
     if prereg.get("status") != "frozen":
         raise SystemExit("the pre-registration is not frozen")
-    frozen_agents(root, DIAGNOSE_TAG, DIAGNOSE_PATHS)
+    frozen_agents(
+        root, DIAGNOSE_TAG, (*DIAGNOSE_PATHS, DIAGNOSE_HASHES.relative_to(ROOT).as_posix())
+    )
+    hashes = root / DIAGNOSE_HASHES.relative_to(ROOT)
+    if not hashes.is_file():
+        raise SystemExit(
+            "no frozen artifact hashes: run heldout.py freeze-diagnose and commit them"
+        )
+    frozen = dict(reversed(line.split("  ", 1)) for line in hashes.read_text().splitlines() if line)
+    if artifact_hashes(root) != frozen:
+        raise SystemExit("Diagnose's artifacts changed since diagnose-freeze")
 
 
 # ---------------------------------------------------------------- DSO4, DSO5, DSO6 sets
@@ -465,6 +514,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("commit-seed", help="create the secret seed and write its SHA-256")
     sub.add_parser("verify-seed", help="check the seed in .env against the committed hash")
+    sub.add_parser(
+        "freeze-diagnose", help="write the SHA-256 of Diagnose's untracked artifacts (D39)"
+    )
     gen = sub.add_parser("generate", help="write the held-out specs (Step 11 only)")
     gen.add_argument("--confirm-step-11", action="store_true")
     pil = sub.add_parser("dev-pilot", help="write the stratified dev pilot to scenarios/dev/pilot/")
@@ -480,6 +532,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "verify-seed":
         checked_seed()
         print("seed matches the committed hash")
+        return 0
+    if args.cmd == "freeze-diagnose":
+        path = freeze_diagnose()
+        print(f"commit {path.relative_to(ROOT).as_posix()} with the {DIAGNOSE_TAG} tag")
         return 0
     prereg = yaml.safe_load(PREREG.read_text(encoding="utf-8"))
     if args.cmd == "dev-pilot":
