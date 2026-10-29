@@ -8,12 +8,35 @@ import random
 import sys
 import time
 import zipfile
+from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 from encoder_data import canonical_hash, classification_metrics, load_examples
 from flowguard.encoder import CLASSES
 
 BASE_FILE = Path(__file__).with_name("encoder") / "base-model.json"
+
+
+def class_weights(labels):
+    counts = Counter(labels)
+    if set(counts) != set(range(len(CLASSES))):
+        raise ValueError("class weighting requires every training class")
+    return [len(labels) / (len(CLASSES) * counts[i]) for i in range(len(CLASSES))]
+
+
+@dataclass
+class EarlyStopping:
+    patience: int
+    best: float = -1.0
+    stale: int = 0
+
+    def update(self, score):
+        if score > self.best:
+            self.best, self.stale = score, 0
+        else:
+            self.stale += 1
+        return self.patience > 0 and self.stale >= self.patience
 
 
 def main():
@@ -27,6 +50,8 @@ def main():
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--unfreeze-layers", type=int, default=2)
+    parser.add_argument("--patience", type=int, default=0)
+    parser.add_argument("--class-weighted", action="store_true")
     args = parser.parse_args()
     if sys.version_info[:2] != (3, 11):
         raise SystemExit("Python 3.11 is required")
@@ -36,6 +61,8 @@ def main():
         raise SystemExit("threads and batch size must be between 1 and 32")
     if not 1 <= args.unfreeze_layers <= 6:
         raise SystemExit("unfreeze-layers must be between 1 and 6")
+    if not 0 <= args.patience <= 10:
+        raise SystemExit("patience must be between 0 and 10 (zero disables early stopping)")
     base = json.loads(BASE_FILE.read_text(encoding="utf-8"))
     examples = load_examples(args.split, args.index, args.log_root, base["split_sha256"])
     train = [e for e in examples if e.split == "train"]
@@ -109,6 +136,13 @@ def main():
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad], lr=2e-5, weight_decay=0.01
     )
+    weights = class_weights([e.label for e in train]) if args.class_weighted else None
+    weighted_loss = (
+        torch.nn.CrossEntropyLoss(weight=torch.tensor(weights, dtype=torch.float32))
+        if weights is not None
+        else None
+    )
+    stopping = EarlyStopping(args.patience)
     process = psutil.Process()
     started = time.perf_counter()
     args.output.mkdir(parents=True)
@@ -121,7 +155,11 @@ def main():
         model.train()
         for step, batch in enumerate(train_loader, 1):
             optimizer.zero_grad(set_to_none=True)
-            loss = model(**batch).loss
+            if weighted_loss is None:
+                loss = model(**batch).loss
+            else:
+                logits = model(**{k: v for k, v in batch.items() if k != "labels"}).logits
+                loss = weighted_loss(logits, batch["labels"])
             training_loss += loss.item() * len(batch["labels"])
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -171,6 +209,9 @@ def main():
             (args.output / "validation-predictions.json").write_text(
                 json.dumps(predictions, indent=2)
             )
+        if stopping.update(metrics["macro_f1"]):
+            print(f"Early stopping after {args.patience} epochs without improvement.", flush=True)
+            break
     metadata = {
         "base_model": base["model"],
         "revision": base["revision"],
@@ -182,6 +223,10 @@ def main():
         "platform": platform.platform(),
         "threads": args.threads,
         "batch_size": args.batch_size,
+        "max_epochs": args.epochs,
+        "early_stopping_patience": args.patience,
+        "class_weighting": "N/(5*n_class), training labels only" if weights else "none",
+        "class_weights": weights,
         "unfrozen_transformer_layers": args.unfreeze_layers,
         "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
         "training_wall_s": time.perf_counter() - started,

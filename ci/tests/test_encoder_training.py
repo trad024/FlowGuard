@@ -10,6 +10,26 @@ import pytest
 
 from download_encoder import download
 from encoder_data import canonical_hash, classification_metrics, load_examples
+from train_encoder import EarlyStopping, class_weights
+
+
+def test_early_stopping_counts_ties_and_resets_only_on_improvement():
+    stopping = EarlyStopping(3)
+    assert not stopping.update(0.2)
+    assert not stopping.update(0.2)
+    assert not stopping.update(0.1)
+    assert not stopping.update(0.3)
+    assert not stopping.update(0.3)
+    assert not stopping.update(0.2)
+    assert stopping.update(0.3)
+
+
+def test_weights_balance_training_class_mass():
+    labels = [0] + [1] * 2 + [2] * 3 + [3] * 4 + [4] * 5
+    weights = class_weights(labels)
+    assert [weights[i] * labels.count(i) for i in range(5)] == pytest.approx([3] * 5)
+    with pytest.raises(ValueError):
+        class_weights([0, 1])
 
 
 @pytest.fixture

@@ -201,3 +201,11 @@ must not be generalized to independent incidents.
 Remaining: review and integration on the other machine, then the separately authorized final
 evaluation. Frozen files remain unchanged. The checkpoint remains optional and should not
 replace the stronger existing methods on the strength of this result.
+
+## Architect review: one additional pre-declared run
+
+The immutable plan in `ci/encoder/run-2-plan.json` declares one run with six unfrozen
+transformer blocks, at most ten epochs, training-only inverse-frequency class weights,
+and early stopping on validation macro-F1 after three non-improving epochs. Seed, splits,
+reduction, tokenizer, optimizer and other settings stay unchanged. Selection is the higher
+validation macro-F1 across the two runs (ties retain run 1). No further runs follow.
