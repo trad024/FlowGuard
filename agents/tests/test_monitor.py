@@ -2,6 +2,7 @@
 orchestrator's Monitor slot. Every series here is synthetic, built in the shape Prometheus
 returns for `selector[window]`."""
 
+import hashlib
 import math
 import random
 import re
@@ -10,7 +11,7 @@ from urllib.parse import quote_plus as quote
 
 import pytest
 
-from flowguard import series
+from flowguard import monitor, series
 from flowguard.agent_io import AgentInput
 from flowguard.audit import AuditLog
 from flowguard.catalog import AGENT_ACTIONS
@@ -399,7 +400,7 @@ def test_monitor_posts_ci_evidence():
 def test_p1_answer_claims_with_series_refs():
     mon = Monitor(model=None)
     stress = mon.answer(inp({"node:cpu_ratio": 0.93, "node:memory_ratio": 0.5}))
-    assert stress.claim.startswith("node under stress: cpu 0.93 >= 0.85")
+    assert stress.claim.startswith("node under stress: cpu 0.93 >= 0.51")
     assert any("container_cpu_usage_seconds_total" in r for r in stress.refs)
     assert all(REF.match(r) for r in stress.refs)
     normal = mon.answer(inp({"node:cpu_ratio": 0.4, "node:memory_ratio": 0.5}))
@@ -408,6 +409,27 @@ def test_p1_answer_claims_with_series_refs():
     assert unknown.claim == "node stress unknown: no memory series"  # never "normal" unmeasured
     assert mon.answer(inp()).claim == "node stress unknown: no cpu or memory series"
     assert "stress" in mon.answer(inp({"node_cpu_ratio": 0.97})).claim  # Step 5 key
+
+
+def test_p1_thresholds_are_frozen():
+    """Set from the recordings-2 node series by the rule in monitor.py, then frozen: cpu from
+    the separated medians (0.023 unstressed, 0.990 stressed); memory 0.90, final, a fixed choice
+    and not set from data (no recording is memory-stressed; untested on real memory stress, a
+    stated limitation); any restart of a non-canary pod. Changing them needs a decision."""
+    assert (monitor.P1_CPU, monitor.P1_MEMORY, monitor.P1_RESTARTS) == (0.507, 0.90, 1.0)
+
+
+# The model fitted on the first half of r-24e489bc (dev normal traffic) with the settings the
+# grid chose on the 18 dev incidents (in-sample): frozen from now on
+MODEL_SHA256 = "3beb9c02fb3c441dda5d7fa86b5b5dad5c55763c46a1be1411975a801022fd16"
+
+
+def test_the_monitor_model_is_frozen():
+    body = monitor.MODEL_FILE.read_bytes()
+    assert hashlib.sha256(body).hexdigest() == MODEL_SHA256
+    runtime = MonitorModel.load().runtime
+    assert (runtime.z_threshold, runtime.quantile, runtime.persist) == (5.0, 0.99, 1)
+    assert Monitor().model is not None and Monitor().runtime is not None  # the default loads it
 
 
 def test_p1_counts_restarts_on_non_canary_pods_only():
