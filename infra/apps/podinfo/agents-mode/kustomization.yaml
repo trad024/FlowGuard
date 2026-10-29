@@ -1,0 +1,23 @@
+# Agents-mode canary (D53, Step 8): the same steps and pauses as the L0 Rollout, without the
+# inline L0 analysis. Where L0 runs its AnalysisTemplate, the Rollout pauses until it is told:
+# Release looks at the canary during that pause and decides through the gate (rollout_promote
+# resumes it, rollout_abort aborts it). base/podinfo.yaml and analysis-l0.yaml are unchanged;
+# the L0 deployment (../staging, ../prod) stays the default. Used by ../staging-agents and
+# ../prod-agents.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target:
+      kind: Rollout
+      name: podinfo
+    patch: |-
+      - op: replace
+        path: /spec/strategy/canary/steps
+        value:
+          - setWeight: 20
+          - pause: {duration: 30s}
+          - pause: {}
+          - setWeight: 50
+          - pause: {duration: 30s}
+          - pause: {}
+          - setWeight: 100

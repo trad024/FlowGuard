@@ -34,6 +34,12 @@ jobs:
           # Upstream CRDs: kubeconform ships no schema for CustomResourceDefinition itself
           ./kustomize build infra/argo-rollouts | ./kubeconform -strict -summary -kubernetes-version 1.31.5 \
             -skip CustomResourceDefinition -
+          # Agents-mode canary overlays (D53): not in infra/kustomization.yaml, so rendered here
+          for overlay in staging-agents prod-agents; do
+            ./kustomize build "infra/apps/podinfo/$overlay" | ./kubeconform -strict -summary -kubernetes-version 1.31.5 \
+              -schema-location default \
+              -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' -
+          done
       - name: Check and unit-test the DSO1 L0 alert rules
         run: |
           curl -fsSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz | tar xz
