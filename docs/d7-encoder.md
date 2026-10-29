@@ -46,8 +46,9 @@ The actual URL, SHA-256 and size are pinned in `ci/encoder/artifact.json`:
 
 ## Split and data boundary
 
-The branch is based on `dev` commit `be5e4b2`, including accepted D39-D44 decisions and
-the draft 0.3 pre-registration. The CI template assignment is populated.
+Training used the pinned split on the earlier `be5e4b2` development base. The delivery
+branch is updated onto `dev` commit `72935a1` (draft pre-registration 0.5); the recorded
+train/validation split and its checksum are unchanged. The CI template assignment is populated.
 `evaluation/datasets/corpus-split.json` assigns 20 training templates and 5 validation
 templates. Excluding its explicitly unverified variants leaves 60 training and 14 validation
 variants, with every root-cause class represented. No test-template contents were opened.
@@ -160,9 +161,9 @@ Every epoch records training loss, elapsed time, validation macro-F1 and per-cla
 precision/recall/F1/support in `training-log.json`. Final metadata adds split/log checksums,
 variant IDs, seed, CPU/platform, thread/batch counts, trainable parameters, wall time and
 process memory. The script saves safetensors, validation predictions and `encoder-weights.zip`;
-`artifact.json` contains the ZIP's actual SHA-256 and size. After a real run, commit the
-training log and metrics, publish the weight ZIP outside git (for example, on the fork's release),
-and record its real public URL/checksum. The optional notebook remains cleared and unrun.
+`artifact.json` contains the ZIP's actual SHA-256 and size. The measured training log and
+metrics are committed; the weight ZIP is stored on the public fork release. The optional
+notebook remains cleared and unrun.
 
 Download the published checkpoint with checksum verification:
 
