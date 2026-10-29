@@ -30,28 +30,25 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "agents")]
 
 from flowguard.contracts import Event  # noqa: E402
-from flowguard.monitor import ci_event  # noqa: E402
+from flowguard.monitor import JOB_FIELDS, RUN_FIELDS, ci_event  # noqa: E402
 
 SCAN = re.compile(r"(trivy_high|trivy_critical|gitleaks)=(\d+)")
+# A branch reaches the agents only in the runner's opaque form (scenarios/leakage.py BRANCH);
+# any other name (early dev runs used names like scenario/ci-code-...) is replaced by one fixed
+# placeholder, so it can never carry a class or scenario word
+OPAQUE_BRANCH = re.compile(r"scenario/r-[0-9a-f]{8,}")
+MASKED_BRANCH = "scenario/r-masked"
 
 
 def _json(path: Path):
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
-# What a CI system shows about a run, without commit messages. The head commit and branch are
-# what a fix starts from (D57, D64); a scenario's branch is the opaque scenario/r-<hex> form the
-# leakage checks allow.
-RUN_FIELDS = (
-    "id",
-    "status",
-    "conclusion",
-    "run_started_at",
-    "updated_at",
-    "head_sha",
-    "head_branch",
-)
-JOB_FIELDS = ("id", "name", "status", "conclusion", "started_at", "completed_at")
+def opaque_branch(branch):
+    """The branch as agents may see it: the opaque form, or the fixed placeholder."""
+    if not branch:
+        return branch
+    return branch if OPAQUE_BRANCH.fullmatch(str(branch)) else MASKED_BRANCH
 
 
 def _epoch(value: str) -> float:
@@ -65,6 +62,7 @@ def ci_events(rec: Path, manifest: dict) -> list[Event]:
         jobs = [{k: j.get(k) for k in JOB_FIELDS} for j in _json(folder / "jobs.json") or []]
         meta = _json(folder / "run.json") or {"id": entry["run_id"]}
         run = {k: meta.get(k) for k in RUN_FIELDS}
+        run["head_branch"] = opaque_branch(run["head_branch"])
         failed = next((j for j in jobs if j.get("conclusion") == "failure"), None)
         log = ""
         if failed:

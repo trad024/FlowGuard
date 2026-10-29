@@ -291,7 +291,8 @@ def record_ci(out: Path, run_ids: list[int], gh: GitHubReader) -> list[dict]:
                 safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in job["name"])
                 if text is not None:
                     (d / "logs").mkdir(exist_ok=True)
-                    (d / "logs" / f"{safe}.txt").write_text(text, encoding="utf-8")
+                    # byte-exact on every platform: no newline translation on write
+                    (d / "logs" / f"{safe}.txt").write_text(text, encoding="utf-8", newline="")
                     logs[job["name"]] = "saved"
                 else:
                     logs[job["name"]] = f"unavailable ({why})"

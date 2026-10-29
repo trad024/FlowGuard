@@ -79,10 +79,14 @@ def problems(inputs: list, truth: set[str]) -> list[str]:
     return found
 
 
-def write_recording(folder: Path, log: str, spec_id: str = "ci-code") -> Path:
+def write_recording(
+    folder: Path, log: str, spec_id: str = "ci-code", run_json: dict | None = None
+) -> Path:
     run = folder / "ci" / "1"
     (run / "logs").mkdir(parents=True)
     (folder / "manifest.json").write_text(json.dumps({"sources": {"ci": [{"run_id": 1}]}}))
+    if run_json is not None:
+        (run / "run.json").write_text(json.dumps(run_json))
     (run / "jobs.json").write_text(json.dumps([{"id": 5, "name": "unit", "conclusion": "failure"}]))
     (run / "logs" / "unit.txt").write_text(log, encoding="utf-8")
     (folder / "ground_truth.json").write_text(
@@ -105,6 +109,34 @@ def test_the_check_finds_planted_leaks_and_passes_clean_inputs(tmp_path):
     assert any(
         "code-06" in p for p in problems(agent_inputs(named, tmp_path / "c"), truth_values(named))
     )
+
+
+def test_a_branch_name_that_is_not_opaque_is_masked_and_the_run_is_an_allow_list(tmp_path):
+    """Early dev runs used branch names like scenario/ci-code-06-...: they reach the agents only
+    as the fixed placeholder, and of the run only the allow-listed fields."""
+    run = {"id": 1, "status": "completed", "conclusion": "failure", "head_sha": "a" * 40,
+           "head_branch": "scenario/ci-code-06-1a2b", "display_title": "inject the code fault",
+           "head_commit": {"message": "inject the code fault"}}  # fmt: skip
+    rec = write_recording(tmp_path / "early", "--- FAIL: TestEchoHandler (0.00s)\n", run_json=run)
+    inputs = agent_inputs(rec, tmp_path / "a")
+    ci = [inp for inp in inputs if "run_id" in inp.params]  # the replay also makes a metrics tick
+    assert ci
+    for inp in ci:
+        assert inp.params["head_branch"] == "scenario/r-masked"
+        if "ci_run" in inp.params:
+            shown = inp.params["ci_run"]["run"]
+            assert set(shown) == set(replay.RUN_FIELDS)
+            assert shown["head_branch"] == "scenario/r-masked"
+    assert problems(inputs, truth_values(rec)) == []
+    # the runner's opaque form is kept as it is
+    opaque = write_recording(tmp_path / "opaque", "--- FAIL: TestEchoHandler (0.00s)\n",
+                             run_json={**run, "head_branch": "scenario/r-0000abcd"})  # fmt: skip
+    inputs = agent_inputs(opaque, tmp_path / "b")
+    branches = {inp.params["head_branch"] for inp in inputs if "run_id" in inp.params}
+    assert branches == {"scenario/r-0000abcd"}
+    assert problems(inputs, truth_values(opaque)) == []
+    # without the masking, the scanner would catch the early name
+    assert leakage.hits(leakage.masked("scenario/ci-code-06-1a2b"))
 
 
 def recordings():

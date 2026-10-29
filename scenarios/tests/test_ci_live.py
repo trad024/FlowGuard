@@ -64,7 +64,11 @@ def test_the_event_is_the_replays_on_the_recorded_run(tmp_path):
     params = event.payload["params"]
     assert (params["run_id"], params["job_id"]) == (41, 6)
     assert (params["head_sha"], params["head_branch"]) == (HEAD, BRANCH)
-    assert event.payload["log"] == LOG.replace("\r\n", "\n")  # as a recording reads back
+    # the recorder keeps the log's bytes on every platform (no newline translation on Windows),
+    # and a recording reads it back with universal newlines
+    saved = tmp_path / "r-0000abcd" / "ci" / "41" / "logs" / "unit.txt"
+    assert saved.read_bytes() == LOG.encode("utf-8")
+    assert event.payload["log"] == LOG.replace("\r\n", "\n")
     assert "display_title" not in params["ci_run"]["run"]  # never a commit message
     passed = [{**j, "conclusion": "success"} for j in JOBS]
     assert ci_live.failed_run_event(Reader(jobs=passed), 41, tmp_path / "ok") is None

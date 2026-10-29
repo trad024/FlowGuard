@@ -611,6 +611,21 @@ def tick_event(
     )
 
 
+# What agents see of a CI run: an allow-list, never GitHub's whole object (which carries the
+# commit message and more). The run's id, state, conclusion, timings, head commit and branch;
+# each job's id, name, state, conclusion and timings (the CI detector's bounds are per job).
+RUN_FIELDS = (
+    "id",
+    "status",
+    "conclusion",
+    "run_started_at",
+    "updated_at",
+    "head_sha",
+    "head_branch",
+)
+JOB_FIELDS = ("id", "name", "status", "conclusion", "started_at", "completed_at")
+
+
 def ci_event(
     run: dict,
     jobs: list[dict],
@@ -620,8 +635,11 @@ def ci_event(
     environment: str = "staging",
     service: str = "podinfo",
 ) -> Event:
-    """A finished CI run (GitHub's run and jobs JSON) and, if a job failed, its log (D49). The
-    run's head commit and branch, when given, are what a fix starts from (D57, D64)."""
+    """A finished CI run (GitHub's run and jobs JSON, cut to RUN_FIELDS and JOB_FIELDS) and, if
+    a job failed, its log (D49). The run's head commit and branch, when given, are what a fix
+    starts from (D57, D64)."""
+    run = {k: run.get(k) for k in RUN_FIELDS}
+    jobs = [{k: j.get(k) for k in JOB_FIELDS} for j in jobs]
     failed = next((j for j in jobs if j.get("conclusion") == "failure"), None)
     params: dict = {"ts": t, "ci_run": {"run": run, "jobs": jobs}, "run_id": run.get("id")}
     for key in ("head_sha", "head_branch"):
