@@ -4,7 +4,7 @@
 # the staging canary (D1: no webhooks). Agent and docs commits do not trigger it.
 #
 # Build, unit tests and scans always run. The plan job only picks which optional jobs run and in
-# what order: the committed Optimizer model by default (a run-all stub until Step 10), or the
+# what order: the committed LightGBM Optimizer model by default, or the
 # DSO5 baseline (fixed order + path filters, D2) when the repo variable FLOWGUARD_CI_MODE or the
 # manual input says "baseline".
 #
@@ -31,6 +31,8 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  checks: read
 
 concurrency:
   group: app-ci-${{ github.ref }}
@@ -60,10 +62,18 @@ jobs:
           if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ] \
              && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             git diff --name-only "$BEFORE" "$GITHUB_SHA" > changed.txt
-            echo "args=--changed-files changed.txt" >> "$GITHUB_OUTPUT"
+            git diff --numstat "$BEFORE" "$GITHUB_SHA" > changed-stats.txt
+            echo "args=--changed-files changed.txt --diff-stats changed-stats.txt" >> "$GITHUB_OUTPUT"
           else
             echo "args=--all-changed" >> "$GITHUB_OUTPUT"   # first push or manual run
           fi
+      - name: Previous scan status
+        id: security
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 ci/optimizer/security_status.py --repo "$GITHUB_REPOSITORY" \
+            --branch "$GITHUB_REF_NAME" --sha "$GITHUB_SHA" --github-output "$GITHUB_OUTPUT"
       - name: Plan optional jobs
         id: plan
         env:
@@ -72,6 +82,7 @@ jobs:
           MODE: ${{ inputs.mode || vars.FLOWGUARD_CI_MODE }}
         run: |
           python3 ci/plan.py --mode "$MODE" --branch "$GITHUB_REF_NAME" \
+            --security-status "${{ steps.security.outputs.status }}" \
             ${{ steps.changed.outputs.args }} --github-output "$GITHUB_OUTPUT" | tee plan.json
           { echo '### Plan'; echo '```json'; cat plan.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           # Also as an annotation: readable on the run page without signing in

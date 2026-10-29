@@ -1,0 +1,180 @@
+# Step 10: CI Optimizer
+
+The CI `plan` job now reads two trained LightGBM models from `ci/optimizer/model.json`:
+a duration regressor and a binary job-failure classifier. Each prediction uses commit paths,
+file types, added/deleted lines, dependency changes, change kind and job identity. Branch
+names, commit messages, run identifiers and outcomes are never prediction features.
+
+Training uses LightGBM 4.6.0, scikit-learn 1.7.2 and SHAP 0.49.1. CI inference still uses
+**only the standard library**: numeric trees are exported to a validated JSON format, never
+pickle or executable model code. Every job prediction includes exact interventional tree
+SHAP values, expected value and the top three features. Duration explanations use seconds;
+failure explanations use raw log-odds. Depth-two trees make exact feature enumeration cheap.
+The training script checks portable predictions against native LightGBM on every validation
+observation, and checks explanations against `shap.TreeExplainer` on three validation rows
+per model. Background rows come only from training.
+
+## Safety and integration
+
+- Build, unit and scans remain outside the optional catalog and cannot be skipped.
+- P2 prevents skipping baseline-eligible SBOM after dependency changes or a previous
+  security flag; scans always run. Optional work never expands beyond baseline path filters.
+- The workflow reads prior completed scan-count annotations with read-only Actions/checks
+  permissions. Missing history, denied API access, failed scans or unknown status use the
+  exact baseline order and path filters, without loading or predicting with the model.
+- A job can be predictively skipped only below the fixed 0.01 failure threshold, with at least
+  eight observed training outcomes, no observed training failures for that job, known change
+  size and all features within observed training ranges. These are conservative heuristics,
+  not a statistical guarantee about future failures.
+- The existing path filters may omit unrelated optional jobs. Retained optional jobs are
+  ordered by predicted failure probability divided by predicted duration. Baseline mode
+  retains its fixed order and original path filters.
+- Missing, unreadable, corrupt, nonfinite, overly deep or incompatible models also use
+  baseline order and path filters. Legacy `run-all` means all baseline-eligible optional jobs.
+  This applies the architect's no-extra-work bound to every fallback path, not just unknown
+  status. Mandatory build, unit and scans are unchanged.
+
+The workflow passes `git diff --numstat` for change size. Missing stats disable predictive
+skipping. Runtime agent stubs, the gate, executor, orchestrator and frozen files are unchanged.
+This task implements the existing CI-side inference path specified by D1.
+
+## Development data and measured results
+
+`ci/optimizer/dev-history.jsonl` records metadata from 30 existing app-ci development runs,
+collected read-only from `trad024/FlowGuard` on 2026-10-28. It contains commit file metadata,
+job timings/conclusions and prior scan status, not log contents or artifact payloads.
+The collector accepts `dev` and explicit development branch prefixes; it does not create
+branches, commits or workflow runs. No extra CI history was generated.
+
+The first 60% of distinct commit SHAs are training; the last 40% are validation, in timestamp
+order. No commit occurs on both sides. The JSON model records the source checksum, exact run
+IDs, split timestamps, seed and package versions. Skipped/cancelled jobs are unobserved and
+are never labelled successful. The model was not refit on validation after these measurements.
+
+| Measurement | Result |
+|---|---:|
+| Training commits / observed jobs / failures | 18 / 108 / 4 |
+| Validation commits / observed jobs / failures | 12 / 72 / 3 |
+| Validation duration MAE | 8.5664 s |
+| Validation failure ROC AUC (pooled jobs) | 0.7705 |
+| Observed validation failures skipped | 0/3 (Wilson 95% CI 0–56.15%) |
+
+Per-job validation results:
+
+| Job | Observed jobs | Failures | MAE, seconds | AUC |
+|---|---:|---:|---:|---:|
+| build | 12 | 1 | 15.2087 | 1.0 |
+| unit | 11 | 1 | 11.0967 | 0.9 |
+| scans | 9 | 0 | 4.6179 | undefined |
+| lint | 10 | 0 | 5.6283 | undefined |
+| integration | 10 | 1 | 6.1246 | 0.0 |
+| sbom | 10 | 0 | 2.4768 | undefined |
+| multiarch | 10 | 0 | 12.8356 | undefined |
+
+An AUC is undefined with only one class. The integration ranking is poor on its single
+validation failure; its historical training failure disables predictive skipping for that
+job. The pooled AUC is not a substitute for these per-job results.
+
+**Projected saving on validation `dev` commits:** 8/8 have complete observed durations for
+both plans. The fixed-order/path-filter baseline totals 1,038 job-seconds; the Optimizer
+totals 1,018: **20 seconds, or 1.9268% saved**. None of these eight commits failed, so this
+subset cannot estimate failure recall. Mandatory jobs account for 975 of those 1,038 baseline
+seconds, leaving 63 optional seconds. Even removing every optional job would save at most
+**6.0694%** on this sample, so it cannot demonstrate the 20% target under the safety rules.
+Across the broader validation set, 9/12 runs have
+complete timings for both plans: baseline 1,248 job-seconds versus Optimizer 1,228,
+**1.6026% projected saving**. The four unknown-prior runs match baseline exactly.
+Every comparable individual run costs no more job-seconds than its baseline.
+The three incomplete runs are excluded from duration comparison but included in the
+observed-failures-skipped count; no durations are imputed. The machine-readable results
+are `ci/optimizer/dev-results.json`.
+
+These are sums of observed job execution seconds under alternative plans, not measured
+pipeline wall-clock changes: queue delays, matrix scheduling, setup and cross-run cache
+effects can differ. The **20% duration reduction target is not met**. This is a small development experiment, not
+final evaluation or evidence of zero future failures. More diverse dev runs and repeated
+paired baseline/optimizer runs are required before a stronger performance claim.
+
+## Fail-fast view on the same validation commits
+
+The separate reorder-only diagnostic ranks the baseline's eligible optional jobs by
+descending predicted failure probability (stable ties), keeping exactly the same jobs and
+the same build/unit prefix. It neither changes path filtering nor skips jobs. This isolates
+the requested likely-to-fail-first view from the production probability/duration heuristic
+and its exact-baseline fallback when prior scan status is unknown.
+
+| Measurement | Fixed baseline | Likely failure first |
+|---|---:|---:|
+| Validation commits | 12 | 12 |
+| Paired failed runs with an observed prefix | 3 | 3 |
+| Mean projected execution time to first failure | 97.0 s | 97.0 s |
+| Failed optional-stage runs | 1 | 1 |
+| Failure on first eligible optional job | 1/1 | 1/1 |
+| Failures caught strictly earlier than baseline | ? | 0/3 |
+| Total execution seconds saved before failure | ? | 0.0 s |
+
+Per failed commit, projected times are 125/125 s (unit failure), 140/140 s
+(integration failure), and 26/26 s (build failure). The mandatory failures occur before
+optional jobs. For the integration failure, the baseline path filters already retain only
+integration, so reordering cannot improve it. The recorded wall times from run creation to
+the first failed job completion are 137, 179 and 36 seconds; these describe historical
+runs, not measured alternative schedules. The historical integration run executed extra
+optional jobs that baseline path filtering would omit.
+
+The eight validation `dev` commits contain no failures: time to first failure is undefined,
+not zero. Across all 12 validation commits, successful runs are excluded from that metric.
+Unlike complete-duration projection, fail-fast scoring only requires the prefix through
+the first failure; a missing later scans job cannot exclude an observed failure. There are
+no missing-prefix exclusions in these three cases. The JSON records run IDs, commit SHAs,
+both orders, predicted probabilities and per-run times.
+
+**Neither duration nor fail-fast benefit is demonstrated on this validation sample.**
+The sole optional failure offers no ordering comparison. Times sum observed execution
+durations, excluding queue/setup delays and counterfactual cache effects. No live paired
+workflow was run. Zero of three earlier catches does not establish zero future benefit.
+
+## Reproduce
+
+Use Python 3.11. Training extras are separate from runtime and unit-test dependencies:
+
+```powershell
+pip install -e ".[dev]"
+pip install -r ci/optimizer/requirements.txt
+# Optional fresh read-only collection (requires an authenticated GitHub CLI):
+python ci/collect_optimizer.py --repo trad024/FlowGuard
+python ci/train_optimizer.py
+python ci/plan.py --all-changed
+ruff check .
+ruff format --check .
+pytest
+```
+
+To inspect a known commit, supply `--changed-files`, `--diff-stats` and
+`--security-status clean|flagged|unknown`; the default status is deliberately `unknown`.
+Ruff follows the approved D38 pin, 0.17.1, for consistent CI/local formatting. The committed history snapshot
+reproduces the measured model and metrics; fresh collection can change the results.
+
+Verified: real read-only history collection; actual model training; native/portable prediction
+parity; reference SHAP parity; focused tests for features, P2, protected jobs, schema corruption,
+fallbacks, chronology, skip support, ordering and annotation handling. The PR records final
+full-suite results. A CLI smoke run under Python `-S` (no site packages) produced seven explained
+job predictions with P2 enforced in 0.203 seconds on this machine. This is a smoke timing,
+not a latency benchmark. Not verified: live execution of the changed workflow,
+paired live pipeline savings, final evaluation or integration tests (skipped by default).
+No frozen-file changes or proposals are needed.
+
+## Architect review: baseline work bound
+
+Unknown prior status returns the baseline before any model read or prediction, retaining
+fixed order and path filters even with a missing model. All other model failure fallbacks
+use that same baseline. For known status, P2 prevents predictive skipping within the
+baseline-eligible set; it never adds an image SBOM for unrelated `pyproject.toml` changes.
+This fixes a second observed regression: that commit previously spent 128 versus 110 seconds.
+No workflow, mandatory job, baseline path filter, history split or timing metric changed.
+The model JSON is unchanged; results were recomputed from the same history. Per-run plans
+and timings are included in `dev-results.json`. Unknown-status jobs equal L0's jobs/order;
+known-status retained work is a subset. This bounds summed job work, not runner queue delays.
+
+The honest result remains negative against DSO5: mandatory work is 975/1,038 seconds, so
+even deleting all optional work saves at most 6.0694%. The 20% target is not met and cannot
+be met in this pipeline under this metric. Fail-fast still shows 0/3 earlier catches.
