@@ -26,7 +26,8 @@ def canary_pods(s, abort_at):
 
 
 def write_recording(root, rid, *, bad, band=None, l0="promoted", abort_at=None, errors=0.0,
-                    slow=0.0, stable_errors=0.0, node_cpu=None, node_stress=False):  # fmt: skip
+                    slow=0.0, stable_errors=0.0, node_cpu=None, node_stress=False,
+                    mode=None):  # fmt: skip
     """A 10-minute staging canary at 10 requests/s: 20% at 60 s, 50% at 210 s, 100% at 360 s,
     or the canary gone `abort_at` s into its 20% step. Counters grow by their expected values."""
     rec = root / rid
@@ -84,8 +85,11 @@ def write_recording(root, rid, *, bad, band=None, l0="promoted", abort_at=None, 
     if node_stress:
         spec["node_stress"] = {"cpu_workers": 8, "cpu_request": 7.0}
     gt = {"bad_release": bad, **({"band": band} if band else {})}
+    observed = {"l0": l0}
+    if mode == "agents":  # D54: the canary was held and resumed to 100%; L0 is replayed
+        observed = {"mode": "agents", "canary": "promoted", "l0": "offline"}
     (rec / "ground_truth.json").write_text(
-        json.dumps({"spec": spec, "ground_truth": gt, "observed": {"l0": l0}, "valid": True})
+        json.dumps({"spec": spec, "ground_truth": gt, "observed": observed, "valid": True})
     )
     (rec / "manifest.json").write_text(
         json.dumps(
@@ -185,3 +189,47 @@ def test_held_out_and_duplicate_recordings_are_refused(tmp_path):
     write_recording(tmp_path / "dev", "r-2", bad=False)
     with pytest.raises(ValueError, match="twice"):
         rr.release_runs([tmp_path / "dev", tmp_path / "dev"])
+
+
+# ---------------------------------------------------------------- L0 replayed offline (D54)
+
+
+def test_rate_extrapolates_as_prometheus_does():
+    from flowguard.series import Series
+
+    times = [T0 + 15 * k for k in range(9)]
+    steady = Series({}, times, [15.0 * k for k in range(9)])  # 1 per second
+    assert rr.prom_rate(steady, T0 + 120) == pytest.approx(1.0)
+    assert rr.prom_rate(steady, T0 + 127) == pytest.approx(1.0)  # samples not on the range
+    reset = Series({}, times, [100, 115, 130, 145, 160, 15, 30, 45, 60])  # restarted at 75 s
+    assert rr.prom_rate(reset, T0 + 120) == pytest.approx(1.0)
+    assert rr.prom_rate(steady, T0) is None  # one sample in (t - 60, t]: no output
+    assert rr.prom_rate(steady, T0 + 15) == pytest.approx(0.25)  # no extrapolation below 0
+
+
+def test_l0_is_replayed_offline_on_an_agents_mode_recording(tmp_path):
+    # Under agents-mode every canary reaches 100%: the bad one is still on its pods
+    write_recording(tmp_path, "r-bad", bad=True, band="above", errors=0.05, mode="agents")
+    write_recording(tmp_path, "r-good", bad=False, mode="agents")
+    write_recording(tmp_path, "r-edge", bad=True, band="near", errors=0.012, mode="agents")
+    result = rr.score(rr.release_runs([tmp_path]))
+    rec = result["per_recording"]
+    assert result["agents_mode"] == 3 and result["l0_replay_vs_live"]["n"] == 0
+    # second failed measurement of the 5xx ratio, 60 s into the 20% step
+    assert rec["r-bad"]["L0"] == {"outcome": "rollback", "t": 60, "weight": 20, "failed": ["5xx"]}
+    assert rec["r-edge"]["L0"]["outcome"] == "rollback"  # 1.2% is over 1% at every look
+    assert rec["r-good"]["L0"]["outcome"] == "promoted"
+    assert rec["r-bad"]["L3"]["outcome"] == "rollback"  # nothing truncates the other levels
+    assert result["classes"] == {"bad / above": 1, "bad / near": 1, "good / dev": 1}
+
+
+def test_no_canary_data_fails_an_l0_measurement():
+    idx = {"podinfo_requests": [], "podinfo_latency_buckets": []}
+    assert rr.l0_measure(idx, T0, "staging", "new") == {"5xx": False, "p99": False}
+
+
+def test_the_replay_is_checked_against_l0s_live_decisions(scored):
+    check = scored["l0_replay_vs_live"]
+    # r-invisible: L0 aborted a canary that showed nothing, gone before a second failure
+    assert check["n"] == 4 and check["agree"] == 3
+    assert check["disagree"] == {"r-invisible": {"live": "rollback", "replay": "truncated"}}

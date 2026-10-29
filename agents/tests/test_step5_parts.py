@@ -2,6 +2,7 @@
 simulated approver and approval page (D17)."""
 
 import ast
+import json
 import random
 import threading
 import time
@@ -133,6 +134,41 @@ def test_executor_refuses_what_the_gate_did_not_allow(tmp_path):
     assert ex.execute(*approved).success
     run = logged(audit, proposal(pid="p-b"), decision("execute", pid="p-b"))
     assert ex.execute(*run).output.startswith("dry run")
+
+
+def test_a_human_approved_undo_runs_once_and_its_replay_is_refused(tmp_path):
+    """Step 8's live action, with kubectl faked: the approved rollout_undo patches the Rollout
+    once; the same proposal and decision handed over again are refused and change nothing."""
+    calls = []
+    replicasets = {
+        "items": [
+            {
+                "metadata": {
+                    "annotations": {"rollout.argoproj.io/revision": str(rev)},
+                    "ownerReferences": [{"name": "podinfo"}],
+                },
+                "spec": {"template": {"metadata": {"labels": {"app": "podinfo"}}, "spec": {}}},
+            }
+            for rev in (6, 7)
+        ]
+    }
+
+    def kubectl(args):
+        calls.append(args)
+        return json.dumps(replicasets) if "get" in args else "patched"
+
+    audit = AuditLog(tmp_path / "a.db")
+    ex = Executor(audit=audit, dry_run=False, kubectl=kubectl)
+    p = proposal("rollout_undo", pid="p-undo")
+    d = decision("ask_human", "approved", pid="p-undo")
+    logged(audit, p, d)
+    assert ex.execute(p, d).success
+    patches = [c for c in calls if "patch" in c]
+    assert len(patches) == 1 and "/spec/template" in patches[0][-1]
+    with pytest.raises(Refused, match="already executed"):
+        ex.execute(p, d)
+    assert [c for c in calls if "patch" in c] == patches  # nothing ran the second time
+    assert len(audit.query("SELECT * FROM executions WHERE proposal_id = 'p-undo'")) == 1
 
 
 def test_executor_trusts_only_the_audit_log(tmp_path):

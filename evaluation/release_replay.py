@@ -16,7 +16,9 @@ counts since the 20% step began. A recording follows L0's own path: after an L0 
 no 50% step to look at, so a release Release would have let through 20% there is counted as not
 caught ("truncated"), never as caught.
 
-    L0     the frozen AnalysisTemplate as it ran live (observed outcome, canary pods gone)
+    L0     the frozen AnalysisTemplate: as it ran live (observed outcome, canary pods gone),
+           or, for a recording made under the agents-mode canary (D54), replayed offline:
+           its two queries evaluated on the recorded series where it would have measured
     L3     Release alone (L1 to L3 are the same: Release has no LLM)
     L4     Release with P1
 
@@ -193,9 +195,98 @@ def replay(run: dict, name: str, folder: Path, idx: series.Index | None = None) 
     return {"outcome": "truncated", "decisions": decisions, "timeline": line}
 
 
+# ---------------------------------------------------------------- L0 replayed offline (D54)
+
+L0_RANGE_S = 60.0  # [1m] in analysis-l0.yaml
+L0_FAILURE_LIMIT = 1  # failureLimit: a step's analysis fails at the second failed measurement
+L0_MAX_5XX = 0.01
+L0_MAX_P99_S = 0.5
+
+
+def prom_rate(s: series.Series, t: float, range_s: float = L0_RANGE_S) -> float | None:
+    """Prometheus' rate() of one counter at t over (t - range_s, t], extrapolated as Prometheus
+    does it; None (no output) with fewer than two samples."""
+    lo = t - range_s
+    times, values = s.between(lo, t)
+    if times and times[0] <= lo:  # the range is left-open
+        times, values = times[1:], values[1:]
+    if len(times) < 2:
+        return None
+    result = sum(b - a if b >= a else b for a, b in zip(values, values[1:], strict=False))
+    sampled = times[-1] - times[0]
+    avg = sampled / (len(times) - 1)
+    threshold = avg * 1.1
+    to_start = times[0] - lo
+    if to_start >= threshold:
+        to_start = avg / 2
+    if result > 0 and values[0] >= 0:  # a counter does not extrapolate below zero
+        to_start = min(to_start, sampled * values[0] / result)
+    to_end = t - times[-1]
+    if to_end >= threshold:
+        to_end = avg / 2
+    return result * (sampled + to_start + to_end) / sampled / range_s
+
+
+def l0_measure(idx: series.Index, t: float, namespace: str, canary: str) -> dict[str, bool]:
+    """One measurement of analysis-l0.yaml's two metrics on the canary's hash: passed or not.
+    An empty or NaN result fails (no data is a failure)."""
+
+    def mine(m: dict) -> bool:
+        return (
+            m.get("namespace") == namespace
+            and m.get("rollouts_pod_template_hash") == canary
+            and m.get("path") == "root"
+        )
+
+    reqs = [
+        (s.labels, r)
+        for s in idx.get("podinfo_requests", [])
+        if mine(s.labels) and (r := prom_rate(s, t)) is not None
+    ]
+    total = sum(r for _, r in reqs)
+    errors = sum(r for m, r in reqs if str(m.get("status", "")).startswith("5"))  # or vector(0)
+    ok_5xx = bool(reqs) and total > 0 and errors / total <= L0_MAX_5XX
+    buckets: dict[float, float] = defaultdict(float)
+    for s in idx.get("podinfo_latency_buckets", []):
+        if mine(s.labels) and (r := prom_rate(s, t)) is not None:
+            buckets[float(s.labels["le"])] += r  # float("+Inf") is inf
+    p99 = series._quantile(0.99, dict(buckets))
+    return {"5xx": ok_5xx, "p99": p99 is not None and p99 <= L0_MAX_P99_S}
+
+
+def l0_replay(idx: series.Index, namespace: str, line: dict) -> dict:
+    """The frozen analysis on the recorded series, where it measured live: 30, 60, 90 and 120 s
+    into each step; a metric's second failed measurement in a step aborts the canary."""
+    since = line["steps"][20]
+    for weight in sorted(STEP_PODS):
+        if weight not in line["steps"]:
+            break
+        failed = {"5xx": 0, "p99": 0}
+        for offset in LOOKS:
+            t = line["steps"][weight] + offset
+            if t > line["end"]:
+                return {"outcome": "truncated"}
+            for metric, passed in l0_measure(idx, t, namespace, line["canary"]).items():
+                failed[metric] += not passed
+            if any(n > L0_FAILURE_LIMIT for n in failed.values()):
+                why = sorted(m for m, n in failed.items() if n > L0_FAILURE_LIMIT)
+                return {"outcome": "rollback", "t": t - since, "weight": weight, "failed": why}
+    return {"outcome": "promoted" if line["how"] == "promoted" else "truncated"}
+
+
+def agents_mode(run: dict) -> bool:
+    return run["observed"].get("mode") == "agents"
+
+
 def l0_outcome(run: dict, idx: series.Index) -> dict:
     observed = run["observed"].get("l0")
     line = timeline(idx, run["spec"].get("environment", "staging"), *run["window"])
+    if agents_mode(run):
+        return (
+            l0_replay(idx, run["spec"].get("environment", "staging"), line)
+            if line
+            else {"outcome": "no_canary"}
+        )
     t = line["end"] - line["steps"][20] if line else None
     if observed == "aborted":
         return {"outcome": "rollback", "t": t}
@@ -276,6 +367,14 @@ def paired(runs: list[dict], a: dict[str, dict], b: dict[str, dict]) -> dict:
     }
 
 
+def classes(runs: list[dict]) -> dict[str, int]:
+    """Recordings per class: bad or good, per band."""
+    out: dict[str, int] = defaultdict(int)
+    for r in runs:
+        out[("bad" if r["ground_truth"].get("bad_release") else "good") + f" / {band(r)}"] += 1
+    return dict(sorted(out.items()))
+
+
 def node_stress(runs: list[dict], res: dict[str, dict]) -> dict:
     cases = [r for r in runs if r["spec"].get("node_stress")]
     return {
@@ -290,12 +389,26 @@ def node_stress(runs: list[dict], res: dict[str, dict]) -> dict:
     }
 
 
+def l0_check(run: dict, idx: series.Index) -> tuple[str, str] | None:
+    """For a recording made under the inline analysis: (live outcome, offline replay), the
+    check that the D54 replay reproduces what the AnalysisTemplate decided live."""
+    ns = run["spec"].get("environment", "staging")
+    line = timeline(idx, ns, *run["window"])
+    if agents_mode(run) or line is None:
+        return None
+    live = {"aborted": "rollback", "promoted": "promoted"}.get(run["observed"].get("l0"))
+    return (live or str(run["observed"].get("l0")), l0_replay(idx, ns, line)["outcome"])
+
+
 def score(runs: list[dict]) -> dict:
     results: dict[str, dict[str, dict]] = {"L0": {}, "L3": {}, "L4": {}}
+    checks: dict[str, tuple[str, str]] = {}
     with tempfile.TemporaryDirectory(prefix="dso3-replay-") as tmp:
         for r in runs:
             idx = load_index(r)
             results["L0"][r["id"]] = l0_outcome(r, idx)
+            if (check := l0_check(r, idx)) is not None:
+                checks[r["id"]] = check
             for name in ("L3", "L4"):
                 folder = Path(tmp) / r["id"]
                 folder.mkdir(exist_ok=True)
@@ -304,7 +417,14 @@ def score(runs: list[dict]) -> dict:
     return {
         "label": LABEL,
         "recordings": len(runs),
+        "agents_mode": sum(agents_mode(r) for r in runs),
         "scored": len(usable),
+        "classes": classes(usable),
+        "l0_replay_vs_live": {
+            "agree": sum(a == b for a, b in checks.values()),
+            "n": len(checks),
+            "disagree": {k: {"live": a, "replay": b} for k, (a, b) in checks.items() if a != b},
+        },
         "no_canary": sorted(r["id"] for r in runs if r not in usable),
         "levels": {n: summary(usable, res) for n, res in results.items()},
         "L0_vs_L3": paired(usable, results["L0"], results["L3"]),

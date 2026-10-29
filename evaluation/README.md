@@ -81,8 +81,13 @@ py evaluation\release_replay.py calibrate evaluation\recordings   # also writes 
 
 The canary's steps come from the pods up per pod-template hash; Release looks where L0
 measured (30 to 120 s into each step) on 30 s windows of per-hash counts since the 20% step
-began. A recording follows L0's path, so a canary L0 aborted before Release's fourth look is
-"truncated" and counted as not caught. `score` gives bad releases caught before 100% and false
+began. A recording made under the inline L0 analysis follows L0's path, so a canary L0
+aborted before Release's fourth look is "truncated" and counted as not caught. A recording made
+under the agents-mode canary (D54) runs every canary to 100%: L0 is then replayed offline,
+`analysis-l0.yaml`'s two queries evaluated on the recorded series (Prometheus' rate
+extrapolation and histogram_quantile) 30 to 120 s into each step, the second failed
+measurement of a metric a rollback. On recordings made under the inline analysis, `score`
+also checks the replay against L0's live decision (`l0_replay_vs_live`). `score` gives bad releases caught before 100% and false
 rollbacks (Wilson), escalations, wrong decisions and the median time to rollback, per level
 and per band; L0 vs L3 and L3 vs L4 paired (exact McNemar, bootstrap interval of the rollback
 time gain); and L3's wrong-decision rate on the node-stress recordings (H4's count, D44).
