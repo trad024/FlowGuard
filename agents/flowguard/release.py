@@ -1,10 +1,10 @@
 """Release agent (Step 8; DSO3, H4): decides each canary step from canary vs stable counts.
 
-Data (D21): per-pod Prometheus counters summed per pod-template hash, cut into 30 s windows
-from the start of the canary's first step: requests to /, the 5xx among them, and the requests
-slower than 500 ms (histogram buckets: the +Inf count minus the le="0.5" count). `windows()`
-builds them from a series index, live and in replay alike (D15), and `step_event()` turns them
-into the orchestrator's rollout_step event.
+Data (D21; latency by D55): per-pod Prometheus counters summed per pod-template hash, cut into
+30 s windows from the start of the canary's first step: requests to /, the 5xx among them, and
+the requests slower than 500 ms (histogram buckets: the +Inf count minus the le="0.5" count).
+`windows()` builds them from a series index, live and in replay alike (D15), and
+`step_event()` turns them into the orchestrator's rollout_step event.
 
 Sequential test (D4): one always-valid test per metric (5xx, slow). Within a window, given how
 many errors (or slow requests) there were in all, the canary's share of them is binomial with

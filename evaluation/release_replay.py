@@ -4,26 +4,32 @@
     python evaluation/release_replay.py calibrate <recordings folder or zip> ...
 
 Scoring side: reads each release recording's ground_truth.json (bad or good, band, node stress,
-L0's recorded outcome). Release sees only rollout_step events built by `flowguard.release`
-from the recorded Prometheus series, and runs inside the real orchestrator (dry-run executor,
-no approver), so P1 at L4 asks the real Monitor and Diagnose through the incident record.
+L0's live outcome when there was one). Release sees only rollout_step events built by
+`flowguard.release` from the recorded Prometheus series, and runs inside the real orchestrator
+(dry-run executor, no approver), so P1 at L4 asks the real Monitor and Diagnose through the
+incident record.
 
 Timeline, from the pods up per pod-template hash (the deployer events are not recorded): the
 stable hash is the one serving at the start, the canary the other; a step starts when the
 canary has 2 pods up (20%) and 5 (50%); the canary ends when it has 10 (100%) or when its pods
-are gone (aborted). Release looks where L0 measured: 30, 60, 90 and 120 s into each step, from
-counts since the 20% step began. A recording follows L0's own path: after an L0 abort there is
-no 50% step to look at, so a release Release would have let through 20% there is counted as not
-caught ("truncated"), never as caught.
+are gone (aborted). Every level decides on the same recording (D54):
 
-    L0     the frozen AnalysisTemplate as it ran live (observed outcome, canary pods gone)
+    L0     the frozen analysis-l0.yaml replayed offline (`l0_canary.py`): after each step's
+           30 s pause, 4 measurements 30 s apart; the second failure aborts
     L3     Release alone (L1 to L3 are the same: Release has no LLM)
     L4     Release with P1
 
+Release looks where L0 measures: 30, 60, 90 and 120 s into each step, from counts since the
+20% step began. D54 records release scenarios under the agents-mode Rollout, so every canary
+runs its full window; a recording made under the L0 Rollout stops where L0 aborted live, and a
+level that has not decided by then is "truncated" (counted as not caught). `needs_rerecording`
+lists those recordings and their dev specs. Where L0's live outcome is known, the offline L0
+is compared with it (`l0_live_agreement`).
+
 Per recording: rollback (rollout_abort), escalate (held for a human), promoted (reached 100%)
-or truncated. Bad releases are caught when rolled back or held before 100%; good releases
-rolled back are false rollbacks; a wrong decision is a bad release let through or a good one
-rolled back (escalations are counted apart). Time to rollback runs from the 20% step's start.
+or truncated. Bad releases are caught when rolled back or held before 100% (escalations are
+also reported apart); good releases rolled back are false rollbacks; a wrong decision is a bad
+release let through or a good one rolled back. Time to rollback runs from the 20% step's start.
 Rates with n and a Wilson interval; L0 vs L3 and L3 vs L4 paired by exact McNemar on right /
 wrong; every result per band; L3's wrong-decision rate on the node-stress cases (H4's count,
 D44). All of it is labelled "dev, in-sample".
@@ -46,6 +52,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "evaluation")]
 
+import l0_canary  # noqa: E402
 import monitor_replay  # noqa: E402
 import stats  # noqa: E402
 from flowguard import release, series  # noqa: E402
@@ -56,12 +63,14 @@ from flowguard.incidents import IncidentRecord  # noqa: E402
 from flowguard.orchestrator import Orchestrator, level  # noqa: E402
 
 LABEL = "dev, in-sample"
-GRID_S = 5.0
 UP_LOOKBACK_S = 20.0  # pods up: a sample older than this no longer counts
+READY_LAG_S = 7.5  # half of Prometheus' 15 s scrape interval (infra/monitoring/prometheus)
 STEP_PODS = {20: 2, 50: 5}  # canary pods up when a step's weight is reached (10 replicas)
 FULL_PODS = 10
 LOOKS = tuple(release.WINDOW_S * k for k in range(1, release.LOOKS_PER_STEP + 1))
+PAUSE_S = 30.0  # each step's pause before L0's analysis (base/podinfo.yaml, agents-mode alike)
 OUT = ROOT / "evaluation" / "runs" / "dso3-replay.json"
+SPECS = ROOT / "scenarios" / "dev"
 EPSILON = 0.1  # conformal coverage target 90%
 
 
@@ -102,8 +111,16 @@ def pods_up(idx: series.Index, t: float, namespace: str) -> dict[str, int]:
 
 
 def timeline(idx: series.Index, namespace: str, t0: float, t1: float) -> dict | None:
-    """Stable and canary hashes, each step's start, and how and when the canary ended."""
-    grid = [t0 + GRID_S * k for k in range(int((t1 - t0) // GRID_S) + 1)]
+    """Stable and canary hashes, each step's start, and how and when the canary ended. The
+    counts change only at an `up` sample or when one goes stale, so those are the times read."""
+    samples = {
+        t
+        for s in idx.get("podinfo_up", [])
+        if s.labels.get("namespace") == namespace
+        for t in s.times
+    }
+    events = samples | {t + UP_LOOKBACK_S + 1e-3 for t in samples}
+    grid = sorted({t0, *(t for t in events if t0 <= t <= t1)})
     counts = [(t, pods_up(idx, t, namespace)) for t in grid]
     start = next((c for _, c in counts if c), None)
     if not start:
@@ -131,6 +148,9 @@ def timeline(idx: series.Index, namespace: str, t0: float, t1: float) -> dict | 
             break
     if canary is None or 20 not in steps:
         return None
+    # A pod is Ready 0 to 15 s (one scrape) before its first `up` sample: steps start half a
+    # scrape earlier than they show
+    steps = {w: t - READY_LAG_S for w, t in steps.items()}
     return {"stable": stable, "canary": canary, "steps": steps, "end": end, "how": how}
 
 
@@ -193,13 +213,87 @@ def replay(run: dict, name: str, folder: Path, idx: series.Index | None = None) 
     return {"outcome": "truncated", "decisions": decisions, "timeline": line}
 
 
-def l0_outcome(run: dict, idx: series.Index) -> dict:
+def l0_offline(run: dict, idx: series.Index, metrics: list | None = None) -> dict:
+    """L0 on the recording (D54): the frozen analysis after each step's pause."""
+    ns = run["spec"].get("environment", "staging")
+    line = timeline(idx, ns, *run["window"])
+    if line is None:
+        return {"outcome": "no_canary"}
+    since, steps = line["steps"][20], []
+    for weight in sorted(STEP_PODS):
+        if weight not in line["steps"]:
+            return {"outcome": "truncated", "steps": steps}
+        start = line["steps"][weight] + PAUSE_S
+        run_ = l0_canary.analysis(idx, start, ns, line["canary"], line["end"], metrics)
+        steps.append({"weight": weight, "outcome": run_["outcome"], "metric": run_.get("metric")})
+        if run_["outcome"] == "failed":
+            return {"outcome": "rollback", "t": run_["t"] - since, "steps": steps}
+        if run_["outcome"] == "truncated":
+            return {"outcome": "truncated", "steps": steps}
+    return {"outcome": "promoted", "steps": steps}
+
+
+def l0_live(run: dict, idx: series.Index) -> dict | None:
+    """L0's live outcome, for recordings made under the L0 Rollout (None otherwise)."""
     observed = run["observed"].get("l0")
+    if observed not in ("aborted", "promoted"):
+        return None
     line = timeline(idx, run["spec"].get("environment", "staging"), *run["window"])
-    t = line["end"] - line["steps"][20] if line else None
-    if observed == "aborted":
-        return {"outcome": "rollback", "t": t}
-    return {"outcome": "promoted" if observed == "promoted" else str(observed)}
+    if observed == "promoted" or line is None:
+        return {"outcome": "promoted" if observed == "promoted" else "rollback"}
+    return {"outcome": "rollback", "t": line["end"] - line["steps"][20]}  # canary pods gone
+
+
+def agreement(runs: list[dict], offline: dict[str, dict], live: dict[str, dict | None]) -> dict:
+    """The offline L0 against L0's live outcome, recording by recording."""
+    pairs = {r["id"]: (offline[r["id"]], live[r["id"]]) for r in runs if live[r["id"]]}
+    same = [rid for rid, (o, lv) in pairs.items() if o["outcome"] == lv["outcome"]]
+    lags = [
+        lv["t"] - o["t"]
+        for o, lv in pairs.values()
+        if o["outcome"] == lv["outcome"] == "rollback" and o.get("t") is not None
+    ]
+    return {
+        "agree": rate(len(same), len(pairs)),
+        "differ": {
+            rid: {"offline": o["outcome"], "live": lv["outcome"]}
+            for rid, (o, lv) in pairs.items()
+            if rid not in same
+        },
+        "abort_to_pods_gone_s_median": round(statistics.median(lags), 1) if lags else None,
+    }
+
+
+def needs_rerecording(runs: list[dict], idx_of: dict, results: dict) -> list[dict]:
+    """Recordings whose canary did not run its full window (D54), or recorded under node
+    stress without node series (P1 cannot be answered), with their dev spec files."""
+    specs = {p.stem: p for p in SPECS.rglob("*.yaml")} if SPECS.is_dir() else {}
+    out = []
+    for r in runs:
+        reasons = []
+        line = timeline(idx_of[r["id"]], r["spec"].get("environment", "staging"), *r["window"])
+        # Release's last look and L0's last measurement are both 120 s into a step
+        full = line is not None and all(
+            w in line["steps"] and line["steps"][w] + LOOKS[-1] <= line["end"] for w in STEP_PODS
+        )
+        if not full:
+            reasons.append("canary stopped before its full window (L0 Rollout)")
+        if r["spec"].get("node_stress") and not node_series(r):
+            reasons.append("node stress without node series")
+        if any(res[r["id"]]["outcome"] == "truncated" for res in results.values()):
+            reasons.append("a level is truncated")
+        if reasons:
+            sid = r["spec"].get("id")
+            path = specs.get(sid)
+            out.append(
+                {
+                    "recording": r["id"],
+                    "spec": sid,
+                    "spec_file": str(path.relative_to(ROOT)) if path else None,
+                    "reasons": reasons,
+                }
+            )
+    return out
 
 
 # ---------------------------------------------------------------- scoring
@@ -276,26 +370,30 @@ def paired(runs: list[dict], a: dict[str, dict], b: dict[str, dict]) -> dict:
     }
 
 
+def node_series(run: dict) -> bool:
+    return any(
+        s.startswith("node") for s in run["manifest"].get("sources", {}).get("prometheus", {})
+    )
+
+
 def node_stress(runs: list[dict], res: dict[str, dict]) -> dict:
     cases = [r for r in runs if r["spec"].get("node_stress")]
     return {
         "wrong": rate(sum(wrong(r, res[r["id"]]["outcome"]) for r in cases), len(cases)),
         "cases": {r["id"]: res[r["id"]]["outcome"] for r in cases},
-        "with_node_series": sum(
-            any(
-                s.startswith("node") for s in r["manifest"].get("sources", {}).get("prometheus", {})
-            )
-            for r in cases
-        ),
+        "with_node_series": sum(node_series(r) for r in cases),
     }
 
 
 def score(runs: list[dict]) -> dict:
     results: dict[str, dict[str, dict]] = {"L0": {}, "L3": {}, "L4": {}}
+    live, idx_of = {}, {}
+    metrics = l0_canary.load_template()
     with tempfile.TemporaryDirectory(prefix="dso3-replay-") as tmp:
         for r in runs:
-            idx = load_index(r)
-            results["L0"][r["id"]] = l0_outcome(r, idx)
+            idx = idx_of[r["id"]] = load_index(r)
+            results["L0"][r["id"]] = l0_offline(r, idx, metrics)
+            live[r["id"]] = l0_live(r, idx)
             for name in ("L3", "L4"):
                 folder = Path(tmp) / r["id"]
                 folder.mkdir(exist_ok=True)
@@ -306,6 +404,8 @@ def score(runs: list[dict]) -> dict:
         "recordings": len(runs),
         "scored": len(usable),
         "no_canary": sorted(r["id"] for r in runs if r not in usable),
+        "l0_live_agreement": agreement(usable, results["L0"], live),
+        "needs_rerecording": needs_rerecording(usable, idx_of, results),
         "levels": {n: summary(usable, res) for n, res in results.items()},
         "L0_vs_L3": paired(usable, results["L0"], results["L3"]),
         "L3_vs_L4": paired(usable, results["L3"], results["L4"]),

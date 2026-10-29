@@ -105,7 +105,9 @@ def test_timeline_reads_the_steps_and_how_the_canary_ended(tmp_path):
     runs = {r["id"]: r for r in rr.release_runs([tmp_path])}
     good = rr.timeline(rr.load_index(runs["r-good"]), "staging", *runs["r-good"]["window"])
     assert (good["stable"], good["canary"], good["how"]) == ("old", "new", "promoted")
-    assert {w: t - T0 for w, t in good["steps"].items()} == {20: STEP_20, 50: STEP_50}
+    # Pods are Ready about half a scrape before their first `up` sample
+    lag = rr.READY_LAG_S
+    assert {w: t - T0 for w, t in good["steps"].items()} == {20: STEP_20 - lag, 50: STEP_50 - lag}
     assert good["end"] - T0 == FULL
     bad = rr.timeline(rr.load_index(runs["r-bad"]), "staging", *runs["r-bad"]["window"])
     assert bad["how"] == "aborted" and STEP_20 + 70 <= bad["end"] - T0 <= STEP_20 + 70 + 25
@@ -122,28 +124,40 @@ def scored(tmp_path_factory):
     return rr.score(rr.release_runs([root]))
 
 
-def test_levels_are_scored_per_band_against_the_recorded_l0(scored):
+def test_every_level_is_scored_per_band_on_the_same_recording(scored):
     rec = scored["per_recording"]
     assert scored["label"] == "dev, in-sample" and scored["scored"] == 4
+    # Release's first look and L0's (offline) first measurement are both 30 s into the step;
+    # L0 needs a second failure
     assert rec["r-above"]["L3"]["outcome"] == "rollback" and rec["r-above"]["L3"]["t"] == 30
-    assert rec["r-above"]["L0"]["outcome"] == "rollback" and rec["r-above"]["L0"]["t"] >= 70
-    assert rec["r-slow"]["L3"]["outcome"] == "rollback"  # slow requests, invisible to L0's p99
-    assert rec["r-good"]["L3"]["outcome"] == "promoted"
+    assert rec["r-above"]["L0"]["outcome"] == "rollback" and rec["r-above"]["L0"]["t"] == 60
+    assert [s["metric"] for s in rec["r-above"]["L0"]["steps"]] == ["error-ratio-5xx"]
+    # Slow requests: the p99 L0 reads stays at the 0.5 s bucket bound, Release counts them
+    assert rec["r-slow"]["L0"]["outcome"] == "promoted"
+    assert rec["r-slow"]["L3"]["outcome"] == "rollback"
+    assert rec["r-good"]["L0"]["outcome"] == rec["r-good"]["L3"]["outcome"] == "promoted"
     assert [d["action"] for d in rec["r-good"]["L3"]["decisions"]] == (
         [None, None, None, "rollout_promote"] * 2  # holds, then a promotion per step
     )
-    # L0 stopped the canary before Release's horizon on a canary that showed nothing:
-    # truncated, counted as not caught
-    assert rec["r-invisible"]["L3"]["outcome"] == "truncated"
+    # Recorded under the L0 Rollout and aborted live on a canary that showed nothing: no level
+    # can decide on what is left of it
+    assert rec["r-invisible"]["L0"]["outcome"] == rec["r-invisible"]["L3"]["outcome"] == "truncated"
     l0, l3 = scored["levels"]["L0"], scored["levels"]["L3"]
-    assert (l0["bad_caught_before_100"]["k"], l3["bad_caught_before_100"]["k"]) == (2, 2)
-    assert l3["bad_truncated"] == 1 and l3["false_rollbacks"]["k"] == 0
+    assert (l0["bad_caught_before_100"]["k"], l3["bad_caught_before_100"]["k"]) == (1, 2)
+    assert l3["bad_truncated"] == l0["bad_truncated"] == 1 and l3["false_rollbacks"]["k"] == 0
     assert l3["bad_caught_by_band"]["near"]["k"] == 1 and l0["bad_caught_by_band"]["near"]["k"] == 0
-    assert (
-        scored["L0_vs_L3"]["right_only_first"] == 1 and scored["L0_vs_L3"]["right_only_second"] == 1
-    )
-    assert scored["L0_vs_L3"]["both_rolled_back"] == 1
-    assert scored["L0_vs_L3"]["rollback_time_gain_s_median"] > 0  # Release decides earlier
+    paired = scored["L0_vs_L3"]
+    assert (paired["right_only_first"], paired["right_only_second"]) == (0, 1)
+    assert paired["both_rolled_back"] == 1 and paired["rollback_time_gain_s_median"] == 30
+
+
+def test_offline_l0_is_checked_against_live_l0_and_short_recordings_are_listed(scored):
+    agreement = scored["l0_live_agreement"]
+    assert (agreement["agree"]["k"], agreement["agree"]["n"]) == (3, 4)
+    assert agreement["differ"] == {"r-invisible": {"offline": "truncated", "live": "rollback"}}
+    listed = {x["recording"]: x["reasons"] for x in scored["needs_rerecording"]}
+    assert set(listed) == {"r-above", "r-invisible"}  # aborted live: no full window
+    assert "a level is truncated" in listed["r-invisible"]
 
 
 def test_p1_at_l4_under_node_stress_gives_h4_its_count(tmp_path):
