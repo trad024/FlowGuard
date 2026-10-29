@@ -67,6 +67,11 @@ COUNTS = (
         " COUNT(*) AS value FROM executions GROUP BY level, success",
     ),
     (
+        "flowguard_execution_refusals_total",
+        "Executor refusals by level (D58: written to the audit log, never run).",
+        "SELECT level, COUNT(*) AS value FROM refusals GROUP BY level",
+    ),
+    (
         "flowguard_deployments_total",
         "Finished canary deployments by level, environment and outcome.",
         "SELECT level, COALESCE(environment, '') AS environment,"

@@ -169,6 +169,8 @@ def test_a_human_approved_undo_runs_once_and_its_replay_is_refused(tmp_path):
         ex.execute(p, d)
     assert [c for c in calls if "patch" in c] == patches  # nothing ran the second time
     assert len(audit.query("SELECT * FROM executions WHERE proposal_id = 'p-undo'")) == 1
+    (refusal,) = audit.query("SELECT * FROM refusals WHERE proposal_id = 'p-undo'")  # D58
+    assert "already executed" in refusal["reason"]
 
 
 def test_executor_trusts_only_the_audit_log(tmp_path):
@@ -287,9 +289,13 @@ def test_approval_page_approves_with_the_token_and_escapes_text():
         html = urllib.request.urlopen(page.url, timeout=5).read().decode()
         assert "<script>" not in html and "&lt;script&gt;" in html
         assert post(page, proposal="p-1", verdict="approved", token="wrong") == 403
-        assert post(page, proposal="p-1", verdict="approved", token=page.token) in (200, 303)
+        assert post(page, proposal="p-1", verdict="approved", token=page.token) == 403  # no name
+        ok = post(page, proposal="p-1", verdict="approved", token=page.token, name=" Ammar  Y ")
+        assert ok in (200, 303)
         t.join(5)
-        assert result["d"].human_verdict == "approved" and result["d"].approved_by == "page"
+        assert result["d"].human_verdict == "approved" and result["d"].approved_by == "Ammar Y"
+        review = page.reviews["p-1"]
+        assert review["channel"] == "page" and review["wait_seconds"] >= 0
     finally:
         page.close()
 

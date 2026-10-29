@@ -5,8 +5,11 @@ refuses everything else even if called directly (defence in depth). The decision
 is not trusted: the proposal, the gate decision and the approval are re-read from the audit
 log by proposal id, and anything missing, different, unapproved or already executed is refused
 (D37), so an executor without an audit log runs nothing. Every execution is written to the
-audit log. Agents never hold write credentials: kubectl writes and the GitHub write
-token (GITHUB_TOKEN_WRITE) appear only in this module (agents/tests/test_executor.py checks).
+audit log, and so is every refusal (D58), in its own table with the reason, before Refused is
+raised: `executions` holds only what ran, so a refused attempt never counts as executed. Agents
+never hold
+write credentials: kubectl writes and the GitHub write token (GITHUB_TOKEN_WRITE) appear only in
+this module (agents/tests/test_executor.py checks).
 
 dry_run=True records what would be done and changes nothing (tests, replays). Live handlers:
 rollout actions through `kubectl patch` on the Argo Rollout, restarts and scaling of the
@@ -70,9 +73,13 @@ class Executor:
         self._json_github = json_github  # built from the write token on first live use
 
     def execute(self, proposal: ActionProposal, decision: GateDecision) -> ExecutionResult:
-        if decision.proposal_id != proposal.id or not allowed(decision):
-            raise Refused(f"{proposal.id}: gate outcome {decision.outcome}, not executable")
-        self._verify(proposal, decision)
+        try:
+            if decision.proposal_id != proposal.id or not allowed(decision):
+                raise Refused(f"{proposal.id}: gate outcome {decision.outcome}, not executable")
+            self._verify(proposal, decision)
+        except Refused as exc:
+            self._record_refusal(proposal, str(exc))
+            raise
         if self.dry_run:
             result = ExecutionResult(
                 proposal_id=proposal.id, success=True, output=f"dry run: {proposal.action}"
@@ -123,6 +130,10 @@ class Executor:
             raise Refused(f"{pid}: logged gate outcome {g['outcome']}")
         if self.audit.query("SELECT 1 FROM executions WHERE proposal_id = ?", (pid,)):
             raise Refused(f"{pid}: already executed")
+
+    def _record_refusal(self, proposal: ActionProposal, reason: str) -> None:
+        if self.audit is not None:  # without a log nothing runs, and there is nowhere to write
+            self.audit.refusal(proposal.id, reason)
 
     # ------------------------------------------------------------ live handlers
 

@@ -2,13 +2,16 @@
 
 SimulatedApprover approves a proposal when the policy it is given says the action is correct
 and denies it otherwise, with a seeded error rate (default 0, 10% in a sensitivity run) and a
-delay. The policy is supplied by the evaluation harness; agent code never sees what a scenario
-injected.
+delay. Every review is recorded in `reviews` (D58): the channel, who answered and how long the
+proposal waited; the orchestrator writes them to the audit log's approvals row. The policy is
+supplied by the evaluation harness; agent code never sees what a scenario injected.
 
 ApprovalPage serves the pending proposals on 127.0.0.1 only, most risky first, with approve and
-deny buttons. A proposal nobody answers within the timeout (10 minutes) is a timeout, which
-counts as a denial. Every field shown is HTML-escaped (a rationale can carry text an attacker
-wrote into a log), and a form must carry the page's random token.
+deny buttons and a required name field: the page has no login, so the person answering names
+themselves, and that name is the approvals row's approver (D58). A proposal nobody answers
+within the timeout (10 minutes) is a timeout, which counts as a denial. Every field shown is
+HTML-escaped (a rationale can carry text an attacker wrote into a log), and a form must carry the
+page's random token.
 """
 
 from __future__ import annotations
@@ -41,8 +44,10 @@ class SimulatedApprover:
         self.delay_s = delay_s
         self.rng = random.Random(seed)
         self.sleep = sleep
+        self.reviews: dict[str, dict] = {}
 
     def review(self, proposal: ActionProposal, decision: GateDecision) -> GateDecision:
+        self.reviews[proposal.id] = {"channel": "simulated", "wait_seconds": self.delay_s}
         if self.delay_s:
             self.sleep(self.delay_s)
         correct = bool(self.policy(proposal))
@@ -57,7 +62,8 @@ class ApprovalPage:
         self.timeout_s = timeout_s
         self.token = secrets.token_urlsafe(16)
         self._pending: dict[str, tuple[ActionProposal, GateDecision]] = {}
-        self._verdicts: dict[str, str] = {}
+        self._verdicts: dict[str, tuple[str, str]] = {}  # proposal id -> (verdict, name)
+        self.reviews: dict[str, dict] = {}
         self._cond = threading.Condition()
         page = self
 
@@ -80,6 +86,7 @@ class ApprovalPage:
                     form.get("proposal", [""])[0],
                     form.get("verdict", [""])[0],
                     form.get("token", [""])[0],
+                    form.get("name", [""])[0],
                 )
                 self.send_response(303 if ok else 403)
                 self.send_header("Location", "/")
@@ -99,24 +106,32 @@ class ApprovalPage:
         self.server.shutdown()
         self.server.server_close()
 
-    def answer(self, proposal_id: str, verdict: str, token: str) -> bool:
+    def answer(self, proposal_id: str, verdict: str, token: str, name: str = "") -> bool:
+        name = " ".join(name.split())[:64]
         if not secrets.compare_digest(token, self.token) or verdict not in ("approved", "denied"):
+            return False
+        if not name:  # an answer must say who gave it (D58)
             return False
         with self._cond:
             if proposal_id not in self._pending:
                 return False
-            self._verdicts[proposal_id] = verdict
+            self._verdicts[proposal_id] = (verdict, name)
             self._cond.notify_all()
         return True
 
     def review(self, proposal: ActionProposal, decision: GateDecision) -> GateDecision:
         """Block until a human answers on the page, or the timeout (a denial) passes."""
+        start = time.monotonic()
         with self._cond:
             self._pending[proposal.id] = (proposal, decision)
             answered = self._cond.wait_for(lambda: proposal.id in self._verdicts, self.timeout_s)
-            verdict = self._verdicts.pop(proposal.id, None) if answered else "timeout"
+            verdict, name = self._verdicts.pop(proposal.id) if answered else ("timeout", None)
             self._pending.pop(proposal.id, None)
-        return decision.model_copy(update={"human_verdict": verdict, "approved_by": "page"})
+        self.reviews[proposal.id] = {
+            "channel": "page",
+            "wait_seconds": round(time.monotonic() - start, 3),
+        }
+        return decision.model_copy(update={"human_verdict": verdict, "approved_by": name})
 
     def render(self) -> str:
         with self._cond:
@@ -128,6 +143,7 @@ class ApprovalPage:
                 f'<form method="post" style="display:inline">'
                 f'<input type="hidden" name="proposal" value="{e(p.id)}">'
                 f'<input type="hidden" name="token" value="{e(self.token)}">'
+                f'<input name="name" placeholder="your name" required maxlength="64">'
                 f'<button name="verdict" value="{v}">{label}</button></form>'
                 for v, label in (("approved", "Approve"), ("denied", "Deny"))
             )

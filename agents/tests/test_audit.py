@@ -38,7 +38,7 @@ def proposal(pid, action="rollout_undo", incident="inc-1"):
 def test_schema_has_the_five_record_types(log):
     tables = {r["name"] for r in log.query("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"events", "proposals", "gate_decisions", "approvals", "executions"} <= tables
-    assert log.query("SELECT value FROM meta WHERE key='schema_version'")[0]["value"] == "1"
+    assert log.query("SELECT value FROM meta WHERE key='schema_version'")[0]["value"] == "2"
 
 
 def test_events_carry_scenario_level_and_payload(log):

@@ -336,7 +336,14 @@ class Orchestrator:
             if d.outcome == "ask_human" and self.approver is not None:
                 d = self.approver.review(by_id[d.proposal_id], d)
                 if self.audit is not None:
-                    self.audit.approval(d.proposal_id, d.human_verdict, d.approved_by)
+                    review = getattr(self.approver, "reviews", {}).get(d.proposal_id, {})
+                    self.audit.approval(
+                        d.proposal_id,
+                        d.human_verdict,
+                        d.approved_by,
+                        review.get("wait_seconds"),
+                        review.get("channel"),
+                    )
             decisions.append(d)
         return {"decisions": decisions}
 
