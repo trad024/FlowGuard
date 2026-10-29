@@ -631,8 +631,13 @@ metrics:
   H1: {primary: DSO1 recall, secondary: [false alerts per hour of normal traffic, MTTD]}
   H2: {secondary (D42): DSO2 macro-F1 on the generated corpus, also: [accuracy, cost per incident, latency per incident],
        note: L0's regex scores 82% accuracy on the generated failures (dev, 61/74)}
-  H3: {primary: localization hit rate on LogChunks (D32),
-       secondary: [hallucination rate (quoted lines not in the log), line-level precision and recall, macro-F1 on the corpus]}
+  H3:
+    primary: localization hit rate on LogChunks (D32)
+    secondary: [hallucination rate (quoted lines not in the log), line-level precision and recall, macro-F1 on the corpus]
+    hallucination: >-
+      The reported rate is per quote, from the model's raw quotes before grounding, at L2 and L3
+      alike: sum of diagnose_ungrounded over sum of diagnose_quotes; the per-item boolean
+      (diagnose_ungrounded > 0) is used only for the paired exact McNemar
   H4: {primary: wrong decisions (false rollbacks and wrong fixes) in collaboration scenarios}
   H5: {primary: share of incidents resolved without a human at each gate setting,
        constraint: 0 unapproved high-risk actions,
