@@ -9,15 +9,20 @@ Every interval:
      series, its L0 alerts and the node rows, tagged with the namespace as its environment (an
      incident is followed up where it happened) and marked in_canary while its Rollout is
      mid-canary.
-  2. Canary hold (workflow D): each watched Rollout that is paused mid-canary gives one
-     rollout_step for its canary hash, with the canary's and the stable pods' 5xx ratios over
-     the last minute (per-pod counters summed by pod-template hash, D21).
-The orchestrator does the rest: incidents, agents, the gate, the approval page for ask_human
-(the loop waits for the answer, at most its 10-minute timeout) and the executor, which is a dry
-run unless --live. Everything is read from Prometheus (D1): pods up per pod-template hash, the
+  2. Canary looks (workflow D): while a watched Rollout is paused mid-canary, one rollout_step
+     per poll once the step's 30 s warm-up has passed (the agents-mode Rollout waits there for
+     Release, D53): `release.step_event`, the per-hash count windows since the canary's
+     ReplicaSet was created (D21, D55), with the look's number within the step (20%, then 50%).
+     Release holds (no proposal, no incident) until it proposes; after a proposal for a step,
+     that step gets no more looks, so a denied promotion is not asked again every poll.
+The orchestrator does the rest: incidents, agents, the gate (Release's proposals with the
+calibrator fitted on the dev release decisions, D9), the approval page for ask_human (the loop
+waits for the answer, at most its 10-minute timeout) and the executor, which is a dry run unless
+--live. Everything is read from Prometheus (D1): pods up per pod-template hash, the
 ReplicaSets' creation times (kube-state-metrics) and the Rollout's phase (Argo Rollouts' own
 rollout_info); the executor is the only component that touches the cluster. The audit log and
-incident record are state/audit.db (FLOWGUARD_AUDIT_DB overrides).
+incident record are state/audit.db (FLOWGUARD_AUDIT_DB overrides). A poll reads the last 10
+minutes (series.HISTORY_S): counts older than that no longer reach Release's windows.
 """
 
 from __future__ import annotations
@@ -27,18 +32,19 @@ import json
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 
-from flowguard import series
+from flowguard import release, series
 from flowguard.approval import ApprovalPage
 from flowguard.audit import AuditLog
-from flowguard.contracts import Event
+from flowguard.contracts import AgentName
 from flowguard.executor import Executor
 from flowguard.incidents import IncidentRecord
 from flowguard.monitor import tick_event
 from flowguard.orchestrator import Orchestrator, level
 
 ROLLOUT = "podinfo"
+WARMUP_S = 30.0  # each step's pause before L0's analysis, and before Release's first look
+WEIGHTS = (20, 50)  # the canary steps (infra/apps/podinfo/base/podinfo.yaml)
 # Rollout state, read by the service only (the Monitor's own series are series.SELECTORS):
 # pods up per pod-template hash, each ReplicaSet's creation time, Argo Rollouts' phase
 ROLLOUT_SELECTORS = {
@@ -53,10 +59,22 @@ class RolloutState:
     paused: bool
     canary: str | None  # the newer revision's pod-template hash, while two serve
     stable: str | None
+    created: float | None = None  # the canary's ReplicaSet creation time, when known
+    weight: int | None = None  # the canary step its pods up are at (20 or 50)
 
     @property
     def mid_canary(self) -> bool:
         return bool(self.canary and self.stable and self.canary != self.stable)
+
+
+@dataclass
+class Look:
+    """Release's looks at one canary step."""
+
+    weight: int
+    since: float  # when this step was first seen
+    looks: int = 0
+    decided: bool = False
 
 
 def rollout_state(idx: series.Index, t: float, namespace: str) -> RolloutState:
@@ -84,7 +102,10 @@ def rollout_state(idx: series.Index, t: float, namespace: str) -> RolloutState:
         return RolloutState(paused, only, only)
     # newest ReplicaSet first; without creation times, the hash with fewer pods
     order = sorted(up, key=lambda h: (created.get(h, float("-inf")), -up[h]))
-    return RolloutState(paused, order[-1], order[0])
+    canary, stable = order[-1], order[0]
+    share = 100 * up[canary] / (up[canary] + up[stable])
+    weight = min(WEIGHTS, key=lambda w: abs(w - share))
+    return RolloutState(paused, canary, stable, created.get(canary), weight)
 
 
 def ratio(counts: tuple[float, float] | None) -> float:
@@ -115,11 +136,11 @@ class Service:
     orch: Orchestrator
     source: series.PrometheusSource
     watch: tuple[str, ...] = ("staging", "prod")
-    asked: set[tuple[str, str]] = field(default_factory=set)  # (namespace, canary hash)
+    steps: dict[tuple[str, str], Look] = field(default_factory=dict)  # (namespace, canary)
+    started: dict[tuple[str, str], float] = field(default_factory=dict)  # first seen
 
     def tick(self, t: float | None = None) -> list[dict]:
-        """One poll: a Monitor tick per watched namespace, then a rollout_step per newly held
-        canary."""
+        """One poll: a Monitor tick per watched namespace, then a look at each held canary."""
         t = time.time() if t is None else t
         idx = self.source.fetch(t)
         states = {ns: rollout_state(idx, t, ns) for ns in self.watch}
@@ -138,26 +159,32 @@ class Service:
             )
             results.append(self.orch.handle(tick))
         for ns, state in states.items():
-            if not (state.paused and state.mid_canary) or (ns, state.canary) in self.asked:
-                continue
-            self.asked.add((ns, state.canary))
-            results.append(
-                self.orch.handle(
-                    Event(
-                        id=f"rollout-{ns}-{state.canary}",
-                        type="rollout_step",
-                        service=ROLLOUT,
-                        environment=ns,
-                        payload={
-                            "metrics": canary_split(idx, t, ns, state),
-                            "in_canary": True,
-                            "params": {"ts": t},
-                        },
-                        received_at=datetime.fromtimestamp(t, UTC),
-                    )
-                )
-            )
+            out = self.look(idx, t, ns, state)
+            if out is not None:
+                results.append(out)
         return results
+
+    def look(self, idx: series.Index, t: float, ns: str, state: RolloutState) -> dict | None:
+        """One look at a held canary after its step's warm-up; none once Release proposed."""
+        if not state.mid_canary:
+            for key in [k for k in self.steps if k[0] == ns]:
+                del self.steps[key], self.started[key]
+            return None
+        key = (ns, state.canary)
+        self.started.setdefault(key, t)
+        step = self.steps.get(key)
+        if step is None or step.weight != state.weight:
+            step = self.steps[key] = Look(state.weight, t)
+        if not state.paused or step.decided or t - step.since < WARMUP_S:
+            return None
+        step.looks += 1
+        since = state.created if state.created is not None else self.started[key]
+        event = release.step_event(
+            idx, t, ns, state.canary, state.stable, since, step.looks, weight=state.weight
+        )
+        out = self.orch.handle(event)
+        step.decided = bool(out.get("output") and out["output"].proposals)
+        return out
 
     def run(self, interval: float, sleep: Callable[[float], None] = time.sleep) -> None:
         while True:
@@ -182,6 +209,18 @@ def report(out: dict) -> None:
     print(json.dumps(line), flush=True)
 
 
+def make_orchestrator(name: str, audit: AuditLog, approver, live: bool = False) -> Orchestrator:
+    """The service's orchestrator: Release's proposals are gated with its calibrator (D9)."""
+    return Orchestrator(
+        cfg=level(name),
+        record=IncidentRecord(audit.path),
+        executor=Executor(audit=audit, dry_run=not live),
+        audit=audit,
+        approver=approver,
+        calibrators={AgentName.RELEASE: release.calibrator()},
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--level", default="L1", choices=("L0", "L1", "L2", "L3", "L4", "L5"))
@@ -193,13 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     audit = AuditLog.open(level=args.level)
     page = ApprovalPage(port=args.approval_port)
-    orch = Orchestrator(
-        cfg=level(args.level),
-        record=IncidentRecord(audit.path),
-        executor=Executor(audit=audit, dry_run=not args.live),
-        audit=audit,
-        approver=page,
-    )
+    orch = make_orchestrator(args.level, audit, page, live=args.live)
     service = Service(
         orch,
         series.PrometheusSource(
