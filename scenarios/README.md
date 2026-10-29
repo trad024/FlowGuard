@@ -108,6 +108,22 @@ such episodes in the load log (no request, or a request stalled, for 60 s or mor
 them as `observed.host_suspended`, sets `valid: false` and `l0_correct: null`. Invalid runs
 are excluded from scoring.
 
+## Agents-mode recording (D53, D54)
+
+`pilot.py mode agents` replaces only staging's canary steps with the agents-mode ones
+(`infra/apps/podinfo/agents-mode`: an indefinite pause where L0 runs its analysis), leaving
+the pod template alone; `pilot.py mode l0` puts L0's steps back. `pilot.py scenarios --agents`
+then records config-delivered release specs under it: the runner refuses to start if staging
+is not in that mode, holds each indefinite pause 120 s (past Release's fourth look), resumes
+it, and records the canary through to 100% with `observed.mode: agents` and `l0: offline`
+(L0 is replayed from the recording). A canary not at 100% within 15 minutes makes the run
+invalid. Restores resume each pause at once.
+
+`live_release.py undo` is Step 8's live action: a bad release under agents-mode, aborted by the
+harness at its first pause; Release proposes `rollout_undo`, the gate asks a human on the
+approval page (127.0.0.1), the live executor runs it, and the same decision handed over again
+is refused.
+
 ## Live results (L0)
 
 | Scenario | Delivery | Expected | L0 did |

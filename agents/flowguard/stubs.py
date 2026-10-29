@@ -8,8 +8,8 @@ for calibration (D9) and evidence posts. Steps 6 to 10 replace the logic, not th
   orchestrator's Monitor slot uses it.
 - Diagnose: L0 the frozen regex classifier and playbook (D3); L2+ an injected LLM; with
   grounding (L3+) quoted lines that are not in the log are dropped (D8).
-- Release: abort a worse canary; with collaboration (L4+) it first asks Monitor and Diagnose
-  (P1) and escalates instead when the evidence says infrastructure.
+- Release: the real agent since Step 8 (`flowguard.release`), re-exported here: a sequential
+  test on canary vs stable counts; with collaboration (L4+) P1 before any rollback.
 - Security: block on any HIGH, CRITICAL or leaked secret, else allow.
 - Optimizer: skip optional jobs a docs-only change cannot affect; P2 forbids skipping the
   dependency and security jobs when dependency files changed or Security flagged the last run.
@@ -25,6 +25,7 @@ from flowguard import baselines
 from flowguard.agent_io import AgentInput, AgentOutput
 from flowguard.contracts import ActionProposal, AgentName, EvidencePost
 from flowguard.monitor import Monitor
+from flowguard.release import Release
 
 __all__ = ["AgentInput", "AgentOutput", "Diagnose", "Monitor", "Optimizer", "Release", "Security"]
 
@@ -79,40 +80,6 @@ class Diagnose:
             refs=[f"line {n}" for n in lines[:5]],
         )
         return AgentOutput(proposals=[p], label_scores={p.id: scores}, evidence=[post])
-
-
-class Release:
-    name = AgentName.RELEASE
-
-    def run(
-        self, inp: AgentInput, cfg, ask: Callable[[AgentName, str], EvidencePost] | None = None
-    ):
-        ratio_canary = float(inp.metrics.get("canary_5xx_ratio", 0.0))
-        ratio_stable = float(inp.metrics.get("stable_5xx_ratio", 0.0))
-        worse = ratio_canary > max(0.01, 2 * ratio_stable)
-        if not worse:
-            p = proposal(self.name, "rollout_promote", inp, "canary not worse than stable")
-            return AgentOutput(proposals=[p], label_scores={p.id: {"promote": 0.8, "abort": 0.2}})
-        evidence = []
-        if cfg.collaboration and ask is not None:  # P1: ask before rolling back
-            evidence = [
-                ask(AgentName.MONITOR, "Is the node or cluster under stress?"),
-                ask(AgentName.DIAGNOSE, "Does the error look release- or infrastructure-caused?"),
-            ]
-            if any(
-                "stress" in e.claim and "normal" not in e.claim or "infrastructure" in e.claim
-                for e in evidence
-            ):
-                p = proposal(
-                    self.name, "escalate_to_human", inp, "worse canary, but infrastructure evidence"
-                )
-                return AgentOutput(proposals=[p], evidence=evidence)
-        p = proposal(
-            self.name, "rollout_abort", inp, f"canary 5xx {ratio_canary:.3f} vs {ratio_stable:.3f}"
-        )
-        return AgentOutput(
-            proposals=[p], label_scores={p.id: {"abort": 0.8, "promote": 0.2}}, evidence=evidence
-        )
 
 
 class Security:

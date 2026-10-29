@@ -10,7 +10,9 @@ this module. Each recording gives at most one event per kind:
     ci_run_completed every recorded CI run: run and job states and timings, and the first
                      failed job's log (D49: the Monitor sees it first)
     scan_completed   the scan counts annotated by the scans job
-    rollout_step     canary vs stable 5xx ratios from the per-pod load log
+    rollout_step     canary vs stable from the per-pod load log: 5xx ratios, and the counts
+                     (requests, 5xx, slower than 500 ms) as one window for Release; the
+                     per-look replay is evaluation/release_replay.py
     metrics_tick     the L0 alerts that fired, the 5xx ratio and the peak memory share
 """
 
@@ -104,9 +106,10 @@ def rollout_event(rec: Path) -> Event | None:
         if h is None:
             continue
         first_seen.setdefault(h, r["ts"])
-        c = counts.setdefault(h, [0, 0])
+        c = counts.setdefault(h, [0, 0, 0])
         c[0] += 1
         c[1] += (r.get("status") or 0) >= 500
+        c[2] += (r.get("latency_ms") or 0) > 500
     if len(counts) < 2:
         return None
     stable, canary = sorted(first_seen, key=first_seen.get)[:2]
@@ -117,8 +120,14 @@ def rollout_event(rec: Path) -> Event | None:
         service="podinfo",
         environment="staging",
         payload={
-            "metrics": {"canary_5xx_ratio": ratio[canary], "stable_5xx_ratio": ratio[stable]},
+            "metrics": {
+                "canary_5xx_ratio": ratio[canary],
+                "stable_5xx_ratio": ratio[stable],
+                # one window over the whole log: Release's counts (FIELDS order)
+                "windows": [[*counts[canary], *counts[stable]]],
+            },
             "in_canary": True,
+            "params": {"canary_hash": canary},
         },
     )
 

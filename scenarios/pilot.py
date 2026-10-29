@@ -3,6 +3,9 @@ of normal traffic, resumably.
 
     python scenarios/pilot.py scenarios          # every pilot spec without a valid run yet
     python scenarios/pilot.py normal --hours 4   # normal traffic, no fault, recorded
+    python scenarios/pilot.py mode agents         # staging's canary steps: agents or l0 (D53)
+    python scenarios/pilot.py scenarios --agents --dir scenarios/dev/node-stress
+                                                  # release specs under agents-mode (D54)
 
 A spec is skipped when the ground-truth DB already holds a valid run of it, so an interrupted
 pilot continues where it stopped. The normal-traffic window is recorded like a scenario
@@ -31,9 +34,12 @@ PILOT = ROOT / "scenarios" / "dev" / "pilot"
 QUIET_ATTEMPTS = 3  # D50: a run started under firing alerts is invalid and retried
 
 
-def done(truth: groundtruth.GroundTruthDB) -> set[str]:
+def done(truth: groundtruth.GroundTruthDB, mode: str = "l0") -> set[str]:
+    """Specs with a valid run in this mode (agents-mode runs say so in observed, D54)."""
+    agents = "json_extract(observed, '$.mode') = 'agents'"
+    where = agents if mode == "agents" else f"NOT IFNULL({agents}, 0)"
     with truth._connect() as db:
-        return {r[0] for r in db.execute("SELECT spec_id FROM runs WHERE valid = 1")}
+        return {r[0] for r in db.execute(f"SELECT spec_id FROM runs WHERE valid = 1 AND {where}")}
 
 
 def healthy(env: str = "staging") -> bool:
@@ -47,26 +53,34 @@ def healthy(env: str = "staging") -> bool:
     load.start(f"heal-{runner.new_run_id()}")
     try:
         runner.retry_rollout(env)
-        outcome = runner.wait_outcome(cluster, image, 900)
+        if runner.canary_mode(cluster.rollout()) == "agents":
+            outcome = runner.pace_canary(cluster, image, 900, lambda: runner.resume(env), 0)
+        else:
+            outcome = runner.wait_outcome(cluster, image, 900)
     finally:
         load.stop()
     print(json.dumps({"heal": outcome}), flush=True)
     return outcome == "promoted"
 
 
-def run_scenarios(specs: list[Path]) -> None:
+def run_scenarios(specs: list[Path], mode: str = "l0") -> None:
     truth = groundtruth.GroundTruthDB.open()
     for path in specs:
         spec = runner.load_spec(path)
-        if spec["id"] in done(truth):
+        if spec["id"] in done(truth, mode):
             continue
+        if mode == "agents" and (spec["family"], spec["fault"]["delivery"]) != (
+            "release",
+            "config",
+        ):
+            continue  # D54: only config-delivered releases are recorded under agents-mode
         if not healthy():
             print(json.dumps({"skipped": spec["id"], "reason": "staging not healthy"}), flush=True)
             continue
         print(json.dumps({"start": spec["id"], "at": recorder.iso(datetime.now(UTC))}), flush=True)
         try:
             for attempt in range(1, QUIET_ATTEMPTS + 1):
-                run = runner.Runner(spec)
+                run = runner.Runner(spec, mode=mode)
                 out = run.run()
                 print(json.dumps({"done": spec["id"], "recording": out.name}), flush=True)
                 if "alerts_not_quiet" not in run.observed:
@@ -113,11 +127,18 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("scenarios")
     s.add_argument("--dir", type=Path, default=PILOT, help="folder of specs (default: the pilot)")
+    s.add_argument("--agents", action="store_true", help="record under agents-mode (D54)")
     n = sub.add_parser("normal")
     n.add_argument("--hours", type=float, default=4)
+    m = sub.add_parser("mode")
+    m.add_argument("mode", choices=("agents", "l0"))
+    m.add_argument("--env", default="staging")
     args = parser.parse_args(argv)
-    if args.cmd == "scenarios":
-        run_scenarios(sorted(args.dir.glob("*.yaml")))
+    if args.cmd == "mode":
+        runner.set_canary_mode(args.env, args.mode)
+        print(json.dumps({"mode": runner.canary_mode(deployer.Cluster(args.env).rollout())}))
+    elif args.cmd == "scenarios":
+        run_scenarios(sorted(args.dir.glob("*.yaml")), "agents" if args.agents else "l0")
     else:
         print(run_normal(args.hours))
     return 0
