@@ -2,6 +2,7 @@
 
     python evaluation/monitor_replay.py fit   <folder or zip> [...]   # writes the model file
     python evaluation/monitor_replay.py score <folder or zip> [...] [--out FILE]
+    python evaluation/monitor_replay.py p1    <folder or zip> [...]   # P1 stress thresholds
 
 Several folders are read as one set (the dev recordings and the normal-traffic window arrive
 separately); nothing is copied.
@@ -456,6 +457,66 @@ def score_ci(runs: list[dict], model: CIModel | None) -> dict:
     }
 
 
+# ---------------------------------------------------------------- P1 thresholds
+
+
+def separate(stressed: list[float], normal: list[float]) -> dict:
+    """The rule fixed before the node series were seen: the midpoint between the highest
+    unstressed and the lowest stressed recording when they separate; otherwise the threshold
+    with the best balanced accuracy (ties: the lowest, which claims stress more often, so
+    Release escalates rather than rolls back), and the overlap reported."""
+    if not stressed or not normal:
+        return {"threshold": None, "reason": "needs stressed and unstressed recordings",
+                "n_stressed": len(stressed), "n_normal": len(normal)}  # fmt: skip
+    hi, lo = max(normal), min(stressed)
+    out = {"n_stressed": len(stressed), "n_normal": len(normal), "max_normal": round(hi, 4),
+           "min_stressed": round(lo, 4)}  # fmt: skip
+    if lo > hi:
+        return {**out, "threshold": round((hi + lo) / 2, 3), "separated": True, "errors": 0}
+
+    def balanced(thr: float) -> float:
+        tpr = sum(v >= thr for v in stressed) / len(stressed)
+        tnr = sum(v < thr for v in normal) / len(normal)
+        return (tpr + tnr) / 2
+
+    best = max(sorted(set(stressed + normal)), key=lambda thr: (balanced(thr), -thr))
+    errors = sum(v < best for v in stressed) + sum(v >= best for v in normal)
+    return {**out, "threshold": round(best, 3), "separated": False, "errors": errors}
+
+
+def p1_thresholds(runs: list[dict]) -> dict:
+    """Median node CPU and memory ratio per recording that has node series (D49), grouped by
+    whether the node was stressed (the spec's node_stress, scoring side only)."""
+    rows = []
+    for r in runs:
+        snaps = snapshots(r)
+        cpu = [s["node:cpu_ratio"] for _, s in snaps if "node:cpu_ratio" in s]
+        mem = [s["node:memory_ratio"] for _, s in snaps if "node:memory_ratio" in s]
+        if not cpu and not mem:
+            continue
+        stress = r["spec"].get("node_stress") or {}
+        rows.append(
+            {
+                "recording": r["id"],
+                "stressed": bool(stress),
+                "stress": stress,
+                "cpu_median": statistics.median(cpu) if cpu else None,
+                "memory_median": statistics.median(mem) if mem else None,
+            }
+        )
+
+    def split(key: str) -> tuple[list[float], list[float]]:
+        have = [x for x in rows if x[key] is not None]
+        return [x[key] for x in have if x["stressed"]], [x[key] for x in have if not x["stressed"]]
+
+    return {
+        "label": "dev",
+        "cpu": separate(*split("cpu_median")),
+        "memory": separate(*split("memory_median")),
+        "recordings": rows,
+    }
+
+
 # ---------------------------------------------------------------- fit
 
 
@@ -521,7 +582,7 @@ def score(runs: list[dict], model: MonitorModel) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("fit", "score"))
+    parser.add_argument("command", choices=("fit", "score", "p1"))
     parser.add_argument("recordings", type=Path, nargs="+", help="folders or zips")
     parser.add_argument("--model", type=Path, default=MODEL_FILE)
     parser.add_argument("--out", type=Path, default=OUT)
@@ -531,6 +592,9 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("the same recording id appears twice")
     if args.command == "fit":
         print(fit(runs).save(args.model))
+        return 0
+    if args.command == "p1":
+        print(json.dumps(p1_thresholds(runs), indent=1))
         return 0
     result = score(runs, MonitorModel.load(args.model))
     args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -285,6 +285,40 @@ def test_ci_l0_rule_is_frozen():
     assert mr.streak_runs(other, by_job=False, streak=3) == set()  # per branch
 
 
+def test_p1_rule_separates_or_reports_the_overlap():
+    sep = mr.separate([0.95, 0.99], [0.20, 0.30])
+    assert sep["threshold"] == 0.625 and sep["separated"] and sep["errors"] == 0
+    over = mr.separate([0.5, 0.9, 0.95], [0.2, 0.6])
+    assert not over["separated"] and over["threshold"] == 0.9 and over["errors"] == 1
+    assert mr.separate([0.9], [])["threshold"] is None
+
+
+def test_p1_thresholds_from_recorded_node_series(tmp_path):
+    for rid, busy, stress in (("calm", 1.5, None), ("busy", 7.6, {"cpu_workers": 8})):
+        rec = write_recording(tmp_path, rid, family="release", seconds=300)
+        node = {
+            "node_cpu": [{"metric": {"id": "/"},
+                          "values": [[T0 + k * 15, str(busy * k * 15)] for k in range(21)]}],
+            "node_memory": [{"metric": {"id": "/"},
+                             "values": [[T0 + k * 15, str(3e9)] for k in range(21)]}],
+            "node_allocatable": [
+                {"metric": {"resource": "cpu"}, "values": [[T0 + k * 15, "8"] for k in range(21)]},
+                {"metric": {"resource": "memory"},
+                 "values": [[T0 + k * 15, str(8e9)] for k in range(21)]},
+            ],
+        }  # fmt: skip
+        for name, result in node.items():
+            (rec / "prometheus" / f"{name}.json").write_text(json.dumps({"result": result}))
+        truth = json.loads((rec / "ground_truth.json").read_text())
+        truth["spec"]["node_stress"] = stress
+        (rec / "ground_truth.json").write_text(json.dumps(truth))
+    out = mr.p1_thresholds(mr.load_runs(tmp_path))
+    cpu = {r["recording"]: round(r["cpu_median"], 3) for r in out["recordings"]}
+    assert cpu == {"busy": 0.95, "calm": 0.188}
+    assert out["cpu"]["threshold"] == round((0.1875 + 0.95) / 2, 3) and out["cpu"]["separated"]
+    assert out["memory"]["n_stressed"] == 1 and out["label"] == "dev"
+
+
 def test_held_out_material_is_refused(tmp_path):
     with pytest.raises(ValueError, match="held-out"):
         mr.open_recordings(tmp_path / "heldout" / "x.zip")
