@@ -140,7 +140,7 @@ def test_each_namespace_keeps_its_own_alert_episode(tmp_path):
     assert poll(svc, T + 90, "staging", "prod") == ["staging"]  # a new staging episode only
 
 
-def test_a_held_prod_canary_goes_to_release_then_to_a_human_once(tmp_path):
+def test_a_held_prod_canary_goes_to_release_once(tmp_path):
     raw = {
         "podinfo_requests": requests("prod", "old", 8, 60, 0) + requests("prod", "new", 2, 60, 0)
     }
@@ -148,11 +148,11 @@ def test_a_held_prod_canary_goes_to_release_then_to_a_human_once(tmp_path):
     svc = make(tmp_path, raw, states)
     _, _, step = svc.tick(T)
     assert step["agent"] == "release" and step["event"].environment == "prod"
+    # Release (Step 8) tests per-hash count windows; this event carries 5xx ratios only, so it
+    # hands the canary to a human (the per-look count windows come with the release-looks PR)
     (p,) = step["output"].proposals
-    assert p.action == "rollout_promote" and p.environment == "prod"
-    (d,) = step["decisions"]
-    assert d.outcome == "ask_human" and d.human_verdict == "approved"  # medium in prod (D23)
-    assert step["results"][0].success  # dry run
+    assert p.action == "escalate_to_human" and p.environment == "prod"
+    assert [d.outcome for d in step["decisions"]] == ["execute"]  # low tier
     assert len(svc.tick(T)) == 2  # the same held canary is not asked about again
 
 
@@ -164,7 +164,7 @@ def test_a_canary_that_is_not_held_is_left_to_its_steps(tmp_path):
     assert len(make(tmp_path, raw, states).tick(T)) == 2  # the two Monitor ticks only
 
 
-def test_a_monitor_incident_mid_canary_gives_release_the_canary_split(tmp_path):
+def test_a_monitor_incident_mid_canary_goes_to_release_with_the_canary_split(tmp_path):
     raw = {
         "podinfo_requests": requests("staging", "old", 8, 60, 0)
         + requests("staging", "new", 2, 30, 30),
@@ -175,8 +175,8 @@ def test_a_monitor_incident_mid_canary_gives_release_the_canary_split(tmp_path):
     out, _ = svc.tick(T)  # not held: no rollout_step, but the tick is in_canary
     assert out["agent"] == "release"
     assert out["event"].payload["metrics"]["canary_5xx_ratio"] == pytest.approx(0.5)
-    assert [p.action for p in out["output"].proposals] == ["rollout_abort"]  # not a promotion
-    assert out["decisions"][0].human_verdict == "denied" and out["results"] == []
+    # Ratios, not Release's count windows: a human decides, never a promotion
+    assert [p.action for p in out["output"].proposals] == ["escalate_to_human"]
 
 
 def test_rollout_state_from_prometheus():
@@ -200,4 +200,4 @@ def test_report_prints_one_line_per_incident(tmp_path, capsys):
     svc = make(tmp_path, raw, {"staging": (False, "o", "o"), "prod": (True, "new", "old")})
     report(svc.tick(T)[2])
     line = json.loads(capsys.readouterr().out)
-    assert line["proposals"] == ["rollout_promote"] and line["gate"] == ["ask_human/approved"]
+    assert line["proposals"] == ["escalate_to_human"] and line["gate"] == ["execute"]
