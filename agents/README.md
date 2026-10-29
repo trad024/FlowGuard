@@ -13,7 +13,8 @@ fails if it does (D25).
 | `agent_io.py` | What every agent receives and returns (`AgentInput`, `AgentOutput`) |
 | `monitor.py` | Monitor (Step 6, DSO1): L0 alert rules; L1+ rolling z-score then Isolation Forest (runtime), duration and failure-streak detector (CI); P1 stress answers; proposes no action |
 | `series.py` | Prometheus series to the Monitor's per-namespace and per-pod features, live and in replay; evidence references |
-| `stubs.py` | Stub agents with the real interfaces (Steps 7 to 10 replace the logic); re-exports the real Monitor |
+| `release.py` | Release (Step 8, DSO3): per-hash count windows from Prometheus, an always-valid sequential test (5xx and requests over 500 ms) with an absolute floor; continue, hold, roll back or escalate; P1 before any rollback at L4+; the rollout_step event, live and in replay |
+| `stubs.py` | Stub agents with the real interfaces (Steps 7, 9 and 10 replace the logic); re-exports the real Monitor and Release |
 | `incidents.py` | Shared incident record (D5): incidents, evidence posts, agent requests |
 | `gate.py` | Risk gate: rules 0 to 7, first match wins (D36 and v1), P3 conflicts, v1 risk score |
 | `calibration.py` | Split conformal confidence for the gate (D9) |

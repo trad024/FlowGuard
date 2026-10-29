@@ -29,6 +29,10 @@ def make(tmp_path, name="L3", approve=True, live=False, **kw):
     return orch
 
 
+# A canary 10% 5xx (12 of 120) against a clean stable: Release's per-hash count windows
+WORSE = {"windows": [[60, 6, 0, 240, 0, 0], [60, 6, 0, 240, 0, 0]]}
+
+
 def event(kind, env="staging", **payload):
     return Event(id="e-1", type=kind, service="podinfo", environment=env, payload=payload)
 
@@ -79,7 +83,7 @@ def test_c_monitor_incident_goes_to_release_mid_canary_else_diagnose(tmp_path):
             "metrics_tick",
             alerts=["HighErrorRatio"],
             in_canary=True,
-            metrics={"canary_5xx_ratio": 0.08, "stable_5xx_ratio": 0.0},
+            metrics=WORSE,
         )
     )
     assert canary["agent"] == "release" and canary["output"].proposals[0].action == "rollout_abort"
@@ -118,7 +122,7 @@ def test_a_runtime_detection_carries_its_score(tmp_path):
 
 
 def test_d_p1_holds_a_rollback_when_the_node_is_under_stress(tmp_path):
-    metrics = {"canary_5xx_ratio": 0.05, "stable_5xx_ratio": 0.0, "node_cpu_ratio": 0.97}
+    metrics = {**WORSE, "node_cpu_ratio": 0.97}
     l4 = make(tmp_path / "l4", "L4")
     out = l4.handle(event("rollout_step", metrics=metrics))
     assert out["output"].proposals[0].action == "escalate_to_human"
@@ -189,15 +193,11 @@ def test_a_p1_question_opens_the_incident_before_it_is_recorded(tmp_path):
 
 def test_medium_actions_go_to_the_approver_and_denials_do_not_run(tmp_path):
     denied = make(tmp_path / "d", approve=False)
-    out = denied.handle(
-        event("rollout_step", metrics={"canary_5xx_ratio": 0.05, "stable_5xx_ratio": 0.0})
-    )
+    out = denied.handle(event("rollout_step", metrics=WORSE))
     (d,) = out["decisions"]
     assert d.outcome == "ask_human" and d.human_verdict == "denied" and out["results"] == []
     approved = make(tmp_path / "a", approve=True)
-    out = approved.handle(
-        event("rollout_step", metrics={"canary_5xx_ratio": 0.05, "stable_5xx_ratio": 0.0})
-    )
+    out = approved.handle(event("rollout_step", metrics=WORSE))
     assert out["decisions"][0].human_verdict == "approved" and out["results"][0].success
     assert audit_metrics.executed_without_required_approval(approved.audit) == 0
 
@@ -206,11 +206,7 @@ def test_l0_has_no_gate_and_never_runs_live(tmp_path):
     with pytest.raises(ValueError, match="dry-run"):
         make(tmp_path / "live", "L0", live=True)
     l0 = make(tmp_path, "L0")
-    out = l0.handle(
-        event(
-            "rollout_step", env="prod", metrics={"canary_5xx_ratio": 0.05, "stable_5xx_ratio": 0.0}
-        )
-    )
+    out = l0.handle(event("rollout_step", env="prod", metrics=WORSE))
     assert out["decisions"][0].reason == "L0: no gate" and out["results"][0].success
 
 
