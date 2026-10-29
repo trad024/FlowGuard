@@ -1,0 +1,9 @@
+# D44 node-stress dev check: does stress visibly distort a good canary's metrics?
+id: ns-good-w00
+family: release
+description: 'control: good release, no node stress'
+environment: staging
+fault: {kind: none, delivery: config}
+timing: {warmup_s: 45, observe_s: 600, cooldown_s: 20}
+load: {rate: 10}
+ground_truth: {bad_release: false, expected_l0: promote}

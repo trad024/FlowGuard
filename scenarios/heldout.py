@@ -124,6 +124,14 @@ def draw(spec: dict, rng: random.Random) -> float | int:
     raise ValueError(f"unknown distribution {spec['dist']!r}")
 
 
+def node_stress(cfg: dict, rng: random.Random) -> dict:
+    """Busy-loop workers and the batch pod's CPU request (D44: its weight against podinfo's)."""
+    out = {"cpu_workers": draw(cfg["cpu_workers"], rng)}
+    if "cpu_request" in cfg:
+        out["cpu_request"] = f"{draw(cfg['cpu_request'], rng):.1f}"
+    return out
+
+
 def weighted(kinds: dict, rng: random.Random) -> str:
     names = sorted(kinds)
     return rng.choices(names, weights=[kinds[k] for k in names])[0]
@@ -208,7 +216,7 @@ def scenario(seed: str, family: str, index: int, cfg: dict, prereg: dict | None 
     if stress:  # good releases under stress must be promoted, bad ones still rolled back
         share = stress["share_of_none"] if kind == "none" else stress["share_of_bad"]
         if rng.random() < share:
-            spec["node_stress"] = {"cpu_workers": draw(stress["cpu_workers"], rng)}
+            spec["node_stress"] = node_stress(stress, rng)
     for key in ("timing", "load"):
         if key in cfg:
             spec[key] = dict(cfg[key])
@@ -251,7 +259,7 @@ def pilot_specs(prereg: dict, seed: str, per_cell: int) -> list[dict]:
             "ground_truth": ground_truth(family, fault, band),
         }
         if stressed:
-            spec["node_stress"] = {"cpu_workers": draw(cfg["node_stress"]["cpu_workers"], rng)}
+            spec["node_stress"] = node_stress(cfg["node_stress"], rng)
         for key in ("timing", "load"):
             if key in cfg:
                 spec[key] = dict(cfg[key])

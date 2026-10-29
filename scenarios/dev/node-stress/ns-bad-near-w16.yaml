@@ -1,0 +1,10 @@
+# D44 node-stress dev check: a bad release (near band) under stress must still be rolled back
+id: ns-bad-near-w16
+family: release
+description: 'D44 check: http_errors near band under 16 CPU workers'
+environment: staging
+fault: {kind: http_errors, delivery: config, error_rate: 0.012}
+node_stress: {cpu_workers: 16}
+timing: {warmup_s: 45, observe_s: 600, cooldown_s: 20}
+load: {rate: 10}
+ground_truth: {bad_release: true, expected_l0: abort, band: near}

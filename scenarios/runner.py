@@ -713,7 +713,9 @@ class Runner:
         log = self.loadgen.start(self.run_id)
         try:
             if stress:
-                self.start_stress(int(stress.get("cpu_workers", 4)))
+                self.start_stress(
+                    int(stress.get("cpu_workers", 4)), str(stress.get("cpu_request", "10m"))
+                )
             time.sleep(self.timing["warmup_s"])
             # Same image and command; only the release Secret differs, for good releases too
             settings = release_settings(self.spec["fault"])
@@ -776,9 +778,12 @@ class Runner:
         except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as exc:
             self.event("gc_error", detail=str(exc)[-300:])
 
-    def start_stress(self, workers: int) -> None:
+    def start_stress(self, workers: int, cpu_request: str = "10m") -> None:
+        """A batch job on the node: `workers` busy loops. Its CPU request sets its weight
+        against podinfo's (10m each), so a large request is a noisy neighbour (D44)."""
         pod = json.loads(json.dumps(STRESS_POD))
         pod["metadata"]["name"] = f"batch-worker-{self.run_id[2:]}"
+        pod["spec"]["containers"][0]["resources"]["requests"]["cpu"] = cpu_request
         pod["spec"]["containers"][0]["command"][2] = (
             f"for i in $(seq {workers}); do while :; do :; done & done; wait"
         )
@@ -791,8 +796,12 @@ class Runner:
             f"pod/{pod['metadata']['name']}",
             "--timeout=120s",
         )
-        self.truth["node_stress"] = {"cpu_workers": workers, "pod": pod["metadata"]["name"]}
-        self.event("node_stress_started", workers=workers)
+        self.truth["node_stress"] = {
+            "cpu_workers": workers,
+            "cpu_request": cpu_request,
+            "pod": pod["metadata"]["name"],
+        }
+        self.event("node_stress_started", workers=workers, cpu_request=cpu_request)
 
     def stop_stress(self) -> None:
         kubectl(

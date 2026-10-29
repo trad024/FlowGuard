@@ -111,12 +111,13 @@ def run_normal(hours: float, env: str = "staging") -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("scenarios")
+    s = sub.add_parser("scenarios")
+    s.add_argument("--dir", type=Path, default=PILOT, help="folder of specs (default: the pilot)")
     n = sub.add_parser("normal")
     n.add_argument("--hours", type=float, default=4)
     args = parser.parse_args(argv)
     if args.cmd == "scenarios":
-        run_scenarios(sorted(PILOT.glob("*.yaml")))
+        run_scenarios(sorted(args.dir.glob("*.yaml")))
     else:
         print(run_normal(args.hours))
     return 0

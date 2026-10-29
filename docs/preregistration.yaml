@@ -102,11 +102,15 @@ families:
             jitter_ms: {dist: int, low: 0, high: 300}
             fraction: {dist: log_uniform, low: 0.03, high: 1.0}
     node_stress:                 # H4: one view (CPU, client latency) misleads
-      # D44: rescaled before freezing so that stress visibly distorts the canary's metrics
-      # on dev (values below are the 4b ones until the dev check is done)
+      # D44 rescale, from the dev check of 2026-10-29 (8 runs, recordings with node series):
+      # busy loops alone (2 to 32 workers, 10m request) hold the 8-CPU node at 99% but leave
+      # client p99 at 28 to 30 ms, as unstressed (28 ms): podinfo's 10m request keeps its CPU
+      # share. The batch pod's CPU request is what distorts: 4 CPUs gave p99 52 ms, 7 CPUs
+      # 78 to 88 ms (stable and canary alike), no 5xx from stress alone
       share_of_none: 0.25        # good releases under stress: must be promoted
       share_of_bad: 0.25         # bad releases under stress: must still be rolled back
-      cpu_workers: {dist: int, low: 2, high: 6}
+      cpu_workers: {dist: int, low: 8, high: 16}        # at least one per core: node saturated
+      cpu_request: {dist: uniform, low: 4.0, high: 7.0}  # CPUs requested by the batch pod
     timing: {warmup_s: 30, observe_s: 600, cooldown_s: 20}
     load: {rate: 10}
 

@@ -117,6 +117,16 @@ def test_every_band_and_node_stress_on_good_and_bad_releases(prereg):
         assert {"below", "near", "above"} <= bands, family
     stressed = [s for s in specs if "node_stress" in s]
     assert {s["ground_truth"]["bad_release"] for s in stressed} == {True, False}
+    for s in stressed:  # D44 rescale: a saturated node and a batch pod with a large request
+        assert 8 <= s["node_stress"]["cpu_workers"] <= 16
+        assert 4.0 <= float(s["node_stress"]["cpu_request"]) <= 7.0
+        assert runner_valid(s)
+
+
+def runner_valid(spec) -> bool:
+    import runner
+
+    return runner.validate_spec(spec) == []
 
 
 def test_run_order_is_a_seeded_permutation(prereg):

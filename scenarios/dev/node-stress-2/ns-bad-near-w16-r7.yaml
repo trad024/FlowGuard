@@ -1,0 +1,10 @@
+# D44 node-stress dev check: a bad release (near band) under a noisy neighbour
+id: ns-bad-near-w16-r7
+family: release
+description: 'D44 check: http_errors near band under 16 CPU workers requesting 7 CPUs'
+environment: staging
+fault: {kind: http_errors, delivery: config, error_rate: 0.012}
+node_stress: {cpu_workers: 16, cpu_request: '7'}
+timing: {warmup_s: 45, observe_s: 600, cooldown_s: 20}
+load: {rate: 10}
+ground_truth: {bad_release: true, expected_l0: abort, band: near}

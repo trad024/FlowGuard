@@ -533,3 +533,23 @@ def test_branch_only_families_do_not_wait_for_cluster_alerts(monkeypatch, stores
         runner.deployer, "load_config", lambda p: type("C", (), {"repo": "", "token": ""})
     )
     assert r.run()["evaluation"]["valid"] is True
+
+
+def test_node_stress_sets_the_batch_pods_cpu_request(monkeypatch, stores):
+    """D44: the stress pod's CPU request sets its weight against podinfo's."""
+    applied = []
+    monkeypatch.setattr(
+        runner, "kubectl", lambda *a, **kw: applied.append(kw.get("input_text")) or ""
+    )
+    r = runner.Runner(spec(), run_id="r-0000abcd")
+    r.start_stress(12, "6")
+    pod = json.loads(next(x for x in applied if x))
+    container = pod["spec"]["containers"][0]
+    assert container["resources"]["requests"]["cpu"] == "6"
+    assert "seq 12" in container["command"][2]
+    assert r.truth["node_stress"] == {
+        "cpu_workers": 12,
+        "cpu_request": "6",
+        "pod": "batch-worker-0000abcd",
+    }
+    assert runner.STRESS_POD["spec"]["containers"][0]["resources"]["requests"]["cpu"] == "10m"

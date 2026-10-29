@@ -31,7 +31,7 @@ fault:
   latency_ms: 0                  # added to faulty requests
   jitter_ms: 0                   # plus a uniform 0..jitter_ms
   fraction: 1.0                  # share of requests that are faulty
-node_stress: {cpu_workers: 6}    # optional: busy-loop pod on the node during the scenario
+node_stress: {cpu_workers: 12, cpu_request: '5.5'}  # optional: busy-loop batch pod; its CPU request sets its weight (D44)
 intensity: 0.05                  # the graded knob, for the analysis
 timing: {warmup_s: 30, observe_s: 600, cooldown_s: 20}
 load: {rate: 10}                 # requests per second during the scenario

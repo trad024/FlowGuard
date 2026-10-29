@@ -1,0 +1,10 @@
+# D44 node-stress dev check: busy loops with a large CPU request (a noisy neighbour)
+id: ns-good-w16-r7
+family: release
+description: 'D44 check: good release under 16 CPU workers requesting 7 CPUs'
+environment: staging
+fault: {kind: none, delivery: config}
+node_stress: {cpu_workers: 16, cpu_request: '7'}
+timing: {warmup_s: 45, observe_s: 600, cooldown_s: 20}
+load: {rate: 10}
+ground_truth: {bad_release: false, expected_l0: promote}
