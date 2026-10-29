@@ -1,12 +1,14 @@
 """Live agent service: the one process on the laptop that runs the agents (blueprint section 5).
 It polls; nothing pushes to it (D1).
 
-    python -m flowguard.service --level L1 [--live] [--env staging] [--watch staging,prod]
+    python -m flowguard.service --level L1 [--live] [--watch staging,prod]
         [--interval 30] [--prometheus http://localhost:9090] [--approval-port 8765]
 
 Every interval:
-  1. Monitor poll (workflow C): the Prometheus series of both namespaces as one metrics_tick
-     for `--env`, marked in_canary while that environment's Rollout is mid-canary.
+  1. Monitor poll (workflow C): one metrics_tick per watched namespace, with that namespace's
+     series, its L0 alerts and the node rows, tagged with the namespace as its environment (an
+     incident is followed up where it happened) and marked in_canary while its Rollout is
+     mid-canary.
   2. Canary hold (workflow D): each watched Rollout that is paused mid-canary gives one
      rollout_step for its canary hash, with the canary's and the stable pods' 5xx ratios over
      the last minute (per-pod counters summed by pod-template hash, D21).
@@ -98,31 +100,43 @@ def canary_split(idx: series.Index, t: float, namespace: str, state: RolloutStat
     }
 
 
+def scope(snapshot: dict[str, float], namespace: str) -> dict[str, float]:
+    """One namespace's rows of a snapshot (itself and its pods), plus the node rows."""
+    out = {}
+    for key, value in snapshot.items():
+        entity = (series.split_key(key) or ("",))[0].split("/")[0]
+        if entity in (namespace, "node"):
+            out[key] = value
+    return out
+
+
 @dataclass
 class Service:
     orch: Orchestrator
     source: series.PrometheusSource
-    environment: str = "staging"
     watch: tuple[str, ...] = ("staging", "prod")
     asked: set[tuple[str, str]] = field(default_factory=set)  # (namespace, canary hash)
 
     def tick(self, t: float | None = None) -> list[dict]:
-        """One poll: the Monitor's tick, then a rollout_step per newly held canary."""
+        """One poll: a Monitor tick per watched namespace, then a rollout_step per newly held
+        canary."""
         t = time.time() if t is None else t
         idx = self.source.fetch(t)
         states = {ns: rollout_state(idx, t, ns) for ns in self.watch}
-        own = states.get(self.environment) or rollout_state(idx, t, self.environment)
         snapshot = series.snapshot(idx, t)
-        if own.mid_canary:  # Release, if the Monitor hands it an incident, compares these
-            snapshot.update(canary_split(idx, t, self.environment, own))
-        tick = tick_event(
-            snapshot,
-            series.firing(idx, t),
-            t,
-            environment=self.environment,
-            in_canary=own.mid_canary,
-        )
-        results = [self.orch.handle(tick)]
+        results = []
+        for ns, state in states.items():
+            mine = scope(snapshot, ns)
+            if state.mid_canary:  # Release, if the Monitor hands it an incident, compares these
+                mine.update(canary_split(idx, t, ns, state))
+            tick = tick_event(
+                mine,
+                series.firing(idx, t, namespace=ns),
+                t,
+                environment=ns,
+                in_canary=state.mid_canary,
+            )
+            results.append(self.orch.handle(tick))
         for ns, state in states.items():
             if not (state.paused and state.mid_canary) or (ns, state.canary) in self.asked:
                 continue
@@ -172,7 +186,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--level", default="L1", choices=("L0", "L1", "L2", "L3", "L4", "L5"))
     parser.add_argument("--live", action="store_true", help="the executor acts (else dry run)")
-    parser.add_argument("--env", default="staging", choices=("staging", "prod"))
     parser.add_argument("--watch", default="staging,prod")
     parser.add_argument("--interval", type=float, default=30.0)  # NFR: detect within 2 polls
     parser.add_argument("--prometheus", default="http://localhost:9090")
@@ -192,7 +205,6 @@ def main(argv: list[str] | None = None) -> int:
         series.PrometheusSource(
             args.prometheus, selectors={**series.SELECTORS, **ROLLOUT_SELECTORS}
         ),
-        environment=args.env,
         watch=tuple(n for n in args.watch.split(",") if n),
     )
     print(

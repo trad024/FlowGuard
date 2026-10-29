@@ -285,11 +285,12 @@ def by_hash(idx: Index, t: float, namespace: str) -> dict[str, tuple[float, floa
     return {h: (c[0], c[1]) for h, c in out.items()}
 
 
-def firing(idx: Index, t: float, step: float = 15.0) -> list[str]:
-    """The L0 alerts Prometheus had firing in (t - step, t], from the recorded ALERTS series."""
+def firing(idx: Index, t: float, step: float = 15.0, namespace: str = "") -> list[str]:
+    """The L0 alerts Prometheus had firing in (t - step, t], from the recorded ALERTS series;
+    only one namespace's when given (every L0 rule keeps the namespace label)."""
     names = set()
     for s in idx.get("alerts", []):
-        if s.labels.get("alertstate") == "firing":
+        if s.labels.get("alertstate") == "firing" and _where(s.labels, namespace):
             times, _ = s.between(t - step + 1e-6, t)
             if times:
                 names.add(s.labels.get("alertname", ""))

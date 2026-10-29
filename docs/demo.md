@@ -48,7 +48,8 @@ service reads only Prometheus, as every agent does (D1). Rollout state comes fro
 series: pods up per pod-template hash, ReplicaSet creation times from kube-state-metrics, and
 Argo Rollouts' `rollout_info` phase from the controller, scraped by the `argo-rollouts` job.
 Only the executor writes to the cluster. It then
-polls every 30 s and prints one line for each incident it opens. While a proposal waits for a
+polls every 30 s and prints one line for each incident it opens. Each namespace (staging, prod)
+is its own Monitor tick, so an incident is tagged and followed up in the namespace it came from. While a proposal waits for a
 human, the loop waits too, for at most 10 minutes; no answer counts as a denial.
 
 Without `--live` the executor is a dry run: everything happens except the write to the cluster.
