@@ -44,9 +44,17 @@ KINDS = ("namespace", "pod")
 # a hundred requests, one histogram step, 1% of the limit, one restart)
 GUARD = {"error_ratio": 0.01, "p99_s": 0.05, "memory_ratio": 0.01, "restarts": 1.0}
 MODEL_FILE = Path(__file__).resolve().parent / "models" / "monitor.json"
-# P1 stress thresholds: provisional (the recordings hold no node series yet to set them on)
-P1_CPU = 0.85
+# P1 stress thresholds, frozen (agents/tests/test_monitor.py). Rule, fixed before the node series
+# were seen: per recording, the median ratio against allocatable; the midpoint between the
+# highest unstressed and the lowest stressed recording when they separate.
+#   cpu: 0.507, from recordings-2 (D44 node stress): unstressed medians 0.022 and 0.023 (2),
+#        stressed 0.990 to 0.992 (7), fully separated
+#   memory: 0.90, provisional: every recorded node stress is CPU stress, so no recording is
+#        memory-stressed and the rule has nothing to separate (medians 0.154 to 0.165 throughout)
+#   restarts: any restart of a non-canary pod in the last 5 minutes (none in any recording)
+P1_CPU = 0.507
 P1_MEMORY = 0.90
+P1_RESTARTS = 1.0
 FRESH_S = 60  # two polling cycles: an older snapshot does not describe "right now"
 
 
@@ -567,7 +575,9 @@ class Monitor:
         out = {}
         for key, value in view.items():
             parts = series.split_key(str(key))
-            if not parts or parts[1] != "restarts" or "/" not in parts[0] or float(value) <= 0:
+            if not parts or parts[1] != "restarts" or "/" not in parts[0]:
+                continue
+            if float(value) < P1_RESTARTS:
                 continue
             pod = parts[0].split("/", 1)[1]
             if canary is None or series.pod_hash(pod) != canary:

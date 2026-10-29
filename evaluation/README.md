@@ -74,6 +74,53 @@ on the normal-traffic half the model never saw, plus the paired L0 vs L1 compari
 McNemar, bootstrap interval of the MTTD gain). Dev recall is in-sample (the grid was tuned on
 those incidents); H1 is tested on the held-out set at Step 11.
 
+### DSO1 on the dev recordings (dev, in-sample, 2026-10-29)
+
+The model in `agents/flowguard/models/monitor.json` (frozen, its SHA-256 pinned in
+`agents/tests/test_monitor.py`) was fitted on the first half of the 4-hour normal-traffic
+window r-24e489bc; the grid chose z threshold 5.0, forest quantile 0.99, persistence 1 **on the
+same 18 runtime incidents it is scored on**. False alerts are scored on the other half only:
+**2 hours the model never saw**. Recordings: the first dev delivery (runtime incidents, CI),
+recordings-2 (8 releases, no runtime incident) and r-24e489bc; r-57130916 is invalid (host
+suspended) and the 4 runtime recordings made before the alert states were recorded are not
+scored (D50).
+
+| Runtime | L0 (frozen alert rules) | L1 (L0 + detectors) |
+|---|---|---|
+| Recall | 10/18, 55.6% (33.7 to 75.4) | 17/18, 94.4% (74.2 to 99.0) |
+| above | 6/6 | 6/6 |
+| near | 3/6 | 6/6 |
+| below | 1/6 | 5/6 |
+| Median MTTD | 73.8 s | 15.0 s |
+| False alerts per hour (exact Poisson 95%) | 0 in 2.0 h: 0 (0 to 1.85) | 0 in 2.0 h: 0 (0 to 1.85) |
+
+Paired: 7 incidents only L1 detects, 0 only L0, exact McNemar p = 0.016; median MTTD gain on
+the 10 both detect 54.3 s (bootstrap 95%: 9.3 to 65.8 s).
+
+| Sensitivity: without the 3 incidents that started under a leftover L0 alert | L0 | L1 |
+|---|---|---|
+| Recall | 7/15, 46.7% (24.8 to 69.9) | 14/15, 93.3% (70.2 to 98.8) |
+| Paired | McNemar 7 vs 0, p = 0.016; MTTD gain 58.3 s (52.3 to 73.3) | |
+
+CI: the one slow pipeline run is caught at L0 and L1 alike (MTTD 499 s from the run's first
+job), 0 false flags in 2 runs; the CI detector needs 5 runs of history and has 2, so it cannot
+fire yet.
+
+Caveats: recall and MTTD are in-sample (the grid was chosen on these 18 incidents); the false
+alert bound (1.85 per hour) is above DSO1's target of 1 per hour, which 2 unseen hours cannot
+show either way (0 alerts over about 3.7 unseen hours would); every number is per dev data, H1
+is tested on the held-out set.
+
+P1 stress thresholds (`agents/flowguard/monitor.py`, frozen), set by the rule fixed before the
+node series were seen (per recording, the median ratio against allocatable; the midpoint
+between the highest unstressed and the lowest stressed recording when they separate) on the
+recordings with node series (`monitor_replay.py p1`): CPU 0.507 (unstressed medians 0.022 and
+0.023, stressed 0.990 to 0.992, separated); memory stays 0.90, provisional (every recorded
+node stress is CPU stress, so no recording is memory-stressed and memory medians are 0.154 to
+0.165 throughout); restarts: any restart of a non-canary pod in the last 5 minutes (none in any
+recording). One unstressed release (r-68579c3d) peaks at 0.992 CPU for a moment: P1 answers from
+the latest poll, so such a peak reads as stress.
+
 ## DSO3 by replay (D15, step 8)
 
 `release_replay.py` runs Release on the dev release recordings (folders or zips; held-out
