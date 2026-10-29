@@ -1,0 +1,6 @@
+{
+  "model": "distilbert/distilbert-base-uncased",
+  "revision": "12040accade4e8a0f71eabdb258fecc2e7e948be",
+  "split_sha256": "a1003ffa6cfefe6f80588ce22f7cbac3231e4cf070580c893b74dcb9ccaa2beb",
+  "status": "Selected final run 2 by validation macro-F1; no further runs; see results/run-comparison.json"
+}

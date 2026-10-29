@@ -1,0 +1,9 @@
+{
+  "torch": "2.5.1+cpu",
+  "transformers": "4.46.3",
+  "safetensors": "0.4.5",
+  "psutil": "6.1.0",
+  "tokenizers": "0.20.3",
+  "huggingface-hub": "0.36.2",
+  "numpy": "2.4.6"
+}

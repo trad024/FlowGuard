@@ -141,6 +141,8 @@ def stores(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOWGUARD_AUDIT_DB", str(tmp_path / "audit.db"))
     monkeypatch.setenv("FLOWGUARD_GROUNDTRUTH_DB", str(tmp_path / "groundtruth.db"))
     monkeypatch.setattr(runner, "RUNS", tmp_path)
+    monkeypatch.setattr(runner.recorder, "RUN_LOCK", tmp_path / "state" / "run.lock")
+    monkeypatch.setattr(runner, "results_in_prometheus", lambda: 0)  # no Prometheus in tests
     return tmp_path
 
 
@@ -243,6 +245,38 @@ class FakeCluster:
         return ["podinfo-release-old"]
 
 
+def test_waiting_on_a_release_shows_every_status_to_the_step_log(tmp_path):
+    def state(index, **status):
+        return {
+            "metadata": {"generation": 2},
+            "spec": {"template": {"spec": {"containers": [{"image": "img:2"}]}},
+                     "strategy": {"canary": {"steps": [{"setWeight": 20}, {"pause": {}}]}}},
+            "status": {"currentStepIndex": index, "currentPodHash": "new", "stableRS": "old",
+                       "observedGeneration": "2", **status},
+        }  # fmt: skip
+
+    class Sequence:
+        states = iter([state(0), state(1, phase="Paused"), state(1, abort=True, phase="Degraded")])
+
+        def rollout(self):
+            return next(self.states)
+
+    log = runner.recorder.RolloutStepLog(tmp_path / "steps.jsonl", "staging")
+    seen, slept = [], []
+    clock = iter(range(0, 100))
+    outcome = runner.wait_outcome(
+        Sequence(),
+        "img:2",
+        60,
+        sleep=slept.append,
+        clock=lambda: next(clock),
+        watch=lambda r: seen.append(log.observe(r)),
+    )
+    assert outcome == "aborted" and len(seen) == 3 and slept == [runner.ROLLOUT_POLL_S] * 2
+    rows = [json.loads(line) for line in (tmp_path / "steps.jsonl").read_text().splitlines()]
+    assert [r["changes"][0] for r in rows] == ["step", "step", "abort"]
+
+
 def test_an_aborted_restore_is_retried_once_with_live_load(monkeypatch, stores):
     r = runner.Runner(spec(), run_id="r-0000abcd")
     r.cluster = FakeCluster()
@@ -250,7 +284,7 @@ def test_an_aborted_restore_is_retried_once_with_live_load(monkeypatch, stores):
     calls = []
     monkeypatch.setattr(runner, "patch_template", lambda *a: calls.append(("patch", a[3])))
     monkeypatch.setattr(runner, "retry_rollout", lambda ns: calls.append("retry"))
-    monkeypatch.setattr(runner, "wait_outcome", lambda *a: next(outcomes))
+    monkeypatch.setattr(runner, "wait_outcome", lambda *a, **k: next(outcomes))
 
     class DeadLoad:
         def alive(self):
@@ -288,7 +322,7 @@ def test_config_release_keeps_the_injection_out_of_the_audit_log(monkeypatch, st
 
     monkeypatch.setattr(runner.deployer, "create_release_settings", create)
     monkeypatch.setattr(runner, "patch_template", lambda *a: patches.append(a))
-    monkeypatch.setattr(runner, "wait_outcome", lambda *a: "aborted")
+    monkeypatch.setattr(runner, "wait_outcome", lambda *a, **k: "aborted")
     monkeypatch.setattr(runner, "retry_rollout", lambda ns: retries.append(ns))
     monkeypatch.setattr(runner.time, "sleep", lambda s: None)
     retries = []
@@ -533,6 +567,41 @@ def test_branch_only_families_do_not_wait_for_cluster_alerts(monkeypatch, stores
         runner.deployer, "load_config", lambda p: type("C", (), {"repo": "", "token": ""})
     )
     assert r.run()["evaluation"]["valid"] is True
+
+
+def test_a_cluster_run_refuses_to_start_with_results_in_prometheus_or_a_held_lock(
+    monkeypatch, stores
+):
+    """D25: the agents read this Prometheus; no scored result may be in it during a run."""
+    r = runner.Runner(spec(), run_id="r-0000abcd")
+    started = []
+    monkeypatch.setattr(r, "_run", lambda: started.append(runner.recorder.RUN_LOCK.is_file()))
+    monkeypatch.setattr(runner, "results_in_prometheus", lambda: 12)
+    with pytest.raises(RuntimeError, match="12 flowguard_result series"):
+        r.run()
+    assert started == [] and not runner.recorder.RUN_LOCK.exists()
+    monkeypatch.setattr(runner, "results_in_prometheus", lambda: 0)
+    r.run()
+    assert started == [True] and not runner.recorder.RUN_LOCK.exists()  # held, then released
+    runner.recorder.RUN_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    runner.recorder.RUN_LOCK.write_text('{"run_id": "r-other"}')
+    with pytest.raises(RuntimeError, match="r-other"):
+        r.run()
+    assert started == [True] and runner.recorder.RUN_LOCK.exists()  # someone else's lock stays
+
+
+def test_the_results_query_counts_flowguard_result_series(monkeypatch):
+    seen = []
+
+    def http_json(url):
+        seen.append(url)
+        return {"data": {"result": [{"value": [1, "7"]}]}}
+
+    monkeypatch.setattr(runner.recorder, "http_json", http_json)
+    assert runner.results_in_prometheus("http://prom:9090") == 7
+    assert "flowguard_result" in seen[0] and "__name__" in seen[0]
+    monkeypatch.setattr(runner.recorder, "http_json", lambda url: {"data": {"result": []}})
+    assert runner.results_in_prometheus() == 0
 
 
 def test_node_stress_sets_the_batch_pods_cpu_request(monkeypatch, stores):

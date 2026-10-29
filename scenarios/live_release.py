@@ -11,6 +11,8 @@ approver), and on approval the live executor patches the Rollout back to the pre
 revision. The same proposal and decision are then handed to the executor again, which must
 refuse them (already executed, D37). The audit rows of the proposal are printed. Without an
 approval the template is restored by the harness, so staging is never left aborted.
+Kept as the one-off D44 script; for anything new, an aborted Rollout is followed up by the
+agent service (`flowguard.service`, its aborted-Rollout path), which supersedes this one.
 """
 
 from __future__ import annotations
