@@ -89,6 +89,7 @@ def test_a_long_log_is_cut_to_the_character_budget_keeping_the_end():
 
 
 def test_example_logs_are_cut_too():
+    assert diagnose.EXAMPLE_CHARS == 1_000 and diagnose.MAX_EXAMPLES == 3  # D51
     ex = diagnose.Example("A" * 10_000 + "TAIL", "code", "open_fix_pr")
     user = diagnose.messages("boom", [ex])[1]["content"]
     assert "TAIL" in user and "A" * (diagnose.EXAMPLE_CHARS + 1) not in user

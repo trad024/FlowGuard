@@ -564,8 +564,11 @@ llm:
   providers: Groq only; OpenRouter (D40) dropped (D46)
   prompt_experiments: may use a second free Groq model; validation and final runs use the pinned model (D39)
   request_budget: >-
-    the log shown to the model is cut to 14,000 characters (its end kept) and each L3 example
-    to 2,000, so one request stays under the free tier's 8,000 tokens per minute. Line
+    the log shown to the model is cut to 14,000 characters (its end kept), each of L3's 3
+    examples to 1,000 and the answer to 600 tokens (D51), so one request stays under the free
+    tier's 8,000 tokens per minute: the longest L3 request (the longest sampled LogChunks log
+    with the 3 longest training examples) is 18,619 characters, about 6,500 prompt tokens at
+    the 2.87 characters per token measured on 74 Groq calls. Line
     numbers follow the terminal view (newline-split, text after the last carriage return),
     as the LogChunks targets do (D48)
   model: openai/gpt-oss-120b     # pinned; logged per call; never mixed within one result set

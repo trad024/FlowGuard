@@ -52,7 +52,7 @@ class Settings:
     model: str = "openai/gpt-oss-120b"
     temperature: float = 0.0
     reasoning_effort: str = "low"
-    max_tokens: int = 1024
+    max_tokens: int = 600  # D51: answers measured so far stay under 360 tokens
 
 
 @dataclass

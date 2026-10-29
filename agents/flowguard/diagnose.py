@@ -23,7 +23,7 @@ from flowguard.contracts import AgentName
 CLASSES = ("code", "dependency", "environment", "flaky_test", "infrastructure")
 ALLOWED = tuple(sorted(AGENT_ACTIONS[AgentName.DIAGNOSE]))
 MAX_EXAMPLES = 3
-EXAMPLE_CHARS = 2_000  # each example's log, its last part (request size)
+EXAMPLE_CHARS = 1_000  # each example's log, its last part (request size, D51)
 MIN_QUOTE = 8  # a shorter quote counts only as a whole line, not as part of one
 
 DEFINITIONS = {
