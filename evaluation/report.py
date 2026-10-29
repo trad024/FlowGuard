@@ -53,6 +53,8 @@ def build(
     seed=20261028,
     make_plots=True,
     synthetic=False,
+    dev_bundle=None,
+    require_confirmatory=False,
 ):
     specification = yaml.safe_load(prereg.read_text(encoding="utf-8"))
     if specification["comparisons"]["H1"]["levels"] != ["L0", "L1"]:
@@ -61,8 +63,18 @@ def build(
         "H4"
     ]["levels"] != ["L3", "L4"]:
         raise ValueError("unsupported preregistration comparisons")
-    joined, coverage = load(audit, truth, replays)
     inference = policy(specification)
+    blockers = []
+    if synthetic or dev_bundle is not None:
+        blockers.append("synthetic or development dry-run inputs")
+    if specification["status"] != "frozen":
+        blockers.append("pre-registration is not frozen")
+    if inference["h4_mode"] == "pending_amendment":
+        blockers.append("H4 amendment is pending")
+    blockers.extend(f"unset pre-registered count: {path}" for path in inference["unset_counts"])
+    if require_confirmatory and blockers:
+        raise ValueError("confirmatory output refused: " + "; ".join(blockers))
+    joined, coverage = load(audit, truth, replays)
     result = analyze(
         joined, setting=setting, seed=seed, alpha=specification["alpha"], inference=inference
     )
@@ -70,6 +82,7 @@ def build(
     result["metadata"] = {
         "format": 1,
         "synthetic": synthetic,
+        "development": dev_bundle is not None,
         "preregistration_status": specification["status"],
         "preregistration_sha256": hashlib.sha256(prereg.read_bytes()).hexdigest(),
         "primary_metric_definitions": specification["metrics"],
@@ -83,13 +96,17 @@ def build(
             "audit": hashlib.sha256(Path(audit).read_bytes()).hexdigest(),
             "truth": hashlib.sha256(Path(truth).read_bytes()).hexdigest(),
             "replays": hashlib.sha256(Path(replays).read_bytes()).hexdigest() if replays else None,
+            "development_bundle": hashlib.sha256(Path(dev_bundle).read_bytes()).hexdigest()
+            if dev_bundle is not None
+            else None,
         },
-        "scope": "synthetic demonstration" if synthetic else "offline supplied results",
-        "confirmatory": (
-            not synthetic
-            and specification["status"] == "frozen"
-            and inference["h4_mode"] != "pending_amendment"
-        ),
+        "scope": "synthetic demonstration"
+        if synthetic
+        else "development observation dry-run; no execution audit"
+        if dev_bundle is not None
+        else "offline supplied results",
+        "confirmatory": not blockers,
+        "confirmatory_blockers": blockers,
         "pairing": "intersection of scenario IDs; repeat 1 only; fixed setting",
         "holm_family": inference["holm_family"],
         "primary_metrics": primary_metrics,
@@ -229,12 +246,20 @@ def build(
             if synthetic
             else ""
         )
+        + (
+            "DEVELOPMENT DRY-RUN: partial recorded observations, not final evaluation. "
+            "No actions, approvals or executions were invented or imported. "
+            "Missing LLM/L5 and other outcomes remain unmeasured.\n\n"
+            if dev_bundle is not None
+            else ""
+        )
         + f"Pre-registration status: {specification['status']}. "
         + f"Confirmatory: {result['metadata']['confirmatory']}.\n\n"
         + "Missing measurements have n=0 and null estimates/intervals, never fabricated zeros. "
         "Only repeat 1 enters primary tables. LLM variance uses complete 1/2/3 triplets. "
         "Comparisons retain matched scenario pairs; the pre-registration sets the Holm family. "
         + inference["note"]
+        + (". Confirmatory blockers: " + "; ".join(blockers) if blockers else "")
         + ". "
         + (
             "H2 is secondary: macro-F1 bootstrap and accuracy Wilson intervals; no H2 test. "
@@ -258,14 +283,35 @@ def main(argv=None):
     parser.add_argument("--l5-setting", default="default")
     parser.add_argument("--seed", type=int, default=20261028)
     parser.add_argument("--no-plots", action="store_true")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--demo", action="store_true", help="generate synthetic fixtures, never open default inputs"
     )
+    mode.add_argument(
+        "--dev-bundle", type=Path, help="explicit development-observation JSON bundle"
+    )
+    mode.add_argument(
+        "--dev",
+        dest="dev_bundle",
+        action="store_const",
+        const=ROOT / "evaluation/dev-report-observations.json",
+        help="dry-run the bundled recorded development observations",
+    )
+    parser.add_argument(
+        "--confirmatory", action="store_true", help="refuse incomplete/draft inference"
+    )
     args = parser.parse_args(argv)
+    if args.confirmatory and (args.demo or args.dev_bundle):
+        parser.error("confirmatory output is unavailable for synthetic/development dry-runs")
     if args.demo:
         from report_demo import create
 
         args.audit, args.truth = create(args.out / "synthetic-inputs")
+        args.replays = None
+    if args.dev_bundle:
+        from report_dev import create
+
+        args.audit, args.truth = create(args.dev_bundle, args.out / "development-inputs")
         args.replays = None
     try:
         result = build(
@@ -278,6 +324,8 @@ def main(argv=None):
             args.seed,
             not args.no_plots,
             args.demo,
+            args.dev_bundle,
+            args.confirmatory,
         )
     except (OSError, ValueError) as exc:
         parser.exit(2, f"report: {exc}\n")
@@ -287,6 +335,7 @@ def main(argv=None):
                 "out": str(args.out),
                 "coverage": result["metadata"]["coverage"],
                 "synthetic": args.demo,
+                "development": args.dev_bundle is not None,
                 "figures": result["figures"],
             },
             indent=2,

@@ -1,3 +1,47 @@
+# Offline analysis: architect review / pre-registration 0.5
+
+Current adapter supports read-only versions 0.2, 0.3 and **0.5**. Under 0.5/D56, H4 is
+always descriptive: per-level counts/Wilson intervals and paired counts, no test or Holm
+slot, and no D44 rate amendment. Holm covers **H1 and H3 only**. H2 remains secondary.
+
+All declared counts are inspected, including release, the DSO5 commit sequence, the DSO6
+adversarial set and the LogChunks sample. Null counts are allowed in a descriptive report,
+but make confirmatory output unavailable even if someone marks the specification frozen.
+`--confirmatory` explicitly refuses draft/synthetic/development inputs and any null count
+before opening the audit/truth databases. No frozen specification was edited or filled in.
+
+## One-command real development-data dry-run
+
+```powershell
+python evaluation/report.py --dev --out results/dev-dry-run/
+```
+
+`evaluation/dev-report-observations.json` contains **28 real development scenarios / 42
+recorded observations**: 14 selected-encoder validation predictions, plus the 14-case Security
+replay at L0/L1. Source commits and JSON checksums are recorded. No logs, secrets, held-out
+items, invented predictions, actions, approvals or executions are included. The selected
+encoder table reproduces macro-F1 0.72. Original execution-audit input mode remains available.
+
+The adapter materializes isolated derived audit/truth SQLite inputs under the output folder,
+then the existing report opens them read-only. A source-bundle hash marker permits repeat
+use only for the same bundle. An explicit alternate bundle uses `--dev-bundle PATH.json`.
+It must declare development scope; action/execution observations require the original DB mode.
+
+Every CSV/JSON/PNG/SVG is produced. This is a **partial dev dry-run**, not a completed L0-L5
+experiment: Monitor/Release/LogChunks/LLM-repeat/L5 execution outcomes are not available on
+this machine, so those metrics have n=0 and null estimates. Plots mark missing measurements
+and carry a DEVELOPMENT DRY-RUN banner. No synthetic results are mixed into this dev bundle.
+The existing `--demo` remains explicitly synthetic and uses separate fake databases.
+
+Verified locally with pre-registration 0.5: all eight figures, coverage 28/28 valid truth
+rows and 42/42 joined observations, encoder macro-F1 0.72, H1/H3 Holm scope, and confirmatory
+refusal while release/DSO5/DSO6 counts remain null. Tests use only synthetic DBs/bundles and
+synthetic temporary specifications. No real held-out DB, seed or log was opened. Full final
+ablation, L5 gate curves and the real 60-item repeat subset remain untested pending inputs.
+
+The earlier implementation notes below retain legacy-version details for reproducibility;
+the 0.3 H4 amendment logic applies only when explicitly analyzing a 0.3 specification.
+
 # Offline final-evaluation analysis toolkit
 
 This branch adds analysis code only. It neither runs agents nor generates/reads real held-out

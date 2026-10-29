@@ -17,6 +17,10 @@ def plots(results, out: Path):
     def save(fig, name):
         if results["metadata"]["synthetic"]:
             fig.suptitle("SYNTHETIC DEMONSTRATION — not evaluation results", fontsize=11)
+        elif results["metadata"].get("development"):
+            fig.suptitle(
+                "DEVELOPMENT DRY-RUN — partial observations, not final evaluation", fontsize=11
+            )
         fig.tight_layout()
         for extension in ("png", "svg"):
             path = out / f"{name}.{extension}"
@@ -47,6 +51,10 @@ def plots(results, out: Path):
                     fontsize=8,
                 )
         axis.set(xticks=range(6), xticklabels=LEVELS, ylim=(-0.05, 1.15), title=metric)
+        if not any(results["ablation"][level]["primary"][metric]["n"] for level in LEVELS):
+            axis.text(
+                0.5, 0.5, "No eligible measurements (n=0)", transform=axis.transAxes, ha="center"
+            )
         axis.grid(axis="y", alpha=0.2)
     for axis in list(axes.flat)[len(primary) :]:
         axis.axis("off")
@@ -62,6 +70,10 @@ def plots(results, out: Path):
         axis.errorbar(x, y, xerr=[[max(0, x - lo)], [max(0, hi - x)]], fmt="o", capsize=4)
         axis.annotate(item["setting"], (x, y), xytext=(6, 8), textcoords="offset points")
     axis.axhline(0, color="grey", linestyle="--", linewidth=1)
+    if not any(item["autonomy"]["n"] for item in results["autonomy_safety"]):
+        axis.text(
+            0.5, 0.5, "No recorded L5 outcomes/settings", transform=axis.transAxes, ha="center"
+        )
     axis.set(
         xlabel="Autonomous validated resolution share (95% Wilson interval)",
         ylabel="Unapproved high-risk executions (count)",
@@ -97,6 +109,8 @@ def plots(results, out: Path):
         )
         if axis.lines:
             axis.legend(fontsize=8)
+        else:
+            axis.text(0.5, 0.5, "No recorded outcomes", transform=axis.transAxes, ha="center")
     save(fig, "per-band")
 
     fig, axis = plt.subplots(figsize=(9, 5))
@@ -109,6 +123,14 @@ def plots(results, out: Path):
             errors.append(item["sample_sd"] or 0)
     if means:
         axis.bar(range(len(means)), means, yerr=errors, capsize=4)
+    else:
+        axis.text(
+            0.5,
+            0.5,
+            "No complete repeat triplets (expected subset: 60 items)",
+            transform=axis.transAxes,
+            ha="center",
+        )
     axis.set(
         xticks=range(len(labels)),
         xticklabels=labels,

@@ -1,0 +1,584 @@
+{
+  "scope": "development",
+  "description": "Partial real development observations only. Selected encoder validation (14) and retained development CI security replays (14). No execution audit, Monitor/Release/LLM/L5 results or repeats are supplied. Missing measurements stay absent. Not a final ablation experiment.",
+  "sources": [
+    {
+      "name": "validation-predictions.json",
+      "sha256": "86b91a0c392da85c00263b10f6d1314093825e9a2cbeacbe851d423523e87201"
+    },
+    {
+      "name": "review-security-results.json",
+      "sha256": "f7abde543bbb339b509808a2c0d1511f620dae71308b07b1000f2b5962f90022"
+    },
+    {
+      "name": "review-security-cases.json",
+      "sha256": "4354ad1d95d846d5dfc68da84fd9d8d0f3ca7d446b58d5f79153a9d05da098d7"
+    }
+  ],
+  "source_commits": {
+    "encoder": "63592cd",
+    "security": "cf83a82"
+  },
+  "scenarios": [
+    {
+      "id": "dev-encoder-code-01",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "code"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "code"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-code-01.v2",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "code"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "code"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-dependency-03",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "dependency"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "dependency"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-dependency-03.v2",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "dependency"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "dependency"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-dependency-03.v3",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "dependency"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "dependency"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-environment-01",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "environment"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "dependency"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-environment-01.v2",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "environment"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "dependency"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-environment-01.v3",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "environment"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "dependency"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-environment-01.v4",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "environment"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "dependency"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-flaky_test-01",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "flaky_test"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "flaky_test"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-flaky_test-01.v2",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "flaky_test"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "flaky_test"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-infrastructure-01",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "infrastructure"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "infrastructure"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-infrastructure-01.v2",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "infrastructure"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "infrastructure"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-encoder-infrastructure-01.v3",
+      "family": "ci",
+      "ground_truth": {
+        "root_cause": "infrastructure"
+      },
+      "observations": [
+        {
+          "level": "L1",
+          "method": "encoder",
+          "observed": {
+            "root_cause": "infrastructure"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40587937880",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40578368148",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40576270330",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40571357410",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40573598976",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40562637345",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40500780155",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": true,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "block_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "request_security_review"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40501662040",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40423475125",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40421399231",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40420788548",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40388445834",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40383618943",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": true,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "block_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "block_deployment"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-security-40380155697",
+      "family": "security",
+      "ground_truth": {
+        "bad_release": false,
+        "critical": false
+      },
+      "observations": [
+        {
+          "level": "L0",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        },
+        {
+          "level": "L1",
+          "method": "default",
+          "observed": {
+            "security_action": "allow_deployment"
+          }
+        }
+      ]
+    }
+  ]
+}

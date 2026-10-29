@@ -6,6 +6,7 @@ import sqlite3
 import statistics
 
 import pytest
+import yaml
 
 import report
 import stats
@@ -25,6 +26,115 @@ from report_metrics import (
     primary_method,
 )
 from report_policy import policy
+
+
+def test_preregistration_05_h4_is_descriptive_and_holm_excludes_it():
+    specification = {"version": 0.5, "comparisons": {"H2": {"primary": "none"}}, "amendments": []}
+    inference = policy(specification)
+    assert inference["h4_mode"] == "descriptive"
+    assert inference["holm_family"] == ["H1_L1_vs_L0", "H3_L3_vs_L2"]
+    assert "families.release.count" in inference["unset_counts"]
+
+
+@pytest.mark.parametrize(
+    "target", ["families.release.count", "dso5_commit_sequence.count", "dso6_adversarial_set.count"]
+)
+def test_null_counts_block_confirmatory_output_before_database_access(
+    tmp_path, monkeypatch, target
+):
+    specification = yaml.safe_load((report.ROOT / "docs/preregistration.yaml").read_text())
+    specification.update(version=0.5, status="frozen")
+    specification["comparisons"]["H2"]["primary"] = "none"
+    for path in policy(specification)["preregistered_counts"]:
+        value = specification
+        parts = path.split(".")
+        for part in parts[:-1]:
+            value = value.setdefault(part, {})
+        value[parts[-1]] = 1
+    value = specification
+    parts = target.split(".")
+    for part in parts[:-1]:
+        value = value[part]
+    value[parts[-1]] = None
+    assert policy(specification)["unset_counts"] == [target]
+    prereg = tmp_path / "synthetic-prereg.yaml"
+    prereg.write_text(yaml.safe_dump(specification))
+
+    def refuse(*args):
+        raise AssertionError("blocked inference opened databases")
+
+    monkeypatch.setattr(report, "load", refuse)
+    with pytest.raises(ValueError, match=f"unset pre-registered count: {target}"):
+        report.build(
+            tmp_path / "missing-audit",
+            tmp_path / "missing-truth",
+            tmp_path / "out",
+            prereg=prereg,
+            require_confirmatory=True,
+        )
+
+
+def test_development_bundle_imports_only_recorded_observations_and_reuses_by_hash(tmp_path):
+    from report_dev import create as create_dev
+
+    bundle = tmp_path / "synthetic-development.json"
+    data = {
+        "scope": "development",
+        "scenarios": [
+            {
+                "id": "dev-synthetic-fixture",
+                "family": "ci",
+                "ground_truth": {"root_cause": "code"},
+                "observations": [
+                    {"level": "L1", "method": "encoder", "observed": {"root_cause": "dependency"}}
+                ],
+            }
+        ],
+    }
+    bundle.write_text(json.dumps(data))
+    folder = tmp_path / "dev-inputs"
+    paths = create_dev(bundle, folder)
+    records, coverage = load(*paths)
+    assert len(records) == 1 and records[0]["level"] == "L1"
+    assert records[0]["audit"]["executions"] == 0
+    assert autonomous(records[0]) is None
+    assert create_dev(bundle, folder) == paths
+    data["scope"] = "held-out"
+    bundle.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="development scope"):
+        create_dev(bundle, tmp_path / "refused")
+
+
+def test_descriptive_development_command_writes_all_plots_from_synthetic_fixture(tmp_path):
+    bundle = tmp_path / "synthetic-development.json"
+    bundle.write_text(
+        json.dumps(
+            {
+                "scope": "development",
+                "scenarios": [
+                    {
+                        "id": "dev-synthetic-fixture",
+                        "family": "ci",
+                        "ground_truth": {"root_cause": "code"},
+                        "observations": [
+                            {
+                                "level": "L1",
+                                "method": "encoder",
+                                "observed": {"root_cause": "dependency"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    out = tmp_path / "out"
+    assert report.main(["--dev-bundle", str(bundle), "--out", str(out)]) == 0
+    result = json.loads((out / "results.json").read_text())
+    assert result["metadata"]["development"] and not result["metadata"]["confirmatory"]
+    assert len(result["figures"]) == 8
+    assert result["diagnosis_methods"]["encoder"]["n"] == 1
+    assert result["ablation"]["L5"]["primary"]["H5_autonomy"]["n"] == 0
 
 
 @pytest.fixture
