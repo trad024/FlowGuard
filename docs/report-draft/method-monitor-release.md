@@ -176,7 +176,8 @@ each inline L0 analysis is replaced by a pause where Release decides through the
     Every prediction set held both labels (mean set size 2.0), and no rollback reached
     confidence 0.70, so every staging rollback or promotion would go to a human.
   - On those 28 plus 8 more: 53 decisions; coverage 53/53, both labels in every set.
-  - The final refit comes after the agents-mode recordings are scored.
+  - Refitted on the decisions from the 32 agents-mode recordings (the primary set below):
+    every prediction set still holds both labels.
 
 ### Behaviour of the test in simulation
 
@@ -196,8 +197,46 @@ each inline L0 analysis is replaced by a pause where Release decides through the
 
 ### Dev results (dev, in-sample)
 
+The primary set is the 32 agents-mode recordings. The earlier recordings, made under the L0
+Rollout, follow as secondary sets. Each set is reported on its own and never pooled with
+another, because they were recorded under different Rollouts. Times run from the start of the
+20% step.
+
+#### Primary: 32 agents-mode recordings
+
+**Data:** 32 release recordings (20 bad, 12 good) made under the agents-mode Rollout (D53, D54).
+Each step's pause lasts past Release's fourth look before the canary resumes, so every level
+sees the whole step and no recording stops at an L0 abort. L0 is replayed offline from
+`analysis-l0.yaml` on the same series. Step starts come from the Rollout step log; a step the
+log misses falls back to the pods-up estimate described below, for that step only.
+
+| | L0 (offline) | L3 | L4 |
+|---|---|---|---|
+| Bad releases caught before 100% | 15/20, 75% (53–89) | 15/20 | 15/20 |
+| False rollbacks | 0/12 (0–24) | 0/12 | 0/12 |
+| Median time to rollback | 60 s | 90 s | — |
+
+<!-- Before submission, from the DSO3 tables: L4's median time to rollback, the paired
+comparisons, and whether an escalated bad release is scored as caught. -->
+
+- **Same count at every level.** The three levels catch the same number of bad releases, and
+  none rolls back a good one.
+- **Every miss is below band:** 5 of 20 at each level (25%, 11–47). The limit is the canary's
+  traffic. At 10 requests/s the canary gets about 240 requests during the 20% step. At the
+  below-band error rates of the earlier recordings (0.29% to 0.42%), that is about one expected
+  error per step or fewer, too few for any level to tell the canary from stable.
+- **L3 rolls back later than L0:** a median of 90 s against 60 s.
+- **P1 fired 3 times at L4.** Each time the release was bad and the node was under stress, and
+  L4 escalated to a human instead of rolling back. Three cases show that P1 runs on real node
+  series and changes L4's decision under stress. They do not show whether those escalations are
+  worth a human's time.
+- **Calibration:** every conformal prediction set on these decisions holds both labels. On dev,
+  the calibrator does not separate Release's right decisions from its wrong ones.
+
+#### Secondary: 28 recordings under the L0 Rollout
+
 **Data:** 28 release recordings from the first dev delivery (22 bad, 6 good), all made under
-the L0 Rollout. Times run from the start of the 20% step.
+the L0 Rollout.
 
 **How the step times were found.** These recordings hold no Rollout step log, so each step's
 start is the first `up` sample of its pods, moved 7.5 s earlier. That is half of
@@ -235,8 +274,10 @@ Paired comparisons:
   releases both rolled back, L3 decided a median 15 s earlier (bootstrap 95%: 0 to 30 s).
 - **L3 vs L4:** identical.
 
-**Node-stress recordings (recordings-2):** 8 releases with node series. Seven ran under the
-D44 node stress; one did not.
+#### Secondary: node-stress recordings (recordings-2)
+
+8 releases with node series, made under the L0 Rollout. Seven ran under the D44 node stress;
+one did not.
 
 | Level | Bad caught (2 near-band bad releases) | False rollbacks (6 good releases) |
 |---|---|---|
@@ -244,7 +285,7 @@ D44 node stress; one did not.
 | L3 | 0 | 0 |
 | L4 | 0 | 0 |
 
-**P1 never ran:** Release proposed no rollback on any of the 8.
+**P1 never ran on this set:** Release proposed no rollback on any of the 8.
 
 **Wrong decisions on node-stress cases** (the 7 new ones plus 5 earlier ones):
 
@@ -260,24 +301,22 @@ D44 node stress; one did not.
   rollbacks in 8 good releases under stress.
 - H4 is reported descriptively (D56).
 
-**All 36 dev release recordings:**
-
-| | L0 | L3 | L4 |
-|---|---|---|---|
-| Bad releases caught | 15/24 | 12/24 | 12/24 |
-| False rollbacks | 0/12 | 0/12 | 0/12 |
-
 **Caveats:**
-- **Truncation.** The L0 Rollout aborts a bad canary live, so a recording stops where L0
-  aborted. A level that has not decided by then is counted as not caught ("truncated": 3 of
-  L3's misses on the 28, 4 on the 36). The agents-mode re-recordings (D54) remove this. Until
-  they are scored, L0 has more data than the other levels on those recordings.
-- **Below band.** At 10 requests/s, below-band releases are invisible to every level: 0.29% to
-  0.42% errors give 1 to 3 errors per canary, and delays of 196 to 318 ms never cross 500 ms.
+- **Truncation (secondary sets only).** The L0 Rollout aborts a bad canary live, so a recording
+  stops where L0 aborted. A level that has not decided by then is counted as not caught
+  ("truncated": 3 of L3's misses on the 28, 1 on recordings-2), so L0 has more data than the
+  other levels on those sets. That is consistent with L0's lead there (14 against 12 of 22),
+  and with the lead's absence on the agents-mode set, which has no truncation; these counts do
+  not prove that truncation is the whole cause.
+- **Below band.** At 10 requests/s, below-band releases are invisible to every level on every
+  set. On the earlier recordings, 0.29% to 0.42% errors gave 1 to 3 errors per canary, and
+  delays of 196 to 318 ms never crossed 500 ms.
 - **Near band.** The configured error rate is not what the canary shows. One near-band
   release configured at 1.09% showed 3 errors in 812 canary requests.
-- **P1 is unexercised.** It never ran, because Release never proposed a rollback under node
-  stress. L3 and L4 are therefore identical on dev, and P1's answers on real node series are
-  unobserved.
-- **Calibration.** It is uninformative on dev and is refitted once more after the agents-mode
-  recordings are scored.
+- **P1 is barely exercised.** It ran 3 times, all on bad releases under node stress in the
+  agents-mode set. It was never asked about a good release, because Release never proposed
+  rolling one back. How P1 treats a good release under stress is therefore unobserved.
+- **Calibration.** It is uninformative on every dev set so far: every prediction set holds both
+  labels.
+- **In-sample.** Every number here is from the dev recordings. Held-out results come at
+  Step 11.
