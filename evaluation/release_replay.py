@@ -167,30 +167,34 @@ def timeline(idx: series.Index, namespace: str, t0: float, t1: float) -> dict | 
         "end": end,
         "how": how,
         "source": "pods_up_estimate",
+        "step_sources": {w: "pods_up_estimate" for w in steps},
     }
 
 
-def logged_timeline(rec: Path, namespace: str, t1: float) -> dict | None:
+def logged_timeline(rec: Path, namespace: str, t0: float, t1: float) -> dict | None:
     """The canary's steps from the recording's Rollout step log, when it has one: a step starts
     when the pause after its setWeight starts, and the canary ends at its abort or when the last
-    setWeight (100%) begins. The source is "argo" for the runner's log (recorder.RolloutStepLog:
-    Argo's own startTime and abortedAt) and "poll" for rows imported from the side logger
-    (step_log_import.py: when a 5 s poll saw the change, up to 5 s late)."""
+    setWeight (100%) begins. The canary is the one in the window's first row of a canary step
+    (20% or 50%); a later canary in the log (the runner's restore of the previous version) is
+    never taken. Only logged steps are returned, each with its source: argo for the runner's log
+    (recorder.RolloutStepLog: Argo's own startTime and abortedAt), poll for rows imported from
+    the side logger (step_log_import.py: when a 5 s poll saw the change, up to 5 s late)."""
     path = rec / recorder.ROLLOUT_EVENTS
     if not path.is_file():
         return None
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
-    rows = [r for r in rows if r.get("namespace") == namespace]
-    # The canary: the first revision the log saw pause after its 20% setWeight
-    first = next(
+    rows = [
+        r
+        for r in rows
+        if r.get("namespace") == namespace and r.get("ts") and t0 <= l0_baseline.ts(r["ts"]) <= t1
+    ]
+    first = next(  # a row in a canary step (20% or 50%), not a finished or steady rollout
         (
             r
             for r in rows
             if r.get("canary_hash")
             and r["canary_hash"] != r.get("stable_hash")
-            and r.get("step") == "pause"
-            and r.get("set_weight") == 20
-            and r.get("pause_start")
+            and r.get("set_weight") in STEP_PODS
         ),
         None,
     )
@@ -199,10 +203,12 @@ def logged_timeline(rec: Path, namespace: str, t1: float) -> dict | None:
     canary = first["canary_hash"]
     mine = [r for r in rows if r.get("canary_hash") == canary]
     steps: dict[int, float] = {}
+    sources: dict[int, str] = {}
     for r in mine:
         w = r.get("set_weight")
         if w in STEP_PODS and w not in steps and r.get("step") == "pause" and r.get("pause_start"):
             steps[w] = l0_baseline.ts(r["pause_start"])
+            sources[w] = "poll" if r.get("time_source") == "poll" else "argo"
     end, how = t1, "window_end"
     for r in mine:
         if r.get("abort"):
@@ -211,27 +217,41 @@ def logged_timeline(rec: Path, namespace: str, t1: float) -> dict | None:
         if r.get("set_weight") == FULL_WEIGHT:
             end, how = l0_baseline.ts(r["ts"]), "promoted"
             break
-    if 20 not in steps:
-        return None
     return {
         "stable": first.get("stable_hash"),
         "canary": canary,
         "steps": steps,
+        "step_sources": sources,
         "end": min(end, t1),
         "how": how,
-        "source": "poll" if any(r.get("time_source") == "poll" for r in mine) else "argo",
     }
 
 
 def run_timeline(run: dict, idx: series.Index) -> dict | None:
-    """Logged step times when the recording has them (D54 recordings); the pods-up estimate
-    only for recordings made before the step log existed."""
+    """Logged step times when the recording has them (D54 recordings), step by step: a step
+    the log has no start for takes the pods-up estimate's for that step only, when the estimate
+    follows the same canary. Recordings made before the step log existed use the estimate.
+    "source" names the step sources in step order ("pods_up_estimate+poll" when they differ)."""
     ns = run["spec"].get("environment", "staging")
-    logged = logged_timeline(Path(run["recording"]), ns, run["window"][1])
-    estimate = timeline(idx, ns, *run["window"])
-    if logged and not logged["stable"] and estimate:  # a log without the stable hash
+    t0, t1 = run["window"]
+    logged = logged_timeline(Path(run["recording"]), ns, t0, t1)
+    estimate = timeline(idx, ns, t0, t1)
+    if logged is None:
+        return estimate
+    if not logged["stable"] and estimate:  # a log without the stable hash
         logged["stable"] = estimate["stable"]
-    return logged or estimate
+    if estimate and estimate["canary"] == logged["canary"]:
+        for w, t in estimate["steps"].items():
+            if w not in logged["steps"] and t <= logged["end"]:
+                logged["steps"][w] = t
+                logged["step_sources"][w] = "pods_up_estimate"
+    if 20 not in logged["steps"]:
+        return None
+    logged["steps"] = dict(sorted(logged["steps"].items()))
+    logged["step_sources"] = dict(sorted(logged["step_sources"].items()))
+    kinds = list(dict.fromkeys(logged["step_sources"].values()))
+    logged["source"] = "+".join(kinds)
+    return logged
 
 
 # ---------------------------------------------------------------- Release on a recording
@@ -476,12 +496,14 @@ def node_stress(runs: list[dict], res: dict[str, dict]) -> dict:
 
 def score(runs: list[dict]) -> dict:
     results: dict[str, dict[str, dict]] = {"L0": {}, "L3": {}, "L4": {}}
-    live, idx_of, sources = {}, {}, {}
+    live, idx_of, sources, step_sources = {}, {}, {}, {}
     metrics = l0_canary.load_template()
     with tempfile.TemporaryDirectory(prefix="dso3-replay-") as tmp:
         for r in runs:
             idx = idx_of[r["id"]] = load_index(r)
-            sources[r["id"]] = (run_timeline(r, idx) or {}).get("source")
+            line = run_timeline(r, idx) or {}
+            sources[r["id"]] = line.get("source")
+            step_sources[r["id"]] = line.get("step_sources", {})
             results["L0"][r["id"]] = l0_offline(r, idx, metrics)
             live[r["id"]] = l0_live(r, idx)
             for name in ("L3", "L4"):
@@ -496,10 +518,11 @@ def score(runs: list[dict]) -> dict:
         "scored": len(usable),
         "classes": classes(usable),
         # argo: Argo's own step times; poll: imported from the side logger, up to 5 s late;
-        # pods_up_estimate: no step log, flagged for the report (D54)
+        # pods_up_estimate: no logged start for a step, flagged for the report (D54); a
+        # recording with steps from two sources counts as e.g. "pods_up_estimate+poll"
         "step_source": dict(sorted(Counter(sources[r["id"]] for r in usable).items())),
         "step_source_fallback": sorted(
-            r["id"] for r in usable if sources[r["id"]] == "pods_up_estimate"
+            r["id"] for r in usable if "pods_up_estimate" in step_sources[r["id"]].values()
         ),
         "no_canary": sorted(r["id"] for r in runs if r not in usable),
         "l0_live_agreement": agreement(usable, results["L0"], live),
@@ -514,6 +537,7 @@ def score(runs: list[dict]) -> dict:
                 "bad": bool(r["ground_truth"].get("bad_release")),
                 "band": band(r),
                 "step_source": sources[r["id"]],
+                "step_sources": step_sources[r["id"]],
                 **{
                     n: {k: v for k, v in res[r["id"]].items() if k != "timeline"}
                     for n, res in results.items()

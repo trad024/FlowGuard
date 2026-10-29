@@ -13,6 +13,7 @@ from flowguard.audit import AuditLog
 from flowguard.contracts import AgentName
 from flowguard.executor import Executor
 from flowguard.incidents import IncidentRecord
+from flowguard.monitor import Monitor
 from flowguard.orchestrator import Orchestrator, level
 from flowguard.service import (
     RolloutReader,
@@ -84,7 +85,8 @@ class Source:
         return series.index(shifted)
 
 
-def make(tmp_path, raw, states, name="L1", approve=True, rollouts=None):
+def make(tmp_path, raw, states, name="L1", approve=True, rollouts=None, monitor="default"):
+    """monitor=None: the Monitor with its L0 alert rules only, without the fitted model."""
     db = tmp_path / "state.db"
     audit = AuditLog(db, level=name)
     orch = Orchestrator(
@@ -95,6 +97,8 @@ def make(tmp_path, raw, states, name="L1", approve=True, rollouts=None):
         approver=SimulatedApprover(policy=lambda p: approve),
         diagnose=Diagnose.without_logs(),
     )
+    if monitor != "default":
+        orch.agents[AgentName.MONITOR] = Monitor(monitor)
     return Service(orch, Source({**raw, **rollout_series(states)}), rollouts=rollouts)
 
 
@@ -190,24 +194,39 @@ def test_a_held_prod_canary_gets_a_look_per_poll_then_one_human_approved_promoti
         assert db.execute("SELECT COUNT(*) FROM incidents").fetchone()[0] == 1  # holds: none
 
 
+WORSE_CANARY = {
+    "podinfo_requests": requests("staging", "old", 8, 60, 0) + requests("staging", "new", 2, 30, 30)
+}
+
+
 def test_a_worse_canary_is_rolled_back_at_its_first_look_and_each_step_restarts(tmp_path):
-    raw = {
-        "podinfo_requests": requests("staging", "old", 8, 60, 0)
-        + requests("staging", "new", 2, 30, 30)
-    }
+    """The Monitor flags a bad canary on its first tick (the fitted model does; an L0 alert
+    stands in for it here, so the test holds with or without the model file): Release decides
+    that incident with its own test at once, and the step gets no look after that."""
     states = {"staging": (True, "new", "old"), "prod": (False, "old", "old")}
-    svc = make(tmp_path, raw, states)
+    svc = make(tmp_path, {**WORSE_CANARY, "alerts": alert("staging")}, states)
     looks = polls(svc, T, 3)
-    assert looks[0] == []
-    (out,) = looks[1]
+    (out,) = looks[0]
+    assert out["event"].type == "metrics_tick" and out["agent"] == "release"
     assert [p.action for p in out["output"].proposals] == ["rollout_abort"]
-    assert looks[2] == []  # decided for this step
+    assert looks[1] == [] and looks[2] == []  # decided for this step
     # The same canary at its next step (5 pods) is looked at again from its own warm-up
     svc.source.raw.update(rollout_series({**states, "staging": (True, "new", "old", 5)}))
     looks = polls(svc, T + 90, 3)
     assert looks[0] == [] and looks[1][0]["event"].payload["params"] == {
         "ts": T + 120, "canary_hash": "new", "looks_in_step": 1, "weight": 50, "aborted": False
     }  # fmt: skip
+
+
+def test_a_worse_canary_the_monitor_misses_is_rolled_back_at_its_first_look(tmp_path):
+    states = {"staging": (True, "new", "old"), "prod": (False, "old", "old")}
+    svc = make(tmp_path, WORSE_CANARY, states, monitor=None)  # no Monitor incident
+    looks = polls(svc, T, 3)
+    assert looks[0] == []  # the step's warm-up
+    (out,) = looks[1]
+    assert out["event"].type == "rollout_step"
+    assert [p.action for p in out["output"].proposals] == ["rollout_abort"]
+    assert looks[2] == []  # decided for this step
 
 
 def test_the_service_gates_release_with_its_calibrator(tmp_path):
@@ -224,20 +243,51 @@ def test_a_canary_that_is_not_held_is_left_to_its_steps(tmp_path):
     assert len(make(tmp_path, raw, states).tick(T)) == 2  # the two Monitor ticks only
 
 
-def test_a_monitor_incident_mid_canary_goes_to_release_which_escalates_without_counts(tmp_path):
+def test_a_monitor_incident_mid_canary_is_decided_by_releases_own_test(tmp_path):
+    states = {"staging": (False, "new", "old"), "prod": (False, "old", "old")}
+    svc = make(tmp_path, {**WORSE_CANARY, "alerts": alert("staging")}, states, approve=False)
+    out, _ = svc.tick(T)  # not held: no look, but the tick is in_canary
+    assert out["agent"] == "release" and out["event"].type == "metrics_tick"
+    # The same per-hash count windows a look gets (D21), before the step's first look
+    metrics, params = out["event"].payload["metrics"], out["event"].payload["params"]
+    assert metrics["windows"] and metrics["canary_5xx"] == pytest.approx(60)
+    assert params == {
+        "ts": T, "canary_hash": "new", "looks_in_step": 0, "weight": 20, "aborted": False,
+        "decided": False,
+    }  # fmt: skip
+    (p,) = out["output"].proposals
+    assert p.action == "rollout_abort" and p.params == {"canary_hash": "new", "weight": 20}
+    assert [d.outcome for d in out["decisions"]] == ["ask_human"]  # no calibrator: confidence 0
+    # One decision per step: a new incident in the same step is evidence only
+    svc.source.raw["alerts"] = alert("staging") + alert("staging", "HighLatency")
+    again, _ = svc.tick(T + 30)
+    assert again["agent"] == "release" and again["event"].payload["params"]["decided"] is True
+    assert again["output"].proposals == []
+    claims = [e.claim for e in svc.orch.record.evidence(again["incident_id"])]
+    assert any(c.startswith("Release already proposed for this canary step") for c in claims)
+
+
+def test_a_monitor_incident_after_a_look_decided_the_step_proposes_nothing(tmp_path):
+    states = {"staging": (True, "new", "old"), "prod": (False, "old", "old")}
+    svc = make(tmp_path, WORSE_CANARY, states, monitor=None)  # quiet until the alert
+    svc.tick(T)  # warm-up
+    look = [o for o in svc.tick(T + 30) if o["event"].type == "rollout_step"]
+    assert [p.action for p in look[0]["output"].proposals] == ["rollout_abort"]
+    svc.source.raw["alerts"] = alert("staging")  # 5 s before each poll from now on
+    staging, _ = svc.tick(T + 60)
+    assert staging["agent"] == "release" and staging["output"].proposals == []
+    assert len(svc.tick(T + 90)) == 2  # the two Monitor ticks: the step gets no more looks
+
+
+def test_a_monitor_incident_never_promotes_before_the_fourth_look(tmp_path):
     raw = {
         "podinfo_requests": requests("staging", "old", 8, 60, 0)
-        + requests("staging", "new", 2, 30, 30),
+        + requests("staging", "new", 2, 60, 0),
         "alerts": alert("staging"),
     }
     states = {"staging": (False, "new", "old"), "prod": (False, "old", "old")}
-    svc = make(tmp_path, raw, states, approve=False)
-    out, _ = svc.tick(T)  # not held: no look, but the tick is in_canary
-    assert out["agent"] == "release"
-    assert out["event"].payload["metrics"]["canary_5xx_ratio"] == pytest.approx(0.5)
-    # The Monitor's tick carries ratios, not Release's count windows: a human decides
-    assert [p.action for p in out["output"].proposals] == ["escalate_to_human"]
-    assert [d.outcome for d in out["decisions"]] == ["execute"]
+    out, _ = make(tmp_path, raw, states).tick(T)
+    assert out["agent"] == "release" and out["output"].proposals == []  # hold
 
 
 def test_rollout_state_from_prometheus():

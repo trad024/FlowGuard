@@ -190,6 +190,71 @@ def test_logged_step_times_replace_the_estimate_and_old_recordings_keep_it(tmp_p
     assert result["per_recording"]["r-logged"]["step_source"] == "argo"
 
 
+def test_the_scenario_canary_comes_from_the_windows_first_rows_and_each_step_its_own_source(
+    tmp_path,
+):
+    """r-267a5325's shape: the side logger saw the 20% pause without its start (that step
+    falls back to the pods-up estimate), logged the 50% pause by poll, and later the runner's
+    restore of the previous version paused at 20% as a new canary; a row from before the
+    window (the previous scenario's restore) is not part of this recording."""
+    poll = {"namespace": "staging", "canary_hash": "new", "stable_hash": "old", "abort": False,
+            "aborted_at": None, "pause_start": None, "time_source": "poll"}  # fmt: skip
+    restore = {**poll, "canary_hash": "old", "stable_hash": "new"}
+    rows = [
+        {
+            **poll,
+            "canary_hash": "prev",
+            "ts": iso(T0 - 30),
+            "step": "pause",
+            "set_weight": 20,
+            "pause_start": iso(T0 - 32),
+        },  # fmt: skip
+        {**poll, "ts": iso(T0 + 62), "step": "pause", "set_weight": 20},  # no start seen
+        {**poll, "ts": iso(T0 + 201), "step": "setWeight", "set_weight": 50},
+        {
+            **poll,
+            "ts": iso(T0 + 207),
+            "step": "pause",
+            "set_weight": 50,
+            "pause_start": iso(T0 + 205),
+        },  # fmt: skip
+        {**poll, "ts": iso(T0 + 357), "step": "setWeight", "set_weight": 100},
+        {**restore, "ts": iso(T0 + 420), "step": "setWeight", "set_weight": 20},
+        {
+            **restore,
+            "ts": iso(T0 + 427),
+            "step": "pause",
+            "set_weight": 20,
+            "pause_start": iso(T0 + 425),
+        },  # fmt: skip
+    ]
+    write_recording(tmp_path, "r-shape", bad=False, steps=rows)
+    (run,) = rr.release_runs([tmp_path])
+    line = rr.run_timeline(run, rr.load_index(run))
+    assert (line["canary"], line["stable"]) == ("new", "old")  # never the restore, nor "prev"
+    assert {w: t - T0 for w, t in line["steps"].items()} == {20: STEP_20 - rr.READY_LAG_S, 50: 205}
+    assert line["step_sources"] == {20: "pods_up_estimate", 50: "poll"}
+    assert line["source"] == "pods_up_estimate+poll"
+    assert (line["end"] - T0, line["how"]) == (357, "promoted")
+    result = rr.score([run])
+    assert result["step_source"] == {"pods_up_estimate+poll": 1}
+    assert result["step_source_fallback"] == ["r-shape"]
+    assert result["per_recording"]["r-shape"]["step_sources"] == {
+        20: "pods_up_estimate", 50: "poll"
+    }  # fmt: skip
+    assert result["per_recording"]["r-shape"]["L3"]["outcome"] == "promoted"
+
+
+def test_a_log_without_the_scenario_canarys_first_step_and_no_estimate_has_no_canary(tmp_path):
+    rows = [{"namespace": "staging", "canary_hash": "new", "stable_hash": "old",
+             "ts": iso(T0 + 207), "step": "pause", "set_weight": 50,
+             "pause_start": iso(T0 + 205), "time_source": "poll"}]  # fmt: skip
+    rec = write_recording(tmp_path, "r-nopods", bad=False, steps=rows)
+    (rec / "prometheus" / "podinfo_up.json").write_text(json.dumps({"result": []}))
+    (run,) = rr.release_runs([tmp_path])
+    assert rr.run_timeline(run, rr.load_index(run)) is None  # no 20% start from either source
+
+
 @pytest.fixture(scope="module")
 def scored(tmp_path_factory):
     root = tmp_path_factory.mktemp("recordings")

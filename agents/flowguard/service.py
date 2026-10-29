@@ -9,7 +9,10 @@ Every interval:
   1. Monitor poll (workflow C): one metrics_tick per watched namespace, with that namespace's
      series, its L0 alerts and the node rows, tagged with the namespace as its environment (an
      incident is followed up where it happened) and marked in_canary while its Rollout is
-     mid-canary.
+     mid-canary. Mid-canary it also carries what a look carries (the per-hash count windows,
+     D21), so an incident the Monitor hands to Release is decided by Release's own test; after
+     Release proposed for the step, at a look or on such an incident, the step is decided:
+     later incidents are only evidence and the step gets no more looks.
   2. Canary looks (workflow D): while a watched Rollout is paused mid-canary, one rollout_step
      per poll once the step's 30 s warm-up has passed (the agents-mode Rollout waits there for
      Release, D53): `release.step_event`, the per-hash count windows since the canary's
@@ -157,19 +160,6 @@ def rollout_state(idx: series.Index, t: float, namespace: str) -> RolloutState:
     return RolloutState(paused, canary, stable, created.get(canary), weight)
 
 
-def ratio(counts: tuple[float, float] | None) -> float:
-    return counts[1] / counts[0] if counts and counts[0] > 0 else 0.0
-
-
-def canary_split(idx: series.Index, t: float, namespace: str, state: RolloutState) -> dict:
-    """The canary's and the stable pods' 5xx ratios over the last minute (Release's input)."""
-    counts = series.by_hash(idx, t, namespace)
-    return {
-        "canary_5xx_ratio": ratio(counts.get(state.canary)),
-        "stable_5xx_ratio": ratio(counts.get(state.stable)),
-    }
-
-
 def scope(snapshot: dict[str, float], namespace: str) -> dict[str, float]:
     """One namespace's rows of a snapshot (itself and its pods), plus the node rows."""
     out = {}
@@ -200,8 +190,10 @@ class Service:
         results = []
         for ns, state in states.items():
             mine = scope(snapshot, ns)
-            if state.mid_canary:  # Release, if the Monitor hands it an incident, compares these
-                mine.update(canary_split(idx, t, ns, state))
+            step = self._step(ns, state, t)
+            view = self._view(idx, t, ns, state, step) if step is not None else None
+            if view is not None:  # what Release decides from if the Monitor hands it an incident
+                mine.update(view.payload["metrics"])
             tick = tick_event(
                 mine,
                 series.firing(idx, t, namespace=ns),
@@ -209,7 +201,12 @@ class Service:
                 environment=ns,
                 in_canary=state.mid_canary,
             )
-            results.append(self.orch.handle(tick))
+            if view is not None:
+                tick.payload["params"].update(view.payload["params"], decided=step.decided)
+            out = self.orch.handle(tick)
+            if step is not None and out.get("agent") == AgentName.RELEASE:
+                step.decided |= bool(out["output"].proposals)
+            results.append(out)
         for ns, state in states.items():
             out = self.look(idx, t, ns, state)
             if out is not None:
@@ -241,8 +238,9 @@ class Service:
         event = release.step_event(idx, t, ns, revision, stable or "", since, 0, aborted=True)
         return self.orch.handle(event)
 
-    def look(self, idx: series.Index, t: float, ns: str, state: RolloutState) -> dict | None:
-        """One look at a held canary after its step's warm-up; none once Release proposed."""
+    def _step(self, ns: str, state: RolloutState, t: float) -> Look | None:
+        """The canary step this poll sees (a new canary or weight starts a new one); None, and
+        the namespace's steps forgotten, when it is not mid-canary."""
         if not state.mid_canary:
             for key in [k for k in self.steps if k[0] == ns]:
                 del self.steps[key], self.started[key]
@@ -252,14 +250,27 @@ class Service:
         step = self.steps.get(key)
         if step is None or step.weight != state.weight:
             step = self.steps[key] = Look(state.weight, t)
+        return step
+
+    def _view(self, idx: series.Index, t: float, ns: str, state: RolloutState, step: Look):
+        """Release's input at t: the per-hash count windows since the canary's ReplicaSet was
+        created (D21, D55), with the looks made so far in the step."""
+        key = (ns, state.canary)
+        since = state.created if state.created is not None else self.started[key]
+        return release.step_event(
+            idx, t, ns, state.canary, state.stable, since, step.looks, weight=state.weight
+        )
+
+    def look(self, idx: series.Index, t: float, ns: str, state: RolloutState) -> dict | None:
+        """One look at a held canary after its step's warm-up; none once Release proposed,
+        at a look or on a Monitor incident."""
+        step = self._step(ns, state, t)
+        if step is None:
+            return None
         if not state.paused or step.decided or t - step.since < WARMUP_S:
             return None
         step.looks += 1
-        since = state.created if state.created is not None else self.started[key]
-        event = release.step_event(
-            idx, t, ns, state.canary, state.stable, since, step.looks, weight=state.weight
-        )
-        out = self.orch.handle(event)
+        out = self.orch.handle(self._view(idx, t, ns, state, step))
         step.decided = bool(out.get("output") and out["output"].proposals)
         return out
 
