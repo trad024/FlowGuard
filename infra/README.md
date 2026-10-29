@@ -107,6 +107,25 @@ k3s itself runs with Traefik, metrics-server and the service load balancer disab
 opens on the **FlowGuard / podinfo** dashboard: request rate, 5xx error rate, latency p95, CPU,
 memory and restarts, filterable by environment.
 
+### Agents vs L0 dashboard
+
+**FlowGuard / agents vs L0** has one row per objective: DSO1 (recall per band, false alerts per
+hour, MTTD; live L0 alerts and Monitor incidents), DSO3 (canary outcomes and Release proposals
+per level; L0's scored canary results) and DSO6 (gate outcomes per level, approvals per
+incident, and the two counts that must stay 0). It reads two exporters that run on the laptop,
+outside the cluster, scraped by Prometheus's `flowguard` job at `host.k3d.internal`:
+
+```powershell
+py -m flowguard.exporter --host 0.0.0.0             # audit log counts, :9464 (agents on PYTHONPATH)
+py evaluation\results_exporter.py --host 0.0.0.0    # scored results in evaluation\runs, :9465
+```
+
+Both serve aggregate counts only (no rationale, log or parameter text) and open their files
+read-only. `--host 0.0.0.0` is needed because the scrape comes from the k3d node container, not
+from 127.0.0.1; on a shared network, restrict the two ports with the host firewall. The scored
+panels fill once `evaluation\l0_baseline.py` and `evaluation\monitor_replay.py score` have
+written their results.
+
 ## Layout
 
 ```

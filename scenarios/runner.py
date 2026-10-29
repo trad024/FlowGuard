@@ -42,6 +42,7 @@ import sys
 import tempfile
 import time
 import urllib.parse
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -594,6 +595,41 @@ def firing_within(seconds: int, base: str = recorder.PROMETHEUS) -> list[str]:
     return sorted(r["metric"].get("alertname", "") for r in result)
 
 
+RESULT_METRICS = "flowguard_result"  # the scored results (evaluation/results_exporter.py)
+
+
+def results_in_prometheus(base: str = recorder.PROMETHEUS) -> int:
+    """How many series of the scored results Prometheus holds now (one instant query). The
+    agents read this Prometheus, so a run must not start while any is there (D25)."""
+    query = f'count({{__name__=~"{RESULT_METRICS}.*"}})'
+    url = f"{base}/api/v1/query?" + urllib.parse.urlencode({"query": query})
+    result = recorder.http_json(url).get("data", {}).get("result", [])
+    return int(float(result[0]["value"][1])) if result else 0
+
+
+@contextmanager
+def run_lock(run_id: str):
+    """recorder.RUN_LOCK for the length of a cluster run: one run at a time, and no results
+    exporter started meanwhile. A lock left by a run that died must be removed by hand."""
+    path = recorder.RUN_LOCK
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8") as f:
+            f.write(
+                json.dumps({"run_id": run_id, "pid": os.getpid(), "since": recorder.iso(utc())})
+            )
+    except FileExistsError:
+        held = path.read_text(encoding="utf-8")[:200]
+        raise RuntimeError(
+            f"{path} is held ({held}): another evaluation run is under way, or one died and "
+            "left it; remove it only if no run is going on"
+        ) from None
+    try:
+        yield
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def wait_alerts_quiet(
     firing=firing_within,
     quiet_s: int = QUIET_S,
@@ -742,6 +778,19 @@ class Runner:
         print(json.dumps({"ts": recorder.iso(utc()), "event": kind, **payload}), flush=True)
 
     def run(self) -> Path:
+        """A cluster run starts only when Prometheus holds no scored result and no other run
+        holds the lock; branch-only families (ci, pipeline) need neither."""
+        if self.spec["family"] in NO_CLUSTER:
+            return self._run()
+        if found := results_in_prometheus():
+            raise RuntimeError(
+                f"Prometheus holds {found} {RESULT_METRICS} series: stop "
+                "evaluation/results_exporter.py and wait for them to go stale before a run (D25)"
+            )
+        with run_lock(self.run_id):
+            return self._run()
+
+    def _run(self) -> Path:
         delivery = self.spec["fault"]["delivery"]
         start = utc()
         self.event(
