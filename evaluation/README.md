@@ -166,6 +166,19 @@ time gain); and L3's wrong-decision rate on the node-stress recordings (H4's cou
 rollback decisions, labelled by the recording, and reports coverage leave-one-recording-out.
 Everything is labelled "dev, in-sample".
 
+## L3 retrieval index (step 7)
+
+```powershell
+py evaluation\diagnose_index.py build   # state\chroma\ and state\chroma\index-manifest.json
+```
+
+Indexes the corpus' training and validation variants only; a test-template variant or a log
+outside the corpus (LogChunks) is refused. Documents and queries are embedded from the same text,
+`flowguard.retrieval.document` (the last 1,000 characters of the reduced log). The manifest is
+deterministic and pins the embedding model by chromadb's archive SHA-256 and each file's SHA-256
+(the archive has no Hugging Face commit id); the diagnose-freeze hashes it. Excluding a query's
+own template applies to dev calibration only (D45).
+
 ## External datasets (D14, step 4a)
 
 ```powershell
