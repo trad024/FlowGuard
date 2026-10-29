@@ -128,9 +128,18 @@ def validate_observed(observed):
     ):
         if key in observed and not isinstance(observed[key], str):
             raise ValueError(f"{key} must be text")
-    for key in ("false_alerts", "tokens"):
+    for key in ("false_alerts", "tokens", "diagnose_quotes", "diagnose_ungrounded"):
         if key in observed and (type(observed[key]) is not int or observed[key] < 0):
             raise ValueError(f"{key} must be a nonnegative integer")
+    if ("diagnose_quotes" in observed) != ("diagnose_ungrounded" in observed):
+        raise ValueError("diagnose_quotes and diagnose_ungrounded come together")
+    if "diagnose_quotes" in observed:
+        if observed["diagnose_ungrounded"] > observed["diagnose_quotes"]:
+            raise ValueError("diagnose_ungrounded exceeds diagnose_quotes")
+        if observed.get("hallucinated", observed["diagnose_ungrounded"] > 0) != (
+            observed["diagnose_ungrounded"] > 0
+        ):
+            raise ValueError("hallucinated must be diagnose_ungrounded > 0")
     for key in (
         "latency_s",
         "cost_usd",

@@ -45,6 +45,16 @@ def proportion(values):
     }
 
 
+def hallucination_rate(records):
+    """Per quote (pre-registration metrics.H3.hallucination): raw quotes not found in the log
+    over all raw quotes, summed over the records that have them, with a Wilson interval. The
+    per-item boolean `hallucinated` is only for the paired exact McNemar."""
+    counted = [r["observed"] for r in records if "diagnose_quotes" in r["observed"]]
+    k = sum(o["diagnose_ungrounded"] for o in counted)
+    n = sum(o["diagnose_quotes"] for o in counted)
+    return {**proportion([True] * k + [False] * (n - k)), "items": len(counted), "unit": "quote"}
+
+
 def macro_f1(pairs):
     if not pairs:
         return None
@@ -185,9 +195,7 @@ def measurements(records, seed):
     hours = sum(float(r["truth"]["spec"]["hours"]) for r in normal)
     secondary = {
         "accuracy": proportion([a == b for a, b in diagnoses]),
-        "hallucination_rate": proportion(
-            [r["observed"]["hallucinated"] for r in records if "hallucinated" in r["observed"]]
-        ),
+        "hallucination_rate": hallucination_rate(records),
         "false_alerts_per_hour": {
             "k": alerts,
             "n": len(normal),
