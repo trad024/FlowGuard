@@ -115,10 +115,11 @@ P1 stress thresholds (`agents/flowguard/monitor.py`, frozen), set by the rule fi
 node series were seen (per recording, the median ratio against allocatable; the midpoint
 between the highest unstressed and the lowest stressed recording when they separate) on the
 recordings with node series (`monitor_replay.py p1`): CPU 0.507 (unstressed medians 0.022 and
-0.023, stressed 0.990 to 0.992, separated); memory stays 0.90, provisional (every recorded
-node stress is CPU stress, so no recording is memory-stressed and memory medians are 0.154 to
-0.165 throughout); restarts: any restart of a non-canary pod in the last 5 minutes (none in any
-recording). One unstressed release (r-68579c3d) peaks at 0.992 CPU for a moment: P1 answers from
+0.023, stressed 0.990 to 0.992, separated); memory 0.90, final: a fixed choice, not set from
+data, since every recorded node stress is CPU stress and no recording is memory-stressed
+(memory medians 0.154 to 0.165 throughout); it is untested on real memory stress (none was
+recorded), which the report states as a limitation; restarts: any restart of a non-canary pod
+in the last 5 minutes (none in any recording). One unstressed release (r-68579c3d) peaks at 0.992 CPU for a moment: P1 answers from
 the latest poll, so such a peak reads as stress.
 
 ## DSO3 by replay (D15, step 8)

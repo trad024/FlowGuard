@@ -411,8 +411,9 @@ def test_p1_answer_claims_with_series_refs():
 
 def test_p1_thresholds_are_frozen():
     """Set from the recordings-2 node series by the rule in monitor.py, then frozen: cpu from
-    the separated medians (0.023 unstressed, 0.990 stressed), memory provisional (no recording
-    is memory-stressed), any restart of a non-canary pod. Changing them needs a decision."""
+    the separated medians (0.023 unstressed, 0.990 stressed); memory 0.90, final, a fixed choice
+    and not set from data (no recording is memory-stressed; untested on real memory stress, a
+    stated limitation); any restart of a non-canary pod. Changing them needs a decision."""
     assert (monitor.P1_CPU, monitor.P1_MEMORY, monitor.P1_RESTARTS) == (0.507, 0.90, 1.0)
 
 
