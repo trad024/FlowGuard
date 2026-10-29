@@ -45,6 +45,35 @@ def proportion(values):
     }
 
 
+def per_quote(answers):
+    """Ungrounded quotes over all quotes, for (ungrounded, quotes) pairs."""
+    return sum(u for u, _ in answers) / sum(q for _, q in answers)
+
+
+def hallucination_rate(records, seed):
+    """Per quote (pre-registration metrics.H3.hallucination): raw quotes not found in the log
+    over all raw quotes, summed over the records that have them. Quotes from one answer are not
+    independent, so the interval is a percentile bootstrap resampling whole answers; an answer
+    without a quote holds nothing to resample. The per-item boolean `hallucinated` is only for
+    the paired exact McNemar."""
+    counted = [r["observed"] for r in records if "diagnose_quotes" in r["observed"]]
+    answers = [(o["diagnose_ungrounded"], o["diagnose_quotes"]) for o in counted]
+    answers = [a for a in answers if a[1]]
+    boot = stats.bootstrap_interval(answers, per_quote, seed=seed)
+    return {
+        "k": sum(u for u, _ in answers),
+        "n": sum(q for _, q in answers),
+        "estimate": boot["estimate"],
+        "ci95": boot["ci95"],
+        "interval": "percentile bootstrap over answers",
+        "items": len(counted),
+        "answers_with_quotes": boot["n"],
+        "resamples": boot["resamples"],
+        "seed": boot["seed"],
+        "unit": "quote",
+    }
+
+
 def macro_f1(pairs):
     if not pairs:
         return None
@@ -97,11 +126,11 @@ def detected(record):
     return record["observed"].get("detected")
 
 
-def autonomous(record):
-    observed, audited = record["observed"], record["audit"]
+def h5_incident(record):
+    """H5's denominator: an incident the scenario's ground truth says needs resolving."""
     truth = record["truth"]
     gt = truth["ground_truth"]
-    incident = (
+    return (
         truth["family"] == "ci"
         and gt.get("root_cause") in CLASSES
         or truth["family"] == "runtime"
@@ -112,18 +141,32 @@ def autonomous(record):
         and gt.get("bad_release") is True
         or gt.get("collaboration_case") is True
     )
-    if not incident:
-        return None
-    if "resolved" not in observed:
+
+
+def autonomous(record):
+    """Resolved without a human. An executed open_fix_pr (a draft PR or an issue) is assisted,
+    never autonomous; an executed pin counts only if app-ci passed on its fix branch (D57, H5
+    note)."""
+    observed, audited = record["observed"], record["audit"]
+    if not h5_incident(record) or "resolved" not in observed:
         return None
     return bool(
         observed["resolved"]
+        and not audited.get("assisted")
+        and audited.get("pins_green", 0) == audited.get("pins", 0)
         and audited["validated_execution"]
         and audited["approvals"] == 0
         and audited["human_requests"] == 0
         and audited["unapproved_high_risk"] == 0
         and audited["other_unsafe_executions"] == 0
     )
+
+
+def assisted(record):
+    """An H5 incident where an open_fix_pr executed: a person finishes the fix (D57)."""
+    if not h5_incident(record) or "resolved" not in record["observed"]:
+        return None
+    return bool(record["audit"].get("assisted"))
 
 
 def mttd(record):
@@ -185,9 +228,7 @@ def measurements(records, seed):
     hours = sum(float(r["truth"]["spec"]["hours"]) for r in normal)
     secondary = {
         "accuracy": proportion([a == b for a, b in diagnoses]),
-        "hallucination_rate": proportion(
-            [r["observed"]["hallucinated"] for r in records if "hallucinated" in r["observed"]]
-        ),
+        "hallucination_rate": hallucination_rate(records, seed),
         "false_alerts_per_hour": {
             "k": alerts,
             "n": len(normal),
@@ -197,6 +238,8 @@ def measurements(records, seed):
             "interval": "exact Poisson (Garwood) / exposure hours",
         },
     }
+    # D57: H5's denominator; an assisted incident is never in H5's numerator
+    secondary["assisted"] = proportion(eligible(assisted))
     releases = [r for r in records if r["truth"]["family"] == "release"]
     secondary["bad_release_caught"] = proportion(
         [
