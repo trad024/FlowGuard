@@ -163,6 +163,23 @@ def test_agents_mode_canary_keeps_the_steps_and_waits_for_release_instead_of_l0(
     assert not any("agents" in r for r in deployed)
 
 
+def test_the_agent_service_reader_can_only_read_rollouts():
+    docs = list(yaml.safe_load_all((INFRA / "base" / "flowguard-reader.yaml").read_text()))
+    roles = [d for d in docs if d["kind"] in ("Role", "ClusterRole")]
+    assert {r["kind"] for r in roles} == {"Role"}  # namespaced, no cluster-wide rights
+    assert {r["metadata"]["namespace"] for r in roles} == set(ENVIRONMENTS)
+    for role in roles:
+        assert role["rules"] == [
+            {"apiGroups": ["argoproj.io"], "resources": ["rollouts"],
+             "verbs": ["get", "list", "watch"]}
+        ]  # fmt: skip
+    bindings = [d for d in docs if d["kind"] == "RoleBinding"]
+    assert {b["metadata"]["namespace"] for b in bindings} == set(ENVIRONMENTS)
+    assert all(b["subjects"][0]["name"] == "flowguard-reader" for b in bindings)
+    base = yaml.safe_load((INFRA / "base" / "kustomization.yaml").read_text())
+    assert "flowguard-reader.yaml" in base["resources"]
+
+
 def test_l0_thresholds_are_frozen():
     # Changing these values changes the DSO3 baseline: update the blueprint first.
     template = next(doc for _, doc in manifests() if doc["kind"] == "AnalysisTemplate")

@@ -14,7 +14,15 @@ from flowguard.contracts import AgentName
 from flowguard.executor import Executor
 from flowguard.incidents import IncidentRecord
 from flowguard.orchestrator import Orchestrator, level
-from flowguard.service import RolloutState, Service, make_orchestrator, report, rollout_state
+from flowguard.service import (
+    RolloutReader,
+    RolloutState,
+    Service,
+    abort_of,
+    make_orchestrator,
+    report,
+    rollout_state,
+)
 
 T = 1_800_000_000.0
 
@@ -75,7 +83,7 @@ class Source:
         return series.index(shifted)
 
 
-def make(tmp_path, raw, states, name="L1", approve=True):
+def make(tmp_path, raw, states, name="L1", approve=True, rollouts=None):
     db = tmp_path / "state.db"
     audit = AuditLog(db, level=name)
     orch = Orchestrator(
@@ -85,7 +93,7 @@ def make(tmp_path, raw, states, name="L1", approve=True):
         audit=audit,
         approver=SimulatedApprover(policy=lambda p: approve),
     )
-    return Service(orch, Source({**raw, **rollout_series(states)}))
+    return Service(orch, Source({**raw, **rollout_series(states)}), rollouts=rollouts)
 
 
 STEADY = {"staging": (False, "old", "old"), "prod": (False, "old", "old")}
@@ -258,3 +266,88 @@ def test_report_prints_one_line_per_incident(tmp_path, capsys):
     report(svc.tick(T + 120)[2])
     line = json.loads(capsys.readouterr().out)
     assert line["proposals"] == ["rollout_promote"] and line["gate"] == ["ask_human/approved"]
+
+
+# ---------------------------------------------------------------- an aborted Rollout (D44)
+
+
+def status(**fields):
+    """A Rollout as the Kubernetes API returns it, reduced to its status."""
+    return {"kind": "Rollout", "status": {"currentPodHash": "new", "stableRS": "old", **fields}}
+
+
+@pytest.mark.parametrize(
+    ("rollout", "expected"),
+    [
+        (status(abort=True, phase="Degraded"), ("new", "old")),
+        (
+            status(
+                phase="Degraded", message="RolloutAborted: Rollout aborted update to revision 3"
+            ),
+            ("new", "old"),
+        ),  # fmt: skip
+        (status(abort=True), ("new", "old")),  # status.abort alone
+        (
+            status(phase="Degraded", message="ProgressDeadlineExceeded: ReplicaSet has timed out"),
+            None,
+        ),  # Degraded, but not aborted: not Release's to undo  # fmt: skip
+        (status(phase="Paused", abort=False), None),
+        (status(phase="Healthy", currentPodHash="old"), None),
+        ({"status": {"abort": True}}, None),  # no revision to name
+        (None, None),
+    ],
+)
+def test_an_abort_is_read_from_the_rollout_status(rollout, expected):
+    assert abort_of(rollout) == expected
+
+
+def test_an_aborted_rollout_gets_one_undo_through_the_gate_and_a_human(tmp_path):
+    current = {"prod": status(abort=True, phase="Degraded"), "staging": status(phase="Healthy")}
+    svc = make(tmp_path, {}, STEADY, rollouts=lambda ns: current[ns])
+    outs = [o for o in svc.tick(T) if o.get("agent") == "release"]
+    (undo,) = outs
+    assert undo["event"].environment == "prod" and undo["event"].payload["params"]["aborted"]
+    (p,) = undo["output"].proposals
+    assert (p.action, p.environment, p.params["canary_hash"]) == ("rollout_undo", "prod", "new")
+    (d,) = undo["decisions"]
+    assert (d.tier, d.outcome, d.human_verdict) == ("high", "ask_human", "approved")
+    assert undo["results"][0].success  # dry run
+    incident, _ = svc.orch.record.incident(undo["incident_id"])
+    assert incident.source == "rollout" and incident.environment == "prod"
+    # Not asked again while the same revision stays aborted (a denial would stand)
+    assert not [o for o in svc.tick(T + 30) if o.get("agent") == "release"]
+    # Back to healthy, then a new abort of that revision: asked again
+    current["prod"] = status(phase="Healthy", currentPodHash="old")
+    assert not [o for o in svc.tick(T + 60) if o.get("agent") == "release"]
+    current["prod"] = status(abort=True, phase="Degraded")
+    assert [
+        o["output"].proposals[0].action for o in svc.tick(T + 90) if o.get("agent") == ("release")
+    ] == ["rollout_undo"]
+
+
+def test_without_a_status_reader_or_with_an_api_error_the_poll_goes_on(tmp_path, capsys):
+    assert len(make(tmp_path / "a", {}, STEADY).tick(T)) == 2  # the two Monitor ticks only
+
+    def broken(ns):
+        raise OSError("connection refused")
+
+    svc = make(tmp_path / "b", {}, STEADY, rollouts=broken)
+    assert len(svc.tick(T)) == 2
+    errors = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert {e["rollout_status"] for e in errors} == {"staging", "prod"}
+
+
+def test_the_reader_only_gets_the_rollout_with_its_token():
+    seen = []
+
+    def get(request, ca_file):
+        seen.append((request.full_url, request.get_method(), request.headers, ca_file))
+        return json.dumps(status(abort=True)).encode()
+
+    reader = RolloutReader("https://127.0.0.1:6550/", "t0ken", "ca.crt", get=get)
+    assert abort_of(reader("prod")) == ("new", "old")
+    ((url, method, headers, ca),) = seen
+    assert (
+        url == "https://127.0.0.1:6550/apis/argoproj.io/v1alpha1/namespaces/prod/rollouts/podinfo"
+    )
+    assert method == "GET" and headers["Authorization"] == "Bearer t0ken" and ca == "ca.crt"

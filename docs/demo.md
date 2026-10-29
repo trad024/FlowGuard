@@ -56,6 +56,24 @@ human, the loop waits too, for at most 10 minutes; no answer counts as a denial.
 
 Without `--live` the executor is a dry run: everything happens except the write to the cluster.
 
+### Following up an aborted Rollout (optional, D44)
+
+An abort is in the Rollout's status, which Prometheus does not carry. To let the service see
+it, give it the read-only `flowguard-reader` token (get, list and watch on Rollouts in staging
+and prod, `infra/base/flowguard-reader.yaml`) and the cluster's CA:
+
+```powershell
+New-Item -ItemType Directory -Force state | Out-Null
+kubectl -n monitoring create token flowguard-reader --duration 8h | Set-Content -NoNewline state\kube-token
+$ca = kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}'
+[IO.File]::WriteAllBytes("$PWD\state\kube-ca.crt", [Convert]::FromBase64String($ca))
+py -m flowguard.service --level L1 --live --kube-token-file state\kube-token --kube-ca-file state\kube-ca.crt
+```
+
+The start line then says `"abort_follow_up": "on"`. When a watched Rollout is aborted, Release
+proposes `rollout_undo` once for that revision; it is high tier, so the approval page always
+asks.
+
 ## Grafana (T2, optional)
 
 ```powershell
