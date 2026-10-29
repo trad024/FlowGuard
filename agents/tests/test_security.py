@@ -182,3 +182,25 @@ def test_checksum_corruption_escalates(tmp_path):
     path.write_bytes(SAMPLE.read_bytes() + b"\n")
     path.with_suffix(".json").write_text(SAMPLE.with_suffix(".json").read_text())
     assert run(reports("LOW", False), epss=path).proposals[0].action == "request_security_review"
+
+
+def test_exact_cvss_seven_threshold_uses_integer_basis_points(monkeypatch):
+    from flowguard.epss import load
+
+    snapshot = load(SAMPLE)
+    snapshot.scores["CVE-2026-56851"] = 0.0
+    monkeypatch.setattr("flowguard.security.load_epss", lambda _: snapshot)
+    report = reports("HIGH", None, "2")
+    vuln = report["trivy"]["Results"][0]["Vulnerabilities"][0]
+    vuln["CVSS"] = {"nvd": {"V3Score": 7.0}}
+    proposal = run(report).proposals[0]
+    explanation = proposal.params["score_explanation"]
+    assert explanation["score_basis_points"] == explanation["threshold_basis_points"] == 5000
+    assert proposal.params["security_score"] == 0.5
+    assert proposal.action == "request_security_review"
+    # Explicit unreachability lowers this by 500 bp; unknown remains conservative.
+    vuln["Reachable"] = False
+    proposal = run(report).proposals[0]
+    assert proposal.params["score_explanation"]["score_basis_points"] == 4500
+    assert proposal.action == "allow_with_findings"
+    assert RiskGate().decide(proposal, confidence=1).outcome == "ask_human"

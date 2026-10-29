@@ -33,7 +33,10 @@ priority = 0.50 ? (CVSS base / 10)
 ```
 
 Aggregate by the **maximum** finding score, not the sum of duplicated image-layer entries.
-A score at least **0.50** proposes `request_security_review`; a lower score proposes
+The decision compares integer basis points against **5,000** (0.50): calculate the
+weighted total in decimal, then round once to the nearest basis point, half up. With
+CVSS 7.0, EPSS 0, unknown runtime/reachability and an available fix, the total is
+exactly 0.500 = 5,000 bp and requests review. A score at least **0.50** proposes `request_security_review`; a lower score proposes
 `allow_with_findings`. Only a clean scan can propose `allow_deployment`.
 
 CVSS supplies the largest impact term; EPSS adds independently published exploitation
@@ -100,15 +103,39 @@ is a tiny offline fixture, not a complete operational feed. Unit tests inject do
 and never use the network. The development replay explicitly selects the committed sample
 so it reproduces offline.
 
+## Govulncheck reachability in app-ci
+
+The scans job installs **govulncheck v1.4.0** and runs a source/symbol scan with JSON output
+on the same checked-out app commit. This version uses Go 1.25 or newer, compatible with the
+app's Go 1.26 toolchain. Raw JSON, mapping status and enriched Trivy JSON are retained in
+scan-reports. Vulnerability findings do not themselves fail CI; the Security gate still
+decides. A failed/unsupported scan leaves reachability unknown.
+
+The offline adapter maps each finding's Go advisory ID through OSV CVE aliases. In a
+completed source/symbol scan, a function trace establishes reachable; explicit module or
+package findings without a called function establish unreachable. Any positive trace wins
+across repeated findings. A CVE absent from findings, missing aliases, a package-only scan,
+wrong scanner version, malformed/truncated data or a failed scan never establishes false.
+Only mapped CVEs receive the `Reachable` boolean; other Trivy findings retain unknown.
+Runtime dependency scope is not inferred from reachability.
+
+Sources: [pinned module requirements](https://go.googlesource.com/vuln/+/refs/tags/v1.4.0/go.mod)
+and [Go's JSON protocol documentation](https://pkg.go.dev/golang.org/x/vuln/internal/govulncheck).
+The mapper does not run govulncheck or the network. Tests use small synthetic protocol messages.
+The new CI step has not yet run against a live app-ci commit on this feature branch.
+
 ## Development replay and limitations
 
-The three sanitized development cases come from Actions runs 40383618943 (secret),
-40501662040 (low-severity dependency control), and 40500780155 (vulnerable dependency).
-Original scan-reports artifact IDs are 12680645324, 12733287463 and 12733410878. Full raw
-artifacts remain outside git; only CVE/severity/fix/CVSS values and counts are retained.
-The original vulnerable-dependency report gives CVSS 7.5 for CVE-2026-56851 and
-CVE-2026-56852. Their real 2026-10-28 EPSS values are 0.00466 and 0.00475. Unknown scope
-and reachability remain explicit. The maximum score is 0.526425, requesting review.
+There are **14 real recorded development scan cases**, including 12 security-negative
+controls. Nine are dev-branch CI runs, three are the previously recorded development
+security cases, and two are named development release recordings. Unknown scenario IDs
+were excluded. Source branch, commit, run/artifact IDs and raw-report SHA-256 are recorded
+per case in `ci/security/dev-cases.json`. Raw artifacts and secrets stay outside git.
+Repeated clean builds are not independent vulnerability examples.
+
+The vulnerable report has CVSS 7.5 for CVE-2026-56851/56852 and real pinned EPSS values
+0.00466/0.00475. Its maximum score is 0.526425 (5,264 bp), requiring review. The score is
+retrospective on these historical artifacts using the documented 2026-10-28 snapshot.
 
 ```powershell
 python ci/security/replay.py
@@ -116,19 +143,23 @@ python ci/security/replay.py
 
 | Policy | Block | Review | Allow | False blocks / controls |
 |---|---:|---:|---:|---:|
-| L0 | 2 | 0 | 1 | 0/1 |
-| Transparent score | 1 | 1 | 1 | 0/1 |
+| L0 | 2 | 0 | 12 | 0/12 |
+| Transparent score | 1 | 1 | 12 | 0/12 |
 
-Both have zero measured false blocks on one control (Wilson 95% interval 0?79.35%). The
-single secret is blocked by both. No critical occurs in these three runs, so measured
-critical recall is undefined; hard-rule coverage comes from tests. Review does not mean
-permission to deploy, and is not counted as a block. No deployment executes in this replay.
-No improvement in false-block rate, calibrated risk prediction, or generalization is claimed.
-The original scanner emitted HIGH/CRITICAL findings only: MEDIUM, dev-only and explicit
-reachability cases are synthetic unit checks, not additional real validation examples.
+Both false-block Wilson 95% intervals are 0-24.25%. The secret is blocked by both. There
+are no actual critical cases, so critical recall is undefined; hard rules are verified by
+unit tests. No deployment executes. Review is not permission to deploy or a counted block.
 
-Verified: real FIRST daily download and checksum, verified cache reuse, real CVSS preservation,
-offline paired replay, hard rules with corrupt context, missing-data escalation, arithmetic
-contributions, explicit scope/reachability, human routing, ablation switching and firewall.
-The PR records the final full-suite count. Not verified: live deployment, production policy
-quality, SonarCloud service integration or final evaluation. No frozen-file change is needed.
+**No observed development case changes decision because of EPSS:** setting EPSS to zero
+in the diagnostic leaves every decision unchanged. **No reachability-changing development
+case exists in this set**, because the retained reports predate govulncheck and all lack
+reachability measurements. The mapper's effect is demonstrated only in synthetic tests,
+not claimed as a real-world improvement. Unknown runtime/reachability score 1.0; thus HIGH
+CVSS >= 7.0 requests review even at EPSS zero unless explicit exposure evidence reduces it.
+
+Verified: 14-case offline paired replay, exact 5,000-bp boundary, hard rules, conservative
+missing data, malformed govulncheck protocol handling, alias/trace precedence, human routing,
+firewall, mocked EPSS acquisition and real FIRST cache verification from the earlier run.
+The workflow YAML is parsed and the tool is pinned; CI tests never invoke scans/network.
+Not verified: running the new govulncheck step, live deployment, production effectiveness,
+SonarCloud service integration or held-out evaluation. Frozen files remain unchanged.

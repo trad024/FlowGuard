@@ -10,13 +10,15 @@ import math
 import os
 import re
 from dataclasses import dataclass, field
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from flowguard.contracts import AgentName, Finding
 from flowguard.epss import load as load_epss
 
 WEIGHTS = {"cvss": 0.50, "epss": 0.30, "runtime": 0.10, "reachable": 0.05, "no_fix": 0.05}
-THRESHOLD = 0.50
+THRESHOLD_BPS = 5000
+THRESHOLD = THRESHOLD_BPS / 10000
 EPSS = Path(__file__).resolve().parents[2] / "state/epss/current.csv"
 
 COUNT_KEYS = ("trivy_high", "trivy_critical", "gitleaks")
@@ -204,6 +206,10 @@ def score(scan: Scan, snapshot):
             "no_fix": 0.0 if finding.fix_available is True else 1.0,
         }
         contributions = {name: WEIGHTS[name] * value for name, value in values.items()}
+        exact = sum(
+            Decimal(str(WEIGHTS[name])) * Decimal(str(value)) for name, value in values.items()
+        )
+        basis_points = int((exact * 10000).quantize(Decimal(1), rounding=ROUND_HALF_UP))
         items.append(
             {
                 "cve": cve or "unmapped finding",
@@ -215,15 +221,19 @@ def score(scan: Scan, snapshot):
                 "fix_available": finding.fix_available,
                 "normalized_values": values,
                 "contributions": contributions,
-                "score": sum(contributions.values()),
+                "score": float(exact),
+                "score_basis_points": basis_points,
                 "missing_required": missing,
             }
         )
-    worst = max(items, key=lambda item: item["score"])
+    worst = max(items, key=lambda item: (item["score_basis_points"], item["score"]))
     return worst["score"], {
         "method": "transparent_weighted_sum",
         "weights": WEIGHTS,
         "threshold": THRESHOLD,
+        "threshold_basis_points": THRESHOLD_BPS,
+        "score_basis_points": worst["score_basis_points"],
+        "rounding": "decimal weighted total, rounded once to integer basis points, half up",
         "aggregate": "maximum finding score",
         "findings": items,
         "worst_contributions": worst["contributions"],
@@ -278,7 +288,8 @@ class Security:
                 priority, explanation = score(scan, load_epss(self.epss_path))
                 action = (
                     "request_security_review"
-                    if priority >= THRESHOLD or explanation["missing_required"]
+                    if explanation["score_basis_points"] >= THRESHOLD_BPS
+                    or explanation["missing_required"]
                     else "allow_with_findings"
                 )
                 top = ", ".join(
