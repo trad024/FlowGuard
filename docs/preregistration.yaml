@@ -592,7 +592,8 @@ calibration:
     are the calibration set; coverage at epsilon 0.1 is reported on each template held
     apart. Validation-only fitting is dropped
   dev_coverage: >-
-    L1 67/74, L2 68/74 at a 90% target (2026-10-28, evaluation/diagnose_calibrate.py)
+    L1 67/74, L2 67/74 at a 90% target (L2 rerun under D51 on 2026-10-29;
+    evaluation/diagnose_calibrate.py)
 
 # ------------------------------------------------------------------ metrics
 # Every rate with its count (n) and a 95% Wilson interval; event rates per hour get an exact
