@@ -166,6 +166,31 @@ time gain); and L3's wrong-decision rate on the node-stress recordings (H4's cou
 rollback decisions, labelled by the recording, and reports coverage leave-one-recording-out.
 Everything is labelled "dev, in-sample".
 
+### Dev results (2026-10-29)
+
+| Set (dev, in-sample) | Level | Bad caught before 100% | False rollbacks | Median time to rollback | Wrong decisions |
+|---|---|---|---|---|---|
+| Primary: 32 agents-mode recordings (D54) | L0 (offline) | 15/20 (75%, 0.53 to 0.89) | 0/12 (0 to 0.24) | 60 s (n 15) | 5/32 |
+| | L3 | 15/20 (75%, 0.53 to 0.89) | 0/12 (0 to 0.24) | 90 s (n 15) | 5/32 |
+| | L4 | 15/20 (75%, 0.53 to 0.89), 3 escalated | 0/12 (0 to 0.24) | 60 s (n 12) | 5/32 |
+| Primary, steps with logged times only (28) | L0 / L3 / L4 | 14/18 at each level | 0/10 | 60 / 75 / 30 s | 4/28 |
+| Secondary: 28 recordings under the inline L0 analysis | L0 | 14/22 | 0/6 | 60 s | 8/28 |
+| | L3, L4 | 12/22 (3 truncated) | 0/6 | 60 s | 10/28 |
+| Secondary: 8 node-stress recordings (second dev set) | L0 | 1/2 | 0/6 | 216 s | 1/8 |
+| | L3, L4 | 0/2 (1 truncated) | 0/6 | none | 2/8 |
+
+Rates with n and 95% Wilson intervals; the three sets are never pooled. Primary set, step times:
+28 recordings from the Rollout's logged steps (poll), 3 from the pods-up estimate (made before
+the step logger started), 1 mixed (estimate at 20%, poll at 50%). L0 vs L3 on the primary set:
+each right once where the other is wrong (exact McNemar p = 1.0; r-88d6c93d near band caught by
+L3 only, r-917c6c62 below band by L0 only), median rollback-time gain 0 s (95% CI -30 to 30). L3
+lets through 4 below-band releases and the 0.05% control. L3 vs L4: P1 escalated 3 bad releases
+under node stress where L3 rolled back (r-3846eb8d, r-cdb74aaa, r-ef073e74); node-stress wrong
+decisions 0/12 at L3 and L4. Release's calibration (D9), refit on the 32 leave-one-recording-out:
+coverage 55/55 at a 90% target, but every prediction set holds both labels (mean size 2.0) and
+confidences lie between 0.7 and 0.8, so at a gate setting of 0.8 or more every Release action
+goes to a human. Per class and band: `evaluation/runs/dso3-agents-mode.json`.
+
 ## L3 retrieval index (step 7)
 
 ```powershell
