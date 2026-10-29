@@ -620,9 +620,13 @@ def ci_event(
     environment: str = "staging",
     service: str = "podinfo",
 ) -> Event:
-    """A finished CI run (GitHub's run and jobs JSON) and, if a job failed, its log (D49)."""
+    """A finished CI run (GitHub's run and jobs JSON) and, if a job failed, its log (D49). The
+    run's head commit and branch, when given, are what a fix starts from (D57, D64)."""
     failed = next((j for j in jobs if j.get("conclusion") == "failure"), None)
     params: dict = {"ts": t, "ci_run": {"run": run, "jobs": jobs}, "run_id": run.get("id")}
+    for key in ("head_sha", "head_branch"):
+        if run.get(key):
+            params[key] = run[key]
     if failed:
         params["job_id"] = failed.get("id")
     return Event(

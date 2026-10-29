@@ -2,6 +2,7 @@
 
     python scenarios/runner.py scenarios/dev/release-errors-05.yaml
     python scenarios/runner.py --validate scenarios/dev/*.yaml
+    python scenarios/runner.py --ci-agents dry-run|live scenarios/dev/<ci spec>.yaml  (D64)
 
 A spec (YAML, see scenarios/README.md) names a family, a fault, its intensity, the timing and
 the ground truth. Dev specs live in scenarios/dev/; scenarios/heldout/ is gitignored and kept
@@ -57,10 +58,12 @@ sys.path[:0] = [
 ]
 
 import ci_failures  # noqa: E402
+import ci_live  # noqa: E402
 import deployer  # noqa: E402
 import groundtruth  # noqa: E402
 import recorder  # noqa: E402
 from flowguard import github_actions  # noqa: E402
+from flowguard.approval import ApprovalPage  # noqa: E402
 from flowguard.audit import AuditLog  # noqa: E402
 
 FAMILIES = {
@@ -82,6 +85,11 @@ BASE_COMMAND = ["./podinfo", "--port=9898", "--level=info", "--port-metrics=9797
 GOMOD, GOSUM = "app/podinfo/go.mod", "app/podinfo/go.sum"
 RUNS = ROOT / "evaluation" / "runs"
 CI_TIMEOUT_S = 2400  # the longest a scenario waits for an app-ci run to complete
+
+
+def dotenv() -> dict:
+    """The process environment over .env, as the deployer reads it."""
+    return {**deployer.read_env_file(ROOT / ".env"), **os.environ}
 
 
 # ---------------------------------------------------------------- spec
@@ -763,9 +771,25 @@ STRESS_POD = {
 
 
 class Runner:
-    def __init__(self, spec: dict, run_id: str | None = None, mode: str = "l0"):
+    def __init__(
+        self,
+        spec: dict,
+        run_id: str | None = None,
+        mode: str = "l0",
+        ci_agents: str = "off",
+        approval_port: int = 8765,
+        approval_timeout_s: float = 3600,
+    ):
+        if ci_agents not in ci_live.MODES:
+            raise ValueError(f"ci_agents must be one of {ci_live.MODES}")
+        if ci_agents != "off" and spec["family"] != "ci":
+            raise ValueError("the live CI path (D64) is for the ci family")
         self.spec = spec
         self.mode = mode  # "agents": recorded under the agents-mode canary (D54)
+        # D64: the agents decide once at L5 on a failed ci run, with a dry-run or live executor
+        self.ci_agents = ci_agents
+        self.approval = (approval_port, approval_timeout_s)
+        self.ci_diagnose = None  # L5's Diagnose, built before anything is pushed
         self.run_id = run_id or new_run_id()
         self.rng = random.Random(self.run_id)
         self.env = spec.get("environment", "staging")
@@ -1086,6 +1110,8 @@ class Runner:
             raise RuntimeError("commit delivery needs a clean dev checkout")
         cfg = deployer.load_config(ROOT / ".env")
         github = deployer.GitHub(cfg)
+        if self.ci_agents != "off":  # fail here, before a branch is pushed, if L5 cannot run
+            self.prepare_ci_agents()
         branch = f"scenario/{self.run_id}"
         saved = deployer.container(self.cluster.rollout())
         self.git("switch", "-q", "-c", branch)
@@ -1112,7 +1138,14 @@ class Runner:
             if self.spec["family"] == "ci":
                 self.observed["l0"] = self.observed["ci"]
                 self.event("l0_outcome", outcome=self.observed["l0"], run_id=ci_runs[:1])
-                self.record_fix_ci(github)
+                if self.ci_agents != "off" and run and run.get("conclusion") == "failure":
+                    try:
+                        self.decide_ci(cfg, run)
+                    except Exception as exc:  # the run's own recording must survive
+                        self.observed["agents"] = {"error": str(exc)[:300]}
+                        self.event("agents_failed", **self.observed["agents"])
+                    if self.ci_agents == "live":  # a dry run starts no fix-branch run
+                        self.observed["fix_ci"] = self.record_fix_ci(github)
                 return ci_runs, []
             if run and self.spec["family"] == "pipeline":
                 self.observed["job_seconds"] = job_seconds(github, run["id"])
@@ -1156,6 +1189,51 @@ class Runner:
                 ["git", "-C", str(ROOT), "branch", "-q", "-D", branch], capture_output=True
             )
             self.event("branch_deleted", branch=branch, pushed=pushed)
+
+    def prepare_ci_agents(self) -> None:
+        """L5's Diagnose for the live CI path (D64); refuses if its method is missing."""
+        if self.ci_diagnose is None:
+            audit = AuditLog(self.audit.path, self.run_id, ci_live.LEVEL)  # LLM calls at L5
+            self.ci_diagnose = ci_live.l5_diagnose(dotenv(), audit)
+        if problem := self.ci_diagnose.missing(ci_live.level(ci_live.LEVEL)):
+            raise RuntimeError(f"refusing to start: {problem}")
+
+    def decide_ci(self, cfg, run: dict, approver=None) -> dict:
+        """D64: the agents decide once at L5 on the failed run, from the event the replay
+        builds; proposals, gate decisions, approvals and executions go to the audit log at L5.
+        A human approves on the approval page (127.0.0.1); a dry run writes nothing to GitHub."""
+        self.prepare_ci_agents()
+        live = self.ci_agents == "live"
+        with tempfile.TemporaryDirectory() as tmp:
+            reader = recorder.GitHubReader(cfg.repo, cfg.token)
+            event = ci_live.failed_run_event(reader, run["id"], Path(tmp) / self.run_id)
+        if event is None:
+            self.observed["agents"] = {"skipped": "the failed run has no failed job log"}
+            self.event("agents_skipped", run_id=run["id"], **self.observed["agents"])
+            return self.observed["agents"]
+        page = approver
+        if page is None:
+            port, timeout_s = self.approval
+            page = ApprovalPage(port=port, timeout_s=timeout_s)
+            print(json.dumps({"approval_page": page.url, "timeout_s": timeout_s}), flush=True)
+        try:
+            out = ci_live.decide(
+                event,
+                self.audit.path,
+                self.run_id,
+                diagnose=self.ci_diagnose,
+                read_client=github_actions.urllib_transport(cfg.token),
+                repo=cfg.repo,
+                approver=page,
+                live=live,
+                token=dotenv().get("GITHUB_TOKEN_WRITE", "") if live else "",
+            )
+        finally:
+            if approver is None:
+                page.close()
+        self.observed["agents"] = out
+        self.event("agents_decided", **out)
+        return out
 
     def wait_ci(
         self, github, sha: str, timeout: int = CI_TIMEOUT_S, sleep=time.sleep
@@ -1243,6 +1321,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("specs", nargs="+", type=Path)
     parser.add_argument("--validate", action="store_true", help="only check the specs")
+    parser.add_argument(
+        "--ci-agents",
+        choices=ci_live.MODES,
+        default="off",
+        help="ci family: the agents decide once at L5 on the failed run (D64); dry-run writes "
+        "nothing to GitHub",
+    )
+    parser.add_argument("--approval-port", type=int, default=8765)
+    parser.add_argument("--approval-timeout-min", type=float, default=60)
     args = parser.parse_args(argv)
     if args.validate:
         bad = 0
@@ -1254,7 +1341,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if bad else 0
     if len(args.specs) != 1:
         parser.error("run one scenario at a time")
-    out = Runner(load_spec(args.specs[0])).run()
+    out = Runner(
+        load_spec(args.specs[0]),
+        ci_agents=args.ci_agents,
+        approval_port=args.approval_port,
+        approval_timeout_s=args.approval_timeout_min * 60,
+    ).run()
     truth = json.loads((out / "ground_truth.json").read_text(encoding="utf-8"))
     print(
         json.dumps(

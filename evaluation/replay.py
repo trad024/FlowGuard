@@ -7,8 +7,9 @@ annotations, the load generator's per-pod log, the recorded Prometheus series (i
 L0 alerts). It never opens ground_truth.json: that file is for scoring, which happens outside
 this module. Each recording gives at most one event per kind:
 
-    ci_run_completed every recorded CI run: run and job states and timings, and the first
-                     failed job's log (D49: the Monitor sees it first)
+    ci_run_completed every recorded CI run: run and job states and timings, its head commit
+                     and branch, and the first failed job's log (D49: the Monitor sees it
+                     first); the live CI path builds its event with this same code (D64)
     scan_completed   the scan counts annotated by the scans job
     rollout_step     canary vs stable from the per-pod load log: 5xx ratios, and the counts
                      (requests, 5xx, slower than 500 ms) as one window for Release; the
@@ -38,8 +39,18 @@ def _json(path: Path):
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
-# What a CI system shows about a run, without commit messages or branch names
-RUN_FIELDS = ("id", "status", "conclusion", "run_started_at", "updated_at")
+# What a CI system shows about a run, without commit messages. The head commit and branch are
+# what a fix starts from (D57, D64); a scenario's branch is the opaque scenario/r-<hex> form the
+# leakage checks allow.
+RUN_FIELDS = (
+    "id",
+    "status",
+    "conclusion",
+    "run_started_at",
+    "updated_at",
+    "head_sha",
+    "head_branch",
+)
 JOB_FIELDS = ("id", "name", "status", "conclusion", "started_at", "completed_at")
 
 
