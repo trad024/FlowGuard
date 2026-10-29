@@ -1,6 +1,6 @@
 # Expanded development security cases
 
-Eight real app-ci cases: 0/8 decisions changed due to EPSS and 2/8 due to reachability.
+Eight real app-ci cases: 0/8 decisions changed due to EPSS and 2/8 due to reachability. **EPSS effect not tested (masked by critical findings).** Every high-EPSS case also had a CRITICAL finding that blocks before scoring.
 
 Each decision uses every real scan finding in the image. EPSS effects compare actual L1 with the same case at zero EPSS; reachability effects compare actual L1 with measured reachability replaced by unknown. Missing EPSS remains missing; hard rules remain active.
 
@@ -26,7 +26,7 @@ FIRST source: [2026-10-28](https://epss.empiricalsecurity.com/epss_scores-2026-1
 - CSV SHA-256: `16ff6e9063ce2e2b31efbfa9bf98b574d501f84f22056861d31f3610665b5d06`
 - Gzip SHA-256: `aa9eefe4155babd88985c26528087bba5053405d4d64aed85ea5dc5c2e16c4e9`
 
-These eight cases contain only three distinct target CVEs, including paired versions of the same CVE. They test policy paths and are not eight independent vulnerability families or evidence of generalization. Both older x/net cases need a compatible gRPC pin; that pin has a real CRITICAL finding, so both cases block under the hard rule regardless of EPSS. Current fixed gRPC versions require HTTP/2 APIs absent from the vulnerable x/net versions. These two cases establish high-EPSS coverage but do not isolate an EPSS-only decision effect. EPSS changed no whole-case decision.
+These eight cases contain only three distinct target CVEs, including paired versions of the same CVE. They test policy paths and are not eight independent vulnerability families or evidence of generalization. Both older x/net cases need a compatible gRPC pin; that pin has a real CRITICAL finding, so both cases block under the hard rule regardless of EPSS. Current fixed gRPC versions require HTTP/2 APIs absent from the vulnerable x/net versions. These two cases establish high-EPSS coverage but do not isolate an EPSS-only decision effect. **EPSS effect not tested (masked by critical findings).** The observed 0/8 decision changes do not identify the EPSS effect.
 
 The initial Rapid Reset candidate CVE-2023-44487 is MEDIUM in its current upstream advisory and cannot be a HIGH target. The same x/net v0.16.0 case instead uses its real HIGH CVE-2023-45288, with EPSS 0.91969; the correction is recorded in the plan. No scanner severity, CVSS, reachability or result was invented or filtered to make an action change. All observed findings remain in the replay JSON.
 

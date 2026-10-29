@@ -91,7 +91,9 @@ def markdown(summary):
         "# Expanded development security cases",
         "",
         f"Eight real app-ci cases: {summary['epss_changed_decisions']}/8 decisions changed "
-        f"due to EPSS and {summary['reachability_changed_decisions']}/8 due to reachability.",
+        f"due to EPSS and {summary['reachability_changed_decisions']}/8 due to reachability. "
+        "**EPSS effect not tested (masked by critical findings).** Every high-EPSS case "
+        "also had a CRITICAL finding that blocks before scoring.",
         "",
         "Each decision uses every real scan finding in the image. EPSS effects compare actual "
         "L1 with the same case at zero EPSS; reachability effects compare actual L1 with measured "
@@ -145,7 +147,9 @@ def markdown(summary):
         "gRPC pin; that pin has a real CRITICAL finding, so both cases block under the hard "
         "rule regardless of EPSS. Current fixed gRPC versions require HTTP/2 APIs absent "
         "from the vulnerable x/net versions. These two cases establish high-EPSS coverage "
-        "but do not isolate an EPSS-only decision effect. EPSS changed no whole-case decision.",
+        "but do not isolate an EPSS-only decision effect. **EPSS effect not tested "
+        "(masked by critical findings).** The observed 0/8 decision changes do not identify "
+        "the EPSS effect.",
         "",
         "The initial Rapid Reset candidate CVE-2023-44487 is MEDIUM in its current "
         "upstream advisory and cannot be a HIGH target. The same x/net v0.16.0 case instead "

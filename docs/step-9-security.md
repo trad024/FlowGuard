@@ -135,8 +135,9 @@ There are now **22 real recorded development scan cases**: the original 14 below
 deliberately selected HIGH-finding cases with real app-ci scans. The new eight have six
 reachable and two unreachable targets, six with fixed versions and two with no known fixed
 version, six low-EPSS and two high-EPSS cases. Reachability changes two whole-case L1 decisions;
-EPSS changes none. Two high-EPSS cases also have a CRITICAL compatibility dependency and
-therefore block under the hard rule. These are development diagnostics, not held-out results.
+EPSS changed 0/8 new decisions because every high-EPSS case also had a CRITICAL finding
+that blocks before scoring: **EPSS effect not tested (masked by critical findings).**
+These are development diagnostics, not held-out results.
 The [expanded report](security-dev-cases.md) records every requested field and the limitations.
 
 The **original 14 historical cases** include 12 security-negative
@@ -166,8 +167,9 @@ were no critical cases in that historical set. The expanded set now includes two
 critical-containing cases, both blocked by L0 and L1. No deployment executes during this
 replay. Review is not permission to deploy or a counted block.
 
-**No observed development case changes decision because of EPSS:** setting EPSS to zero
-leaves every decision unchanged in all 22 cases. **Two new cases change decision because
+**EPSS effect not tested (masked by critical findings).** Setting EPSS to zero changes
+0/8 new decisions (0/22 overall), but every high-EPSS case blocks on a CRITICAL finding
+before scoring. These cases do not identify the EPSS effect. **Two new cases change decision because
 of measured unreachability**, moving from review to allow with findings (still human-gated).
 The original 14 reports predate govulncheck. Unknown runtime/reachability score 1.0; thus HIGH
 CVSS >= 7.0 requests review even at EPSS zero unless explicit exposure evidence reduces it.
