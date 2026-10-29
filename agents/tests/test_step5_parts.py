@@ -211,6 +211,7 @@ def test_live_handlers_use_kubectl_and_github(tmp_path):
         token="t",
         kubectl=lambda args: calls.append(args) or "ok",
         github=lambda method, path: calls.append((method, path)) or 201,
+        json_github=lambda method, path, body=None: calls.append((method, path)) or (200, {}),
     )
 
     def run(action):
@@ -222,8 +223,8 @@ def test_live_handlers_use_kubectl_and_github(tmp_path):
     assert '"replicas": 3' in calls[-1][-1]
     assert run("rerun_workflow").success
     assert calls[-1] == ("POST", "/repos/trad024/FlowGuard/actions/runs/7/rerun-failed-jobs")
-    not_yet = run("open_fix_pr")
-    assert not not_yet.success and "Step 7" in not_yet.output
+    not_yet = run("reorder_jobs")
+    assert not not_yet.success and "Step 10" in not_yet.output
     executions = AuditLog(tmp_path / "a.db").query("SELECT success FROM executions")
     assert len(executions) == 4
 
