@@ -152,7 +152,7 @@ def test_logged_step_times_replace_the_estimate_and_old_recordings_keep_it(tmp_p
     runs = {r["id"]: r for r in rr.release_runs([tmp_path])}
     idx = {k: rr.load_index(r) for k, r in runs.items()}
     logged = rr.run_timeline(runs["r-logged"], idx["r-logged"])
-    assert logged["source"] == "rollout_events" and (logged["canary"], logged["stable"]) == (
+    assert logged["source"] == "argo" and (logged["canary"], logged["stable"]) == (
         "new", "old"
     )  # fmt: skip
     assert {w: t - T0 for w, t in logged["steps"].items()} == {20: 57, 50: 205}
@@ -185,8 +185,9 @@ def test_logged_step_times_replace_the_estimate_and_old_recordings_keep_it(tmp_p
     rr.replay(runs["r-logged"], "L3", tmp_path, idx["r-logged"])
     assert looks[:4] == [87, 117, 147, 177] and looks[4] == 235
     result = rr.score(list(runs.values()))
-    assert result["timeline_sources"] == {"rollout_events": 2, "pods_up_estimate": 1}
-    assert result["per_recording"]["r-logged"]["timeline"] == "rollout_events"
+    assert result["step_source"] == {"argo": 2, "pods_up_estimate": 1}
+    assert result["step_source_fallback"] == ["r-old"]  # flagged in the results (D54)
+    assert result["per_recording"]["r-logged"]["step_source"] == "argo"
 
 
 @pytest.fixture(scope="module")

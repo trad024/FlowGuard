@@ -51,7 +51,7 @@ import json
 import statistics
 import sys
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -170,17 +170,27 @@ def timeline(idx: series.Index, namespace: str, t0: float, t1: float) -> dict | 
 
 
 def logged_timeline(rec: Path, namespace: str, t1: float) -> dict | None:
-    """The canary's steps from the runner's Rollout step log (recorder.RolloutStepLog), when
-    the recording has one: a step starts when the pause after its setWeight starts (Argo's
-    own startTime, so no estimate), and the canary ends at its abort (Argo's abortedAt, else
-    when the abort was seen) or when the last setWeight (100%) begins."""
+    """The canary's steps from the recording's Rollout step log, when it has one: a step starts
+    when the pause after its setWeight starts, and the canary ends at its abort or when the last
+    setWeight (100%) begins. The source is "argo" for the runner's log (recorder.RolloutStepLog:
+    Argo's own startTime and abortedAt) and "poll" for rows imported from the side logger
+    (step_log_import.py: when a 5 s poll saw the change, up to 5 s late)."""
     path = rec / recorder.ROLLOUT_EVENTS
     if not path.is_file():
         return None
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
     rows = [r for r in rows if r.get("namespace") == namespace]
+    # The canary: the first revision the log saw pause after its 20% setWeight
     first = next(
-        (r for r in rows if r.get("canary_hash") and r["canary_hash"] != r.get("stable_hash")),
+        (
+            r
+            for r in rows
+            if r.get("canary_hash")
+            and r["canary_hash"] != r.get("stable_hash")
+            and r.get("step") == "pause"
+            and r.get("set_weight") == 20
+            and r.get("pause_start")
+        ),
         None,
     )
     if first is None:
@@ -208,7 +218,7 @@ def logged_timeline(rec: Path, namespace: str, t1: float) -> dict | None:
         "steps": steps,
         "end": min(end, t1),
         "how": how,
-        "source": "rollout_events",
+        "source": "poll" if any(r.get("time_source") == "poll" for r in mine) else "argo",
     }
 
 
@@ -217,7 +227,10 @@ def run_timeline(run: dict, idx: series.Index) -> dict | None:
     only for recordings made before the step log existed."""
     ns = run["spec"].get("environment", "staging")
     logged = logged_timeline(Path(run["recording"]), ns, run["window"][1])
-    return logged or timeline(idx, ns, *run["window"])
+    estimate = timeline(idx, ns, *run["window"])
+    if logged and not logged["stable"] and estimate:  # a log without the stable hash
+        logged["stable"] = estimate["stable"]
+    return logged or estimate
 
 
 # ---------------------------------------------------------------- Release on a recording
@@ -436,6 +449,14 @@ def paired(runs: list[dict], a: dict[str, dict], b: dict[str, dict]) -> dict:
     }
 
 
+def classes(runs: list[dict]) -> dict[str, int]:
+    """Recordings per class: bad or good, per band."""
+    out: Counter = Counter()
+    for r in runs:
+        out[("bad" if r["ground_truth"].get("bad_release") else "good") + f" / {band(r)}"] += 1
+    return dict(sorted(out.items()))
+
+
 def node_series(run: dict) -> bool:
     return any(
         s.startswith("node") for s in run["manifest"].get("sources", {}).get("prometheus", {})
@@ -453,12 +474,12 @@ def node_stress(runs: list[dict], res: dict[str, dict]) -> dict:
 
 def score(runs: list[dict]) -> dict:
     results: dict[str, dict[str, dict]] = {"L0": {}, "L3": {}, "L4": {}}
-    live, idx_of, source = {}, {}, {}
+    live, idx_of, sources = {}, {}, {}
     metrics = l0_canary.load_template()
     with tempfile.TemporaryDirectory(prefix="dso3-replay-") as tmp:
         for r in runs:
             idx = idx_of[r["id"]] = load_index(r)
-            source[r["id"]] = (run_timeline(r, idx) or {}).get("source")
+            sources[r["id"]] = (run_timeline(r, idx) or {}).get("source")
             results["L0"][r["id"]] = l0_offline(r, idx, metrics)
             live[r["id"]] = l0_live(r, idx)
             for name in ("L3", "L4"):
@@ -469,12 +490,16 @@ def score(runs: list[dict]) -> dict:
     return {
         "label": LABEL,
         "recordings": len(runs),
+        "agents_mode": sum(r["observed"].get("mode") == "agents" for r in runs),
         "scored": len(usable),
+        "classes": classes(usable),
+        # argo: Argo's own step times; poll: imported from the side logger, up to 5 s late;
+        # pods_up_estimate: no step log, flagged for the report (D54)
+        "step_source": dict(sorted(Counter(sources[r["id"]] for r in usable).items())),
+        "step_source_fallback": sorted(
+            r["id"] for r in usable if sources[r["id"]] == "pods_up_estimate"
+        ),
         "no_canary": sorted(r["id"] for r in runs if r not in usable),
-        "timeline_sources": {
-            s: sum(source[r["id"]] == s for r in usable)
-            for s in ("rollout_events", "pods_up_estimate")
-        },
         "l0_live_agreement": agreement(usable, results["L0"], live),
         "needs_rerecording": needs_rerecording(usable, idx_of, results),
         "levels": {n: summary(usable, res) for n, res in results.items()},
@@ -486,7 +511,7 @@ def score(runs: list[dict]) -> dict:
             r["id"]: {
                 "bad": bool(r["ground_truth"].get("bad_release")),
                 "band": band(r),
-                "timeline": source[r["id"]],
+                "step_source": sources[r["id"]],
                 **{
                     n: {k: v for k, v in res[r["id"]].items() if k != "timeline"}
                     for n, res in results.items()

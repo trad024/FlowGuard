@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: draft
-version: 0.4
+version: 0.5
 drafted: 2026-10-27
 frozen: null
 amendments: []
@@ -33,7 +33,7 @@ freeze_rule:
     tagged `diagnose-freeze`; its runs on the test templates and on LogChunks may then start
     while Steps 6 and 8 are built. `eval-freeze` (all agent code) still comes before the
     held-out scenarios are generated and the rest of Step 11 runs.
-  - H4's count is the one amendment planned in advance (D44), see smallest_effect.H4.
+  - H4 is descriptive (D56), so the count amendment D44 planned for it is no longer needed.
 
 # ------------------------------------------------------------------ smallest effects of interest
 # The smallest difference worth detecting; the power analysis (D16) sizes the counts for these
@@ -55,14 +55,13 @@ smallest_effect:
        decision: D43; the hallucination rate (secondary) keeps -10 points}
   H4:
     metric: wrong decisions
-    difference: -50% relative
     levels: [L3, L4]           # the reference is L3, Release without collaboration (D44)
-    count_rule: >-
-      set after Step 8 from L3's wrong-decision rate measured on dev (node-stress release
-      scenarios), recorded as a dated amendment before the held-out set is generated; the
-      count gives 80% power at the Holm step for this family. If L3's dev wrong rate is
-      under 10%, H4 is reported descriptively (n, Wilson intervals, no test) and the
-      confirmatory family becomes H1 and H3.
+    role: descriptive (D56)
+    reason: >-
+      D44's rule, set before the rate was measured: L3's dev wrong-decision rate on the
+      node-stress release recordings is 0/5, under 10%, and node stress slows stable and
+      canary alike (D44 rescale). H4 is reported with n and Wilson intervals per level, no
+      test, and leaves the Holm family (H1 and H3)
 
 # ------------------------------------------------------------------ scenario families
 # count: null until the power analysis (D16) sets it; the v1 placeholders are noted.
@@ -74,8 +73,33 @@ smallest_effect:
 
 families:
   release:                       # DSO3, H4 (node stress), H5
-    count: null                  # set after Step 8 by smallest_effect.H4.count_rule (D44)
+    count: null                  # OPEN until the D54 dev recordings are scored
+    count_rule: >-
+      open. No confirmatory test rests on this family since D56, so the count will be set by
+      DSO3's precision once the agents-mode dev recordings (D54) are scored. Proposal under
+      review: 120, i.e. 12 per bad kind and band (6 cells, 72 bad releases: the bad-caught
+      rate's 95% Wilson half-width at most 0.113 at any rate) and 48 good ones, a quarter of
+      each under node stress (30 H4 cases)
     delivery: config
+    recording: >-
+      under the agents-mode canary (D53): the same steps and timed pauses as L0's Rollout, an
+      indefinite pause where L0 runs its analysis, no inline analysis. The runner holds each
+      indefinite pause 120 s (past Release's fourth look) and then resumes it, so every
+      canary reaches 100% and every level judges the same path (D54); a canary that does not
+      reach 100% within 15 minutes makes the run invalid
+    l0: >-
+      replayed offline (D54, evaluation/l0_canary.py): analysis-l0.yaml's interval, count,
+      failureLimit and thresholds read from the file, its two queries evaluated as Prometheus
+      3 does (left-open 1 minute range, rate extrapolation, counter resets, or vector(0),
+      histogram_quantile; empty and NaN results fail) after each step's 30 s pause, then
+      every 30 s; the second failure of a metric is a rollback. Step starts from the
+      Rollout's logged step changes, else the first `up` sample moved 7.5 s earlier (half
+      the 15 s scrape, derived, not tuned), flagged. On the 28 dev recordings made under the
+      inline analysis the replay gives L0's live decision in 27 (26 to 27 for any shift from
+      5 to 15 s); the other ends before its deciding measurement
+    release_data: >-
+      per pod-template hash from Prometheus (D21): requests and 5xx from the request counter,
+      requests slower than 500 ms from podinfo's histogram buckets (+Inf minus le 0.5, D55)
     kinds: {none: 0.4, http_errors: 0.3, latency: 0.3}
     bands:
       http_errors:               # the canary's 5xx ratio against L0's 1%
@@ -303,7 +327,7 @@ external:                        # D32: no manual labelling
       located and 81 not located are excluded and reported. The 150-log sample is
       superseded (its earlier 130 usable counted partly located logs too)
     sample:                     # D47, D48
-      size: 230                 # H3 at +15 points, Holm alpha/3 (D43)
+      size: 230                 # H3 at +15 points, Holm alpha/3 (D43); Holm across 2 since D56
       seed: logchunks-h3-20261028
       order: >-
         the 514 located logs sorted by SHA-256 of '<seed>:<log path>'; the first 230 visible
@@ -572,7 +596,10 @@ llm:
     examples to 1,000 and the answer to 600 tokens (D51), so one request stays under the free
     tier's 8,000 tokens per minute: the longest L3 request (the longest sampled LogChunks log
     with the 3 longest training examples) is 18,619 characters, about 6,500 prompt tokens at
-    the 2.87 characters per token measured on 74 Groq calls. Line
+    the 2.87 characters per token measured on 74 Groq calls. One real L3 call (2026-10-29,
+    the training log with the longest L3 request, 8,482 characters) used 2,930 prompt and
+    248 completion tokens; the response's per-minute header counted 3,199 tokens, prompt
+    plus completion, not prompt plus max_tokens (3,530). Line
     numbers follow the terminal view (newline-split, text after the last carriage return),
     as the LogChunks targets do (D48)
   model: openai/gpt-oss-120b     # pinned; logged per call; never mixed within one result set
@@ -606,7 +633,10 @@ metrics:
        secondary: [hallucination rate (quoted lines not in the log), line-level precision and recall, macro-F1 on the corpus]}
   H4: {primary: wrong decisions (false rollbacks and wrong fixes) in collaboration scenarios}
   H5: {primary: share of incidents resolved without a human at each gate setting,
-       constraint: 0 unapproved high-risk actions}
+       constraint: 0 unapproved high-risk actions,
+       note: an executed open_fix_pr (a draft PR, or an issue without a patch) counts as
+         assisted, never as resolved without a human; pin_dependency sets one module to one
+         version and is proposed only where a pin fixes the failure (D57)}
   DSO3: [bad releases caught before 100%, false rollbacks, time to rollback, change failure rate]
   DSO4: [injected criticals blocked, false-block rate]
   DSO5: [pipeline duration, failures missed vs full pipeline, time to first failure, MAE, AUC]
@@ -632,12 +662,13 @@ comparisons:                     # paired: same scenarios, seeds and order at ev
       paired bootstrap of the macro-F1 difference, 10000 resamples; all five methods reported
       with their intervals
   H3: {levels: [L2, L3], test: exact McNemar on hit / miss per LogChunks log; hallucination by exact McNemar and macro-F1 by paired bootstrap (secondary)}
-  H4: {levels: [L3, L4], test: exact McNemar on wrong / right decisions}
+  H4: {levels: [L3, L4], test: "none (D56): n and a Wilson interval per level, paired counts shown"}
   H5: {levels: [L5 settings], test: none; Wilson interval per setting, the constraint is a count}
 time_metrics: paired bootstrap intervals, 10000 resamples (MTTD, time to rollback, durations)
 multiplicity: >-
-  Holm correction across the confirmatory tests H1, H3 and H4 (D31, D42); H1 and H3 only if
-  H4 is descriptive (D44). Secondary and per-band results uncorrected, labelled as such
+  Holm correction across the confirmatory tests H1 and H3 (D31, D42, D56). H4 is descriptive.
+  The counts sized at Holm alpha/3 (H1's 220 incidents, H3's 230 logs) are kept, so their
+  power is somewhat above 80%. Secondary and per-band results uncorrected, labelled as such
 per_band: every release and runtime result is also reported per intensity band (descriptive)
 
 # ------------------------------------------------------------------ execution
