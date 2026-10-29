@@ -180,6 +180,17 @@ def test_the_agent_service_reader_can_only_read_rollouts():
     assert "flowguard-reader.yaml" in base["resources"]
 
 
+def test_the_reader_token_is_short_lived_and_stays_out_of_git():
+    """D59: the documented token is created with an expiry, and it and the CA go to state/."""
+    root = INFRA.parent
+    demo = (root / "docs" / "demo.md").read_text(encoding="utf-8")
+    creates = [line for line in demo.splitlines() if "create token flowguard-reader" in line]
+    assert len(creates) == 2 and all("--duration" in line for line in creates)  # both shells
+    paths = re.findall(r"--kube-(?:token|ca)-file (\S+)", demo)
+    assert len(paths) == 4 and all(re.match(r"state[\\/]", p) for p in paths), paths
+    assert "state/" in (root / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
 def test_l0_thresholds_are_frozen():
     # Changing these values changes the DSO3 baseline: update the blueprint first.
     template = next(doc for _, doc in manifests() if doc["kind"] == "AnalysisTemplate")
