@@ -176,8 +176,13 @@ each inline L0 analysis is replaced by a pause where Release decides through the
     Every prediction set held both labels (mean set size 2.0), and no rollback reached
     confidence 0.70, so every staging rollback or promotion would go to a human.
   - On those 28 plus 8 more: 53 decisions; coverage 53/53, both labels in every set.
-  - Refitted on the decisions from the 32 agents-mode recordings (the primary set below):
-    every prediction set still holds both labels.
+  - Refitted on the 55 Release proposals from the 32 agents-mode recordings (the primary set
+    below). Every prediction set still holds both labels, yet all 55 proposals reach confidence
+    0.70 and none reaches 0.80.
+  - `rollout_abort` and `rollout_promote` are medium tier, and the default gate threshold is
+    0.70. So, at the default setting, every staging Release decision on that set would run
+    without a human, the wrong ones included. At 0.80, every one would go to a human. On dev,
+    the confidence does not separate Release's right decisions from its wrong ones.
 
 ### Behaviour of the test in simulation
 
@@ -210,28 +215,44 @@ sees the whole step and no recording stops at an L0 abort. L0 is replayed offlin
 `analysis-l0.yaml` on the same series. Step starts come from the Rollout step log; a step the
 log misses falls back to the pods-up estimate described below, for that step only.
 
+A bad release counts as caught when it is held at its step and never promoted without a human:
+rolled back, or escalated to a human.
+
 | | L0 (offline) | L3 | L4 |
 |---|---|---|---|
-| Bad releases caught before 100% | 15/20, 75% (53–89) | 15/20 | 15/20 |
+| Bad releases caught before 100% | 15/20, 75% (53–89) | 15/20 | 15/20: 12 rolled back, 3 escalated |
 | False rollbacks | 0/12 (0–24) | 0/12 | 0/12 |
-| Median time to rollback | 60 s | 90 s | — |
+| Median time to rollback | 60 s | 90 s | 60 s (n 12) |
+| Wrong decisions | 5/32, 16% (7–32) | 5/32 | 5/32 |
 
-<!-- Before submission, from the DSO3 tables: L4's median time to rollback, the paired
-comparisons, and whether an escalated bad release is scored as caught. -->
+<!-- Every number in this section is from the DSO3 report on e194b06; re-check each against
+the evaluation docs once its tables are on dev. -->
 
 - **Same count at every level.** The three levels catch the same number of bad releases, and
-  none rolls back a good one.
-- **Every miss is below band:** 5 of 20 at each level (25%, 11–47). The limit is the canary's
-  traffic. At 10 requests/s the canary gets about 240 requests during the 20% step. At the
-  below-band error rates of the earlier recordings (0.29% to 0.42%), that is about one expected
-  error per step or fewer, too few for any level to tell the canary from stable.
-- **L3 rolls back later than L0:** a median of 90 s against 60 s.
+  none rolls back a good one, so each level's 5 wrong decisions are its 5 promoted bad releases.
+- **Paired, L0 vs L3:** one discordant release each way, exact McNemar p = 1.0.
+  - r-88d6c93d, near band: L3 catches it at 251 s, L0 promotes it.
+  - r-917c6c62, below band: L0 catches it at 90 s, L3 promotes it.
+  - On the releases both rolled back, the median difference in time to rollback is 0 s
+    (bootstrap 95%: −30 to +30 s). L3's higher median (90 s against 60 s) therefore does not
+    show that L3 is slower on the same release.
+- **Paired, L3 vs L4:** no discordant catch. L4's median covers only its 12 rollbacks; the 3
+  escalations have no rollback time.
+- **Misses are below band, with one exception.** L3 and L4 miss only below-band releases. L0's
+  misses are four of those and the near-band r-88d6c93d. The limit is the canary's traffic: at
+  10 requests/s the canary gets about 240 requests during the 20% step. At the below-band error
+  rates of the earlier recordings (0.29% to 0.42%), that is about one expected error per step or
+  fewer, too few for any level to tell the canary from stable.
 - **P1 fired 3 times at L4.** Each time the release was bad and the node was under stress, and
   L4 escalated to a human instead of rolling back. Three cases show that P1 runs on real node
   series and changes L4's decision under stress. They do not show whether those escalations are
   worth a human's time.
-- **Calibration:** every conformal prediction set on these decisions holds both labels. On dev,
-  the calibrator does not separate Release's right decisions from its wrong ones.
+- **Sensitivity: logged step times only.** On the 28 recordings whose step starts all come from
+  the Rollout step log, every level catches 14/18 (78%, 55–91) with 0/10 false rollbacks
+  (0–28). The median time to rollback is 60 s at L0, 75 s at L3 and 30 s at L4.
+- **Calibration:** see "Frozen settings and calibration". At the default gate setting, the
+  confidence lets every staging decision on this set run without a human, the wrong ones
+  included.
 
 #### Secondary: 28 recordings under the L0 Rollout
 
@@ -317,6 +338,7 @@ one did not.
   agents-mode set. It was never asked about a good release, because Release never proposed
   rolling one back. How P1 treats a good release under stress is therefore unobserved.
 - **Calibration.** It is uninformative on every dev set so far: every prediction set holds both
-  labels.
+  labels. On the agents-mode set, every proposal's confidence is at least 0.70 and below 0.80, so
+  the default threshold (0.70) lets all of them through.
 - **In-sample.** Every number here is from the dev recordings. Held-out results come at
   Step 11.
