@@ -189,7 +189,7 @@ under node stress where L3 rolled back (r-3846eb8d, r-cdb74aaa, r-ef073e74); nod
 decisions 0/12 at L3 and L4. Release's calibration (D9), refit on the 32 leave-one-recording-out:
 coverage 55/55 at a 90% target, but every prediction set holds both labels (mean size 2.0) and
 confidences lie between 0.7 and 0.8, so at a gate setting of 0.8 or more every Release action
-goes to a human. Per class and band: `evaluation/runs/dso3-agents-mode.json`.
+goes to a human. At the default gate setting (0.70) every staging Release decision on the 32 executes without a human, the 5 wrong promotions included; at 0.80 or more every Release action needs a human. Reported in H5; the threshold is unchanged. Per class and band: `evaluation/runs/dso3-agents-mode.json`.
 
 ## L3 retrieval index (step 7)
 
