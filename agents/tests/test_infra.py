@@ -143,6 +143,26 @@ def test_podinfo_is_a_canary_rollout_20_50_100_with_l0_analysis():
             assert step["analysis"]["templates"] == [{"templateName": "podinfo-l0"}]
 
 
+def test_agents_mode_canary_keeps_the_steps_and_waits_for_release_instead_of_l0():
+    podinfo = INFRA / "apps" / "podinfo"
+    component = yaml.safe_load((podinfo / "agents-mode" / "kustomization.yaml").read_text())
+    assert component["kind"] == "Component"
+    (patch,) = component["patches"]
+    assert patch["target"] == {"kind": "Rollout", "name": "podinfo"}
+    (op,) = yaml.safe_load(patch["patch"])
+    assert (op["op"], op["path"]) == ("replace", "/spec/strategy/canary/steps")
+    # The L0 steps with each inline analysis replaced by a pause until Release decides
+    l0 = podinfo_rollout()["spec"]["strategy"]["canary"]["steps"]
+    assert op["value"] == [{"pause": {}} if "analysis" in s else s for s in l0]
+    for env in ENVIRONMENTS:
+        overlay = yaml.safe_load((podinfo / f"{env}-agents" / "kustomization.yaml").read_text())
+        assert overlay["resources"] == [f"../{env}"]
+        assert overlay["components"] == ["../agents-mode"]
+    # The deployed default stays L0
+    deployed = yaml.safe_load((INFRA / "kustomization.yaml").read_text())["resources"]
+    assert not any("agents" in r for r in deployed)
+
+
 def test_l0_thresholds_are_frozen():
     # Changing these values changes the DSO3 baseline: update the blueprint first.
     template = next(doc for _, doc in manifests() if doc["kind"] == "AnalysisTemplate")
