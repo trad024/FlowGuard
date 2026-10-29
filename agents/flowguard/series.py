@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import urllib.parse
 import urllib.request
 from bisect import bisect_left, bisect_right
@@ -300,8 +301,26 @@ def firing(idx: Index, t: float, step: float = 15.0, namespace: str = "") -> lis
 # ---------------------------------------------------------------- live source
 
 
+METRIC_NAME = re.compile(r"[a-zA-Z_:][a-zA-Z0-9_:]*")
+OWN_METRICS = "flowguard_"  # FlowGuard's exporters: audit counts and scored results (D25)
+
+
+def checked_selector(selector: str) -> str:
+    """A selector an agent may read: one literal metric name, never FlowGuard's own metrics.
+    The same Prometheus scrapes the dashboard exporters, and the scored results there come from
+    the evaluation side (D25), so no agent query may reach a flowguard_* series, by name or by
+    a __name__ matcher."""
+    name = selector.split("{", 1)[0].strip()
+    if not METRIC_NAME.fullmatch(name) or "__name__" in selector:
+        raise ValueError(f"an agent selector names one metric literally: {selector!r}")
+    if name.startswith(OWN_METRICS):
+        raise ValueError(f"FlowGuard's own metrics are not an agent input (D25): {selector!r}")
+    return selector
+
+
 class PrometheusSource:
-    """Live polling: the same raw samples a recording holds, read with `selector[window]`."""
+    """Live polling: the same raw samples a recording holds, read with `selector[window]`.
+    Every selector is checked first (checked_selector): no flowguard_* metric, no __name__."""
 
     def __init__(
         self,
@@ -309,7 +328,8 @@ class PrometheusSource:
         get: Callable[[str], dict] | None = None,
         selectors: dict[str, str] = SELECTORS,
     ):
-        self.base, self.selectors = base.rstrip("/"), selectors
+        self.base = base.rstrip("/")
+        self.selectors = {name: checked_selector(s) for name, s in selectors.items()}
         self.get = get or self._get
 
     @staticmethod

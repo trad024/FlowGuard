@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 import results_exporter as rx
@@ -108,6 +109,38 @@ def test_the_dashboard_is_provisioned_and_queries_only_exported_metrics():
     selects = " ".join(t["expr"] for p in dash["panels"] for t in p.get("targets", []))
     for label in ('level=~"L0|L1"', 'objective="DSO1 runtime"', "outcome", "verdict"):
         assert label in selects
+
+
+def test_every_scored_result_is_a_flowguard_result_series(tmp_path):
+    """The runner's start check counts flowguard_result.* series: it must see all of them."""
+    (tmp_path / "dso1-replay.json").write_text(json.dumps(REPLAY))
+    names = {
+        line.split("{")[0].split(" ")[0]
+        for line in rx.render(tmp_path).splitlines()
+        if line and not line.startswith("#")
+    }
+    assert names and all(n.startswith("flowguard_result") for n in names), names
+
+
+def test_the_results_exporter_refuses_to_start_during_a_run(tmp_path, monkeypatch, capsys):
+    lock = tmp_path / "state" / "run.lock"
+    monkeypatch.setattr(rx.recorder, "RUN_LOCK", lock)
+    lock.parent.mkdir()
+    lock.write_text('{"run_id": "r-0000abcd"}')
+    with pytest.raises(SystemExit) as exc:
+        rx.main(["--port", "0"])
+    assert exc.value.code == 2 and "run.lock" in capsys.readouterr().err
+    lock.unlink()
+    with pytest.raises(SystemExit):  # and never on every interface
+        rx.main(["--host", "0.0.0.0", "--port", "0"])
+    assert "all interfaces" in capsys.readouterr().err
+
+
+def test_the_demo_never_binds_the_exporters_to_every_interface():
+    demo = (ROOT / "docs" / "demo.md").read_text(encoding="utf-8")
+    assert not re.search(r"--host\s+(0\.0\.0\.0|::)", demo)
+    hosts = re.findall(r"(?:flowguard\.exporter|results_exporter\.py) --host (\S+)", demo)
+    assert len(hosts) == 4 and all(h in ("$gw", '"$gw"') for h in hosts), hosts
 
 
 def test_prometheus_scrapes_both_exporters():

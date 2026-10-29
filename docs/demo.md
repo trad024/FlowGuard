@@ -86,12 +86,30 @@ asks.
 
 ## Grafana (T2, optional)
 
+Prometheus runs inside k3d and reaches the laptop as `host.k3d.internal`. The exporters listen
+on that one address, never on every interface (they refuse `0.0.0.0`); k3d writes it into
+CoreDNS:
+
 ```powershell
-py -m flowguard.exporter --host 0.0.0.0
+$gw = ((kubectl -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}') -split "`n" |
+  Select-String 'host.k3d.internal').ToString().Trim().Split()[0]
+py -m flowguard.exporter --host $gw
+py evaluation\results_exporter.py --host $gw
 ```
-```powershell
-py evaluation\results_exporter.py --host 0.0.0.0
+
+```bash
+gw=$(kubectl -n kube-system get configmap coredns -o jsonpath='{.data.NodeHosts}' \
+  | awk '/host.k3d.internal/ {print $1}')
+python -m flowguard.exporter --host "$gw"
+python evaluation/results_exporter.py --host "$gw"
 ```
+
+If that address is not one of this machine's own (Docker Desktop can give the address of its
+VM), the exporter cannot bind it and says so: check which address Prometheus reaches before a
+demo (still to be checked on the laptop). The scored results stay out of this Prometheus during
+an evaluation run: `results_exporter.py` will not start while a run holds `state/run.lock`, and
+the runner will not start a run while any `flowguard_result` series is in Prometheus (stop the
+exporter and let its series go stale, about one scrape).
 
 Open **FlowGuard / agents vs L0** in Grafana. The live panels (L0 alerts firing, Monitor
 incidents, gate outcomes, approvals) move during the loops.
