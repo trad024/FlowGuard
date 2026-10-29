@@ -1,0 +1,199 @@
+{
+  "source": "14 recorded development CI scan cases, including 12 controls",
+  "n": 14,
+  "levels": {
+    "L0": {
+      "actions": {
+        "allow_deployment": 12,
+        "block_deployment": 2
+      },
+      "false_blocks": 0,
+      "controls": 12,
+      "false_block_rate": 0.0,
+      "false_block_wilson95": [
+        0.0,
+        0.24249400665524085
+      ]
+    },
+    "L1": {
+      "actions": {
+        "allow_deployment": 12,
+        "request_security_review": 1,
+        "block_deployment": 1
+      },
+      "false_blocks": 0,
+      "controls": 12,
+      "false_block_rate": 0.0,
+      "false_block_wilson95": [
+        0.0,
+        0.24249400665524085
+      ]
+    }
+  },
+  "policy": "transparent weighted sum; no learned policy or fitted labels",
+  "epss_provenance": {
+    "format": 1,
+    "date": "2026-10-28",
+    "model_version": "v2026.06.15",
+    "source_url": "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz",
+    "source_documentation": "https://www.first.org/epss/data.html",
+    "gzip_sha256": "aa9eefe4155babd88985c26528087bba5053405d4d64aed85ea5dc5c2e16c4e9",
+    "source_csv_sha256": "16ff6e9063ce2e2b31efbfa9bf98b574d501f84f22056861d31f3610665b5d06",
+    "csv_sha256": "93488ee8744ba7d84e31e85e80516a646516b2af9d4184a940060931c6b3939f",
+    "sample": true,
+    "rows": 3,
+    "selection": [
+      "CVE-2021-44228",
+      "CVE-2026-56851",
+      "CVE-2026-56852"
+    ],
+    "purpose": "Small unmodified real FIRST CSV row sample for offline tests and development replay; not a complete feed"
+  },
+  "per_case": {
+    "recorded-security-40587937880": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40578368148": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40576270330": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40571357410": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40573598976": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40562637345": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40500780155": {
+      "L0": {
+        "action": "block_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "request_security_review",
+        "score_basis_points": 5264
+      }
+    },
+    "recorded-security-40501662040": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40423475125": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40421399231": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40420788548": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40388445834": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40383618943": {
+      "L0": {
+        "action": "block_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "block_deployment",
+        "score_basis_points": null
+      }
+    },
+    "recorded-security-40380155697": {
+      "L0": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      },
+      "L1": {
+        "action": "allow_deployment",
+        "score_basis_points": null
+      }
+    }
+  },
+  "signal_effects": {
+    "epss_decision_changes_vs_zero": 0,
+    "cases_with_observed_reachability": 0,
+    "conclusion": "No case in this development set changes decision due to EPSS. No historical case has measured reachability; no reachability-changing dev case exists. The new govulncheck integration has not yet run on these historical commits."
+  }
+}
