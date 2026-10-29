@@ -197,7 +197,6 @@ def measurements(records, seed):
     hours = sum(float(r["truth"]["spec"]["hours"]) for r in normal)
     secondary = {
         "accuracy": proportion([a == b for a, b in diagnoses]),
-        "assisted": proportion(eligible(assisted)),  # H5's denominator; never in its numerator
         "hallucination_rate": proportion(
             [r["observed"]["hallucinated"] for r in records if "hallucinated" in r["observed"]]
         ),
@@ -210,6 +209,8 @@ def measurements(records, seed):
             "interval": "exact Poisson (Garwood) / exposure hours",
         },
     }
+    # D57: H5's denominator; an assisted incident is never in H5's numerator
+    secondary["assisted"] = proportion(eligible(assisted))
     releases = [r for r in records if r["truth"]["family"] == "release"]
     secondary["bad_release_caught"] = proportion(
         [
