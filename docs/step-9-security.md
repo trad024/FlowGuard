@@ -57,7 +57,8 @@ a hard rule blocks them.
 Only explicit boolean `RuntimeDependency: false` establishes dev-only scope. Unknown scope
 receives the runtime value 1. Optional adapter fields `Reachable` (boolean) or `Reachability`
 (`reachable` / `unreachable`) carry explicit reachability evidence if available. The actual
-recorded Trivy reports contain no such evidence: it remains unknown, scored 1. This adapter
+historical Trivy reports contain no such evidence: it remains unknown, scored 1. New dev
+cases have real govulncheck evidence, described below. This adapter
 does not claim Trivy performs reachability analysis, infer reachability from dependency
 paths, or interpret `Status: fixed` as proof of unreachability. A missing/unknown fix receives
 no-fix value 1. Critical/secret rules are unaffected by any of these reductions.
@@ -100,8 +101,8 @@ On 2026-10-28, the actual downloaded file had 396,966 CVEs, EPSS model `v2026.06
 The full files stay outside git. `ci/security/epss-sample.csv` commits three unmodified real
 rows, with a manifest recording source-file and sample checksums, date and selection. This
 is a tiny offline fixture, not a complete operational feed. Unit tests inject download bytes
-and never use the network. The development replay explicitly selects the committed sample
-so it reproduces offline.
+and never use the network. The expanded development replay requires the full dated snapshot
+with both pinned checksums. The three-row sample is used only for offline test fixtures.
 
 ## Govulncheck reachability in app-ci
 
@@ -125,11 +126,20 @@ Runtime dependency scope is not inferred from reachability.
 Sources: [pinned module requirements](https://go.googlesource.com/vuln/+/refs/tags/v1.4.0/go.mod)
 and [Go's JSON protocol documentation](https://pkg.go.dev/golang.org/x/vuln/internal/govulncheck).
 The mapper does not run govulncheck or the network. Tests use small synthetic protocol messages.
-The new CI step has not yet run against a live app-ci commit on this feature branch.
+The new CI step has now completed on eight real development scenario commits; see the
+[per-case report](security-dev-cases.md) for all run links and measured reachability.
 
 ## Development replay and limitations
 
-There are **14 real recorded development scan cases**, including 12 security-negative
+There are now **22 real recorded development scan cases**: the original 14 below and eight
+deliberately selected HIGH-finding cases with real app-ci scans. The new eight have six
+reachable and two unreachable targets, six with fixed versions and two with no known fixed
+version, six low-EPSS and two high-EPSS cases. Reachability changes two whole-case L1 decisions;
+EPSS changes none. Two high-EPSS cases also have a CRITICAL compatibility dependency and
+therefore block under the hard rule. These are development diagnostics, not held-out results.
+The [expanded report](security-dev-cases.md) records every requested field and the limitations.
+
+The **original 14 historical cases** include 12 security-negative
 controls. Nine are dev-branch CI runs, three are the previously recorded development
 security cases, and two are named development release recordings. Unknown scenario IDs
 were excluded. Source branch, commit, run/artifact IDs and raw-report SHA-256 are recorded
@@ -141,8 +151,10 @@ The vulnerable report has CVSS 7.5 for CVE-2026-56851/56852 and real pinned EPSS
 retrospective on these historical artifacts using the documented 2026-10-28 snapshot.
 
 ```powershell
-python ci/security/replay.py
+python ci/security/report_development.py
 ```
+
+The historical 14 alone produced:
 
 | Policy | Block | Review | Allow | False blocks / controls |
 |---|---:|---:|---:|---:|
@@ -150,19 +162,20 @@ python ci/security/replay.py
 | Transparent score | 1 | 1 | 12 | 0/12 |
 
 Both false-block Wilson 95% intervals are 0-24.25%. The secret is blocked by both. There
-are no actual critical cases, so critical recall is undefined; hard rules are verified by
-unit tests. No deployment executes. Review is not permission to deploy or a counted block.
+were no critical cases in that historical set. The expanded set now includes two real
+critical-containing cases, both blocked by L0 and L1. No deployment executes during this
+replay. Review is not permission to deploy or a counted block.
 
 **No observed development case changes decision because of EPSS:** setting EPSS to zero
-in the diagnostic leaves every decision unchanged. **No reachability-changing development
-case exists in this set**, because the retained reports predate govulncheck and all lack
-reachability measurements. The mapper's effect is demonstrated only in synthetic tests,
-not claimed as a real-world improvement. Unknown runtime/reachability score 1.0; thus HIGH
+leaves every decision unchanged in all 22 cases. **Two new cases change decision because
+of measured unreachability**, moving from review to allow with findings (still human-gated).
+The original 14 reports predate govulncheck. Unknown runtime/reachability score 1.0; thus HIGH
 CVSS >= 7.0 requests review even at EPSS zero unless explicit exposure evidence reduces it.
 
-Verified: 14-case offline paired replay, exact 5,000-bp boundary, hard rules, conservative
+Verified: 22-case offline paired replay, eight successful real app-ci scenario runs,
+exact 5,000-bp boundary, hard rules, conservative
 missing data, malformed govulncheck protocol handling, alias/trace precedence, human routing,
 firewall, mocked EPSS acquisition and real FIRST cache verification from the earlier run.
 The workflow YAML is parsed and the tool is pinned; CI tests never invoke scans/network.
-Not verified: running the new govulncheck step, live deployment, production effectiveness,
+Not verified: live deployment, production effectiveness,
 SonarCloud service integration or held-out evaluation. Frozen files remain unchanged.
