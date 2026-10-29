@@ -249,8 +249,22 @@ def test_ci_scoring_l0_vs_l1_on_a_slow_run_and_normal_runs(tmp_path):
         and out["L1"]["false_flags_per_run"] == out["L0"]["false_flags_per_run"]
     )
     assert out["L1"]["false_flags_per_run"]["k"] == 0 and out["L1"]["false_flags_per_run"]["n"] == 8
-    assert 60 < out["L1"]["mttd_s_median"] < 60 + 220  # while the unit job is still running
-    assert out["history"] == {"build": 8, "unit": 8}
+    assert out["L1"]["mttd_s_median"] == 60 + 220  # judged on ci_run_completed (D49)
+    assert out["history"] == {"build": 8, "unit": 8} and out["failed_runs"] == 0
+
+
+def test_ci_failed_runs_are_counted_apart_and_l0_catches_a_3x_job(tmp_path):
+    for i, d in enumerate([98, 104, 100]):
+        write_recording(tmp_path, f"sec-{i}", family="security", seconds=60,
+                        ci=[ci_run(i + 1, d, T0 + i * 1000)])  # fmt: skip
+    write_recording(tmp_path, "fail", family="ci", seconds=60,
+                    ci=[ci_run(7, 30, T0 + 5000, conclusion="failure")])  # fmt: skip
+    write_recording(tmp_path, "slow", family="pipeline", seconds=60, ci=[ci_run(99, 400, T0 + 9e4)])
+    runs = mr.load_runs(tmp_path)
+    out = mr.score_ci(runs, mr.fit_ci([rj for r in runs for rj in mr.ci_runs(r)]))
+    assert out["failed_runs"] == 1 and out["L0"]["false_flags_per_run"]["n"] == 3
+    assert out["L0"]["recall"]["k"] == 1  # 400 s > 3 x the 100 s median
+    assert out["detector"]["recall"]["k"] == 0  # 3 runs of history: under min_runs
 
 
 def test_ci_l0_rule_is_frozen():

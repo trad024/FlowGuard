@@ -32,10 +32,13 @@ cannot be measured on them. Incidents with an L0 alert already firing before the
 over from the previous run) stay in the primary result and are left out of a sensitivity
 result and of the tuning.
 
-CI: the pipeline family's runs are the anomalies, every other run is normal and is judged
-against the history of the others (leave one out). L0 is the rule frozen 2026-10-28 (CI_L0): a
-job longer than 3x its dev median, or 3 failed runs in a row on a branch. L1 adds the duration
-detector (median + k x robust spread, k by leave-one-out). Held-out recordings are refused.
+CI: the pipeline family's runs are the anomalies, every other successful run is normal and is
+judged against the history of the others (leave one out). A run is judged when its
+ci_run_completed event arrives (D49); the Monitor sees the event as replay.py builds it. L0 is
+the rule frozen 2026-10-28 (CI_L0): a job longer than 3x its dev median, or 3 failed runs in a
+row on a branch. L1 adds the duration detector (median + k x robust spread, k by leave-one-out).
+Failed runs are incidents at every level (D49) and are only counted. Held-out recordings are
+refused.
 """
 
 from __future__ import annotations
@@ -52,12 +55,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "evaluation")]
 
 import l0_baseline  # noqa: E402
+import replay  # noqa: E402
 import stats  # noqa: E402
 from flowguard import series  # noqa: E402
 from flowguard.agent_io import AgentInput  # noqa: E402
+from flowguard.contracts import Event  # noqa: E402
 from flowguard.monitor import (  # noqa: E402
     MODEL_FILE,
-    CIDetector,
     CIModel,
     Monitor,
     MonitorModel,
@@ -313,36 +317,21 @@ def ci_runs(run: dict) -> list[tuple[dict, list[dict]]]:
     return out
 
 
-def as_of(meta: dict, jobs: list[dict], t: float) -> tuple[dict, list[dict]]:
-    """The run as a poll at time t would have seen it."""
-    seen, done = [], True
-    for job in jobs:
-        start = l0_baseline.ts(job["started_at"]) if job.get("started_at") else None
-        if start is None or start > t:
-            done = done and job.get("conclusion") == "skipped"
-            continue
-        end = l0_baseline.ts(job["completed_at"]) if job.get("completed_at") else None
-        if end is None or end > t:
-            seen.append({**job, "completed_at": None, "conclusion": None})
-            done = False
-        else:
-            seen.append(job)
-    return {**meta, "status": "completed" if done else "in_progress"}, seen
-
-
-def first_alert(check, meta: dict, jobs: list[dict]) -> float | None:
-    """Seconds from the run's first job start to the first poll at which check(run, jobs, t)
-    holds, polling every STEP as the run unfolds; None if it never does."""
+def span(jobs: list[dict]) -> tuple[float, float] | None:
+    """(first job start, last job end): when the run began and when ci_run_completed arrives."""
     starts = [l0_baseline.ts(j["started_at"]) for j in jobs if j.get("started_at")]
     ends = [l0_baseline.ts(j["completed_at"]) for j in jobs if j.get("completed_at")]
-    if not starts:
-        return None
-    t = min(starts)
-    while t <= max(ends or starts) + STEP:
-        if check(*as_of(meta, jobs, t), t):
-            return t - min(starts)
-        t += STEP
-    return None
+    return (min(starts), max(ends)) if starts and ends else None
+
+
+def detector_flags(model: CIModel, history: dict[str, list[float]], event: Event) -> bool:
+    """The Monitor at L1, given only this run's ci_run_completed event as the system shows it
+    (D49), judged against `history`: does it report a CI incident?"""
+    ci = CIModel(durations=history, k=model.k, min_runs=model.min_runs, streak=model.streak)
+    p = event.payload
+    inp = AgentInput(incident_id="replay", log=p.get("log", ""), params=dict(p.get("params", {})))
+    out = Monitor(MonitorModel(ci=ci)).run(inp, level("L1"))
+    return out.incident and out.detector == "ci"
 
 
 # CI L0, decided 2026-10-28 and frozen before any CI scoring: a job alerts when its duration
@@ -390,13 +379,6 @@ def l0_duration_check(history: dict[str, list[float]]):
     return check
 
 
-def l1_duration_check(model: CIModel, history: dict[str, list[float]]):
-    det = CIDetector(
-        CIModel(durations=history, k=model.k, min_runs=model.min_runs, streak=model.streak)
-    )
-    return lambda meta, jobs, t: any(f.kind == "slow" for f in det.check(meta, jobs, t))
-
-
 def streak_runs(ci: list[tuple[dict, list[dict]]], by_job: bool, streak: int) -> set[int]:
     """Runs that complete a failure streak, in time order: L0 counts failed runs per branch,
     the detector failed jobs per branch and job."""
@@ -419,22 +401,37 @@ def streak_runs(ci: list[tuple[dict, list[dict]]], by_job: bool, streak: int) ->
 
 
 def score_ci(runs: list[dict], model: CIModel | None) -> dict:
-    """Pipeline-family runs are the anomalies (a slow step); every other run is normal and is
-    judged against the history without itself. L1 = L0 plus the detector."""
+    """Pipeline-family runs are the anomalies (a slow step, the run succeeds); other successful
+    runs are normal, each judged against the history without itself. Every run is judged once,
+    when its ci_run_completed event arrives (D49), so MTTD is the run's length. Failed runs are
+    incidents at every level (D49) and are counted apart. L1 = L0 plus the detector."""
     every = [(r, rj) for r in runs for rj in ci_runs(r)]
+    events = {
+        e.payload["params"].get("run_id"): e
+        for r in {r["id"]: r for r, _ in every}.values()
+        for e in replay.ci_events(Path(r["recording"]), r["manifest"])
+        if e.type == "ci_run_completed"
+    }
     history = job_durations([rj for r, rj in every if r["family"] != "pipeline"])
     l0_streak = streak_runs([rj for _, rj in every], False, CI_L0["failure_streak"])
     l1_streak = streak_runs([rj for _, rj in every], True, model.streak) if model else set()
     times: dict[str, list] = {"L0": [], "L1": [], "detector": []}
-    labels = []
+    labels, failed = [], 0
     for r, (meta, jobs) in every:
+        when = span(jobs)
+        if meta.get("conclusion") == "failure" or when is None or meta.get("id") not in events:
+            failed += meta.get("conclusion") == "failure"
+            continue
         hist = history if r["family"] == "pipeline" else without(history, jobs)
-        l0 = first_alert(l0_duration_check(hist), meta, jobs)
-        det = first_alert(l1_duration_check(model, hist), meta, jobs) if model else None
+        mttd = when[1] - when[0]
+        hit0 = l0_duration_check(hist)(meta, jobs, when[1]) or meta.get("id") in l0_streak
+        hit1 = bool(model) and (
+            detector_flags(model, hist, events[meta["id"]]) or meta.get("id") in l1_streak
+        )
         labels.append(r["family"] == "pipeline")
-        times["L0"].append(l0)
-        times["detector"].append(det)
-        times["L1"].append(min((x for x in (l0, det) if x is not None), default=None))
+        times["L0"].append(mttd if hit0 else None)
+        times["detector"].append(mttd if hit1 else None)
+        times["L1"].append(mttd if hit0 or hit1 else None)
 
     def block(found: list) -> dict:
         hits = [m for m, bad in zip(found, labels, strict=True) if bad and m is not None]
@@ -453,7 +450,8 @@ def score_ci(runs: list[dict], model: CIModel | None) -> dict:
         "L0_rule": CI_L0,
         "history": {name: len(ds) for name, ds in sorted(history.items())},
         "detector_min_runs": model.min_runs if model else None,
-        "mttd_from": "the run's first job start",
+        "failed_runs": failed,
+        "mttd_from": "the run's first job start to its completion (ci_run_completed, D49)",
         "notes": ["detector: exploratory (not a level of the ladder)"],
     }
 
