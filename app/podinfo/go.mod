@@ -31,8 +31,8 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/net v0.60.0
-	google.golang.org/grpc v1.83.2
+	golang.org/x/net v0.58.0
+	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -90,3 +90,7 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace golang.org/x/net => golang.org/x/net v0.16.0
+
+replace google.golang.org/grpc => google.golang.org/grpc v1.74.3
