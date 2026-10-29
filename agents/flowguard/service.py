@@ -3,6 +3,7 @@ It polls; nothing pushes to it (D1).
 
     python -m flowguard.service --level L1 [--live] [--watch staging,prod]
         [--interval 30] [--prometheus http://localhost:9090] [--approval-port 8765]
+        [--kube-token-file FILE --kube-ca-file FILE [--kube-api https://127.0.0.1:6550]]
 
 Every interval:
   1. Monitor poll (workflow C): one metrics_tick per watched namespace, with that namespace's
@@ -15,12 +16,19 @@ Every interval:
      ReplicaSet was created (D21, D55), with the look's number within the step (20%, then 50%).
      Release holds (no proposal, no incident) until it proposes; after a proposal for a step,
      that step gets no more looks, so a denied promotion is not asked again every poll.
+  3. Aborted Rollout: when a watched Rollout's status shows an abort (status.abort, or phase
+     Degraded with an abort message), one rollout_step marked aborted for that revision, so
+     Release proposes rollout_undo (high tier: always a human); asked once per aborted
+     revision, again only after the Rollout recovered and aborted anew.
 The orchestrator does the rest: incidents, agents, the gate (Release's proposals with the
 calibrator fitted on the dev release decisions, D9), the approval page for ask_human (the loop
 waits for the answer, at most its 10-minute timeout) and the executor, which is a dry run unless
---live. Everything is read from Prometheus (D1): pods up per pod-template hash, the
-ReplicaSets' creation times (kube-state-metrics) and the Rollout's phase (Argo Rollouts' own
-rollout_info); the executor is the only component that touches the cluster. The audit log and
+--live. Metrics come from Prometheus (D1): pods up per pod-template hash, the ReplicaSets'
+creation times (kube-state-metrics) and the Rollout's phase (Argo Rollouts' own rollout_info).
+The abort is in the Rollout's status, which Prometheus does not carry: with --kube-token-file,
+the Rollout is read from the Kubernetes API with the read-only flowguard-reader token (get,
+list and watch on Rollouts, infra/base/flowguard-reader.yaml); without it, step 3 is off. The
+executor is the only component that changes the cluster. The audit log and
 incident record are state/audit.db (FLOWGUARD_AUDIT_DB overrides). A poll reads the last 10
 minutes (series.HISTORY_S): counts older than that no longer reach Release's windows.
 """
@@ -29,9 +37,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import ssl
 import time
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from flowguard import release, series
 from flowguard.approval import ApprovalPage
@@ -52,6 +63,43 @@ ROLLOUT_SELECTORS = {
     "replicasets": 'kube_replicaset_created{namespace=~"staging|prod",replicaset=~"podinfo-.*"}',
     "rollout_info": f'rollout_info{{name="{ROLLOUT}"}}',
 }
+ROLLOUT_API = "/apis/argoproj.io/v1alpha1/namespaces/{namespace}/rollouts/" + ROLLOUT
+
+
+def abort_of(rollout: dict | None) -> tuple[str, str | None] | None:
+    """(aborted revision's pod-template hash, stable hash) when the Rollout is aborted:
+    status.abort, or phase Degraded with an abort message. A Rollout Degraded for another
+    reason (a progress deadline, a failed pod) is not an abort and not Release's to undo."""
+    status = (rollout or {}).get("status") or {}
+    message = str(status.get("message") or "").lower()
+    aborted = status.get("abort") is True or (
+        status.get("phase") == "Degraded" and "abort" in message
+    )
+    canary = status.get("currentPodHash")
+    return (canary, status.get("stableRS")) if aborted and canary else None
+
+
+def _get(request: urllib.request.Request, ca_file: str | None) -> bytes:
+    context = ssl.create_default_context(cafile=ca_file) if ca_file else None
+    with urllib.request.urlopen(request, timeout=10, context=context) as response:
+        return response.read()
+
+
+@dataclass
+class RolloutReader:
+    """GET the Rollout from the Kubernetes API with the read-only flowguard-reader token."""
+
+    api: str
+    token: str
+    ca_file: str | None = None
+    get: Callable[[urllib.request.Request, str | None], bytes] = _get
+
+    def __call__(self, namespace: str) -> dict:
+        request = urllib.request.Request(
+            self.api.rstrip("/") + ROLLOUT_API.format(namespace=namespace),
+            headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},
+        )  # a GET: the token can do nothing else
+        return json.loads(self.get(request, self.ca_file))
 
 
 @dataclass(frozen=True)
@@ -138,9 +186,12 @@ class Service:
     watch: tuple[str, ...] = ("staging", "prod")
     steps: dict[tuple[str, str], Look] = field(default_factory=dict)  # (namespace, canary)
     started: dict[tuple[str, str], float] = field(default_factory=dict)  # first seen
+    rollouts: Callable[[str], dict] | None = None  # namespace -> the Rollout (RolloutReader)
+    undo_asked: set[tuple[str, str]] = field(default_factory=set)  # (namespace, revision)
 
     def tick(self, t: float | None = None) -> list[dict]:
-        """One poll: a Monitor tick per watched namespace, then a look at each held canary."""
+        """One poll: a Monitor tick per watched namespace, a look at each held canary, and the
+        follow-up of an aborted Rollout."""
         t = time.time() if t is None else t
         idx = self.source.fetch(t)
         states = {ns: rollout_state(idx, t, ns) for ns in self.watch}
@@ -162,7 +213,32 @@ class Service:
             out = self.look(idx, t, ns, state)
             if out is not None:
                 results.append(out)
+        for ns in self.watch:
+            out = self.aborted(idx, t, ns)
+            if out is not None:
+                results.append(out)
         return results
+
+    def aborted(self, idx: series.Index, t: float, ns: str) -> dict | None:
+        """An aborted Rollout: one look marked aborted for that revision, so Release proposes
+        rollout_undo through the gate; not again for the same revision until it recovers."""
+        if self.rollouts is None:
+            return None
+        try:
+            found = abort_of(self.rollouts(ns))
+        except (OSError, ValueError) as exc:  # unreachable API, bad token, not JSON
+            print(json.dumps({"rollout_status": ns, "error": str(exc)[:200]}), flush=True)
+            return None
+        if found is None:
+            self.undo_asked = {k for k in self.undo_asked if k[0] != ns}
+            return None
+        revision, stable = found
+        if (ns, revision) in self.undo_asked:
+            return None
+        self.undo_asked.add((ns, revision))
+        since = t - release.WINDOW_S  # the counts do not matter to an undo
+        event = release.step_event(idx, t, ns, revision, stable or "", since, 0, aborted=True)
+        return self.orch.handle(event)
 
     def look(self, idx: series.Index, t: float, ns: str, state: RolloutState) -> dict | None:
         """One look at a held canary after its step's warm-up; none once Release proposed."""
@@ -229,7 +305,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--interval", type=float, default=30.0)  # NFR: detect within 2 polls
     parser.add_argument("--prometheus", default="http://localhost:9090")
     parser.add_argument("--approval-port", type=int, default=8765)
+    parser.add_argument("--kube-api", default="https://127.0.0.1:6550")
+    parser.add_argument("--kube-token-file", type=Path, help="flowguard-reader token (read-only)")
+    parser.add_argument("--kube-ca-file", help="the cluster's CA certificate")
     args = parser.parse_args(argv)
+    rollouts = None
+    if args.kube_token_file:
+        token = args.kube_token_file.read_text(encoding="utf-8").strip()
+        rollouts = RolloutReader(args.kube_api, token, args.kube_ca_file)
     audit = AuditLog.open(level=args.level)
     page = ApprovalPage(port=args.approval_port)
     orch = make_orchestrator(args.level, audit, page, live=args.live)
@@ -239,6 +322,7 @@ def main(argv: list[str] | None = None) -> int:
             args.prometheus, selectors={**series.SELECTORS, **ROLLOUT_SELECTORS}
         ),
         watch=tuple(n for n in args.watch.split(",") if n),
+        rollouts=rollouts,
     )
     print(
         json.dumps(
@@ -248,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
                 "approval_page": page.url,
                 "audit_log": str(audit.path),
                 "monitor_model": "fitted" if orch.agents["monitor"].model else "none (L0 rules)",
+                "abort_follow_up": "on" if rollouts else "off (no --kube-token-file)",
             }
         ),
         flush=True,

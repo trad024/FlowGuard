@@ -462,13 +462,23 @@ def patch_template(namespace: str, image: str, command: list[str], env: list | N
         os.unlink(f.name)
 
 
-def wait_outcome(cluster, image: str, timeout: int, sleep=time.sleep, clock=time.monotonic) -> str:
+ROLLOUT_POLL_S = 5  # step changes are logged with Argo's own times; this only bounds the rest
+
+
+def wait_outcome(
+    cluster, image: str, timeout: int, sleep=time.sleep, clock=time.monotonic, watch=None
+) -> str:
+    """Poll the Rollout until the release for `image` ends; `watch` sees every status read
+    (the step log, recorder.RolloutStepLog)."""
     deadline = clock() + timeout
     while clock() < deadline:
-        outcome = deployer.rollout_outcome(cluster.rollout(), image)
+        rollout = cluster.rollout()
+        if watch is not None:
+            watch(rollout)
+        outcome = deployer.rollout_outcome(rollout, image)
         if outcome:
             return outcome
-        sleep(10)
+        sleep(ROLLOUT_POLL_S)
     return "timeout"
 
 
@@ -555,6 +565,7 @@ def pace_canary(
     on_resume=None,
     sleep=time.sleep,
     clock=time.monotonic,
+    watch=None,
 ) -> str:
     """Agents-mode recording (D54): nothing is decided live. Each indefinite pause is held for
     `hold_s`, then resumed, so every canary reaches 100% and L0 (replayed), L3 and L4 are judged
@@ -563,6 +574,8 @@ def pace_canary(
     held: dict[int, float] = {}
     while clock() < deadline:
         rollout = cluster.rollout()
+        if watch is not None:  # the step log (recorder.RolloutStepLog)
+            watch(rollout)
         outcome = deployer.rollout_outcome(rollout, image)
         if outcome:
             return outcome
@@ -765,6 +778,8 @@ class Runner:
         # What a real system sees (deployments, gate decisions, CI results) ...
         self.audit = AuditLog.open(scenario_id=self.run_id, level="L0")
         self.deploys = deployer.EventLog(RUNS / "deployer-events.jsonl", self.audit)
+        # Every Rollout step change while a release runs, for the offline timeline (D54)
+        self.steps = recorder.RolloutStepLog(RUNS / recorder.ROLLOUT_EVENTS, self.env)
         # ... and what only the experiment knows (D25)
         self.truth_db = groundtruth.GroundTruthDB.open()
         self.cluster = deployer.Cluster(self.env)
@@ -922,9 +937,12 @@ class Runner:
                 lambda: resume(self.env),
                 hold_s,
                 on_resume=lambda step: self.event("canary_resumed", step=step),
+                watch=self.steps.observe,
             )
         else:
-            outcome = wait_outcome(self.cluster, image, self.timing["observe_s"])
+            outcome = wait_outcome(
+                self.cluster, image, self.timing["observe_s"], watch=self.steps.observe
+            )
         self.deploys.write(
             "deploy_finished",
             environment=self.env,

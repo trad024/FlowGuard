@@ -1,0 +1,58 @@
+# Read-only access for the agent service (blueprint section 5: agents hold read-only
+# credentials; only the executor writes). The service reads the podinfo Rollout's status to
+# see an abort (status.abort, phase Degraded) and hand Release the follow-up. get, list and
+# watch on Rollouts in staging and prod only; nothing else. A short-lived token:
+#   kubectl -n monitoring create token flowguard-reader --duration 8h
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flowguard-reader
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: flowguard-rollout-reader
+  namespace: staging
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["rollouts"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flowguard-rollout-reader
+  namespace: staging
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: flowguard-rollout-reader
+subjects:
+  - kind: ServiceAccount
+    name: flowguard-reader
+    namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: flowguard-rollout-reader
+  namespace: prod
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["rollouts"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flowguard-rollout-reader
+  namespace: prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: flowguard-rollout-reader
+subjects:
+  - kind: ServiceAccount
+    name: flowguard-reader
+    namespace: monitoring
