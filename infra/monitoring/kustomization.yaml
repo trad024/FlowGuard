@@ -10,6 +10,7 @@ configMapGenerator:
   - name: grafana-dashboards
     files:
       - grafana/podinfo-dashboard.json
+      - grafana/flowguard-agents-vs-l0.json
   - name: prometheus-rules
     files:
       - prometheus/l0-alerts.yml

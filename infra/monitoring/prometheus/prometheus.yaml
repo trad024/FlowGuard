@@ -81,6 +81,21 @@ data:
         static_configs:
           - targets: [kube-state-metrics.monitoring.svc:8080]
 
+      # Argo Rollouts' controller: rollout_info carries each Rollout's phase (Paused while a
+      # canary is held), which the agent service reads instead of the Kubernetes API
+      - job_name: argo-rollouts
+        static_configs:
+          - targets: [argo-rollouts-metrics.argo-rollouts.svc:8090]
+
+      # FlowGuard's own processes on the laptop, outside the cluster: the audit log's counts
+      # (python -m flowguard.exporter, 9464) and the scored results
+      # (evaluation/results_exporter.py, 9465), for the agents-vs-L0 dashboard. k3d resolves
+      # host.k3d.internal to the host; see docs/demo.md for the listening address
+      - job_name: flowguard
+        scrape_interval: 30s
+        static_configs:
+          - targets: [host.k3d.internal:9464, host.k3d.internal:9465]
+
       # Container CPU and memory, through the API server proxy
       - job_name: kubernetes-cadvisor
         scheme: https

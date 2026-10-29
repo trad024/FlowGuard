@@ -3,10 +3,14 @@
     metrics_tick, ci_run_completed -> Monitor -> [no incident: end, nothing recorded]
         -> open incident (Monitor's detector and score) -> Release if mid-canary, else
         Diagnose (a CI run only when a job failed) -> gate -> ...
+    rollout_step -> Release -> [hold, no proposal: end, nothing recorded]
+        -> open incident -> gate -> ...
     other events -> open incident -> agent -> gate -> human approval (ask_human only)
         -> executor -> audit log
 
 Monitored events run the Monitor first and open an incident only when it reports one (D49).
+Each look at a canary (rollout_step) runs Release first: a hold opens no incident; the incident
+is opened when Release proposes an action, or before its first P1 question.
 
 Levels (D10) are configuration flags of the same code:
     L0  rule baselines, no gate (DSO6's baseline): dry-run executor only
@@ -127,6 +131,7 @@ class Orchestrator:
         }
         graph = StateGraph(State)
         graph.add_node("monitor", self._monitor)
+        graph.add_node("release", self._release)
         graph.add_node("open_incident", self._open_incident)
         graph.add_node("run_agent", self._run_agent)
         graph.add_node("follow_up", self._follow_up)
@@ -135,13 +140,24 @@ class Orchestrator:
         graph.add_node("execute", self._execute)
         graph.add_conditional_edges(
             START,
-            lambda s: "monitor" if s["event"].type in MONITORED else "open_incident",
-            {"monitor": "monitor", "open_incident": "open_incident"},
+            lambda s: (
+                "monitor"
+                if s["event"].type in MONITORED
+                else "release"
+                if s["event"].type == "rollout_step"
+                else "open_incident"
+            ),
+            {"monitor": "monitor", "release": "release", "open_incident": "open_incident"},
         )
         graph.add_conditional_edges(
             "monitor",
             lambda s: "follow_up" if s["output"].incident else END,
             {"follow_up": "follow_up", END: END},
+        )
+        graph.add_conditional_edges(
+            "release",
+            lambda s: "gate" if s.get("incident_id") else END,
+            {"gate": "gate", END: END},
         )
         graph.add_edge("open_incident", "run_agent")
         graph.add_edge("run_agent", "gate")
@@ -203,12 +219,37 @@ class Orchestrator:
             self.record.post(post)
         return {"incident_id": incident_id, "agent": AgentName.MONITOR, "inp": inp, "output": out}
 
-    def _call(self, agent: AgentName, inp: AgentInput) -> AgentOutput:
+    def _release(self, state: State) -> State:
+        """A look at a canary: Release first; a hold (no proposal) opens no incident."""
+        event = state["event"]
+        incident_id = f"i-{secrets.token_hex(5)}"
+        inp = self._inputs(event, incident_id)
+        opened = []
+
+        def open_once() -> None:
+            if not opened:
+                self._incident(event, incident_id)
+                opened.append(incident_id)
+
+        def ask(to: AgentName, question: str) -> EvidencePost:
+            open_once()  # the request and the answer belong to the incident
+            return self._ask(inp, to, question)
+
+        out = self._call(AgentName.RELEASE, inp, ask=ask)
+        if not out.proposals and not opened:
+            return {"agent": AgentName.RELEASE, "inp": inp, "output": out}
+        open_once()
+        for post in out.evidence:
+            self.record.post(post)
+        return {"incident_id": incident_id, "agent": AgentName.RELEASE, "inp": inp, "output": out}
+
+    def _call(self, agent: AgentName, inp: AgentInput, ask=None) -> AgentOutput:
         if self.input_tap is not None:
             self.input_tap(agent, inp)
         impl = self.agents[agent]
         if agent == AgentName.RELEASE:
-            return impl.run(inp, self.cfg, ask=lambda to, q: self._ask(inp, to, q))
+            ask = ask or (lambda to, q: self._ask(inp, to, q))
+            return impl.run(inp, self.cfg, ask=ask)
         return impl.run(inp, self.cfg)
 
     def _ask(self, inp: AgentInput, to: AgentName, question: str) -> EvidencePost:

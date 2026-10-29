@@ -236,9 +236,10 @@ def test_baseline_is_frozen_during_an_anomaly(model):
 # ---------------------------------------------------------------- the agent
 
 
-def inp(metrics=None, alerts=(), t=T0, **params):
+def inp(metrics=None, alerts=(), t=T0, environment="staging", **params):
     return AgentInput(
         incident_id="i-1",
+        environment=environment,
         metrics=dict(metrics or {}),
         alerts=list(alerts),
         params={"ts": t, **params},
@@ -275,6 +276,24 @@ def test_l0_reads_only_alerts_and_l1_without_a_model_says_so():
     assert not mon.run(inp(alerts=["HighErrorRatio"], t=T0 + 30), level("L0")).incident  # same
     out = Monitor(model=None).run(inp(alerts=["PodCrashLooping"]), level("L1"))
     assert [p.claim for p in out.evidence][-1] == "detectors off, no fitted model: runtime, ci"
+
+
+def test_episodes_and_the_p1_view_are_kept_per_environment():
+    mon, l0 = Monitor(model=None), level("L0")
+    staging = mon.run(inp(alerts=["HighErrorRatio"]), l0)
+    prod = mon.run(inp(alerts=["HighErrorRatio"], environment="prod"), l0)
+    assert staging.incident and prod.incident  # the same rule in two namespaces: two incidents
+    assert prod.evidence[0].claim == "L0 alert HighErrorRatio firing (prod)"
+    assert not mon.run(inp(alerts=["HighErrorRatio"], t=T0 + 15), l0).incident  # same episode
+    healthy = {"node:cpu_ratio": 0.3, "node:memory_ratio": 0.4}
+    mon.run(inp({**healthy, "prod/podinfo-old-1:restarts": 3}, t=T0 + 30, environment="prod"), l0)
+    mon.run(inp(healthy, t=T0 + 30), l0)
+    assert "normal" in mon.answer(inp(t=T0 + 35)).claim  # staging's view
+    assert "3 restarts" in mon.answer(inp(t=T0 + 35, environment="prod")).claim
+    raw = {"alerts": [{"metric": {"alertname": "HighErrorRatio", "alertstate": "firing",
+                                  "namespace": "prod"}, "values": [[T0, "1"]]}]}  # fmt: skip
+    assert series.firing(series.index(raw), T0, namespace="staging") == []
+    assert series.firing(series.index(raw), T0, namespace="prod") == ["HighErrorRatio"]
 
 
 def test_orchestrator_slot_l0_vs_l1_on_the_same_ticks(model, tmp_path):
