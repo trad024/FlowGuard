@@ -212,6 +212,9 @@ families:
     execution: parallel scenario/* branches, 4 to 5 at a time, no cluster (D44)
     delivery: commit
     kinds: {code: 1, dependency: 1, environment: 1, flaky_test: 1, infrastructure: 1}
+    live_run: >-
+      On a live ci scenario the runner runs the full system once at L5 (default gate) after CI
+      fails, then checks the pin's CI run; L0 to L4 are compared offline on the same logs (D64)
     templates:                   # test-split variants (D6, D34; corpus-split.json)
       - code-06
       - code-06.v2
