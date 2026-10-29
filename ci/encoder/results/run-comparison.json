@@ -1,0 +1,22 @@
+{
+  "plan_commit": "fe0496e",
+  "selected_run": 2,
+  "rule": "higher validation macro-F1; ties keep run 1",
+  "no_further_runs": true,
+  "runs": [
+    {
+      "run": 1,
+      "macro_f1": 0.2533333333333333,
+      "best_epoch": 3,
+      "epochs_completed": 3,
+      "training_wall_s": 155.9401191000361
+    },
+    {
+      "run": 2,
+      "macro_f1": 0.72,
+      "best_epoch": 7,
+      "epochs_completed": 10,
+      "training_wall_s": 1050.4914109000238
+    }
+  ]
+}

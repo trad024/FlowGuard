@@ -1,48 +1,59 @@
-# D7: measured CPU encoder development checkpoint
+# D7: final pre-declared CPU encoder comparison
 
-CPU training completed on 2026-10-29: three epochs, seed 31, two threads, batch size two,
-with the classifier and last two DistilBERT blocks trainable. The actual training log,
-validation predictions, corpus provenance, package versions and CPU benchmarks are committed
-under `ci/encoder/results/`. No held-out test templates were used.
+Two runs were completed, with no further runs after the architect's pre-declared run 2.
+Its plan was committed and pushed as `fe0496e` before execution. Both used the same seed 31,
+base revision, split checksum, exact log index, reduction, tokenizer, AdamW settings,
+512-token limit, batch size two and two CPU threads. Embeddings remain frozen in both.
 
-**This is a negative validation result:** macro-F1 0.2533, accuracy 5/14 (35.7%). It misses
-three of five classes entirely. The checkpoint is delivered for review/comparison, not
-adopted as a reliable deployment diagnosis model. No extra tuning run was performed.
+| Run | Unfrozen blocks | Max epochs | Class-weighted loss | Patience | Best epoch | Macro-F1 | Accuracy |
+|---|---:|---:|---|---:|---:|---:|---:|
+| 1 | 2 | 3 | No | Disabled | 3 | 0.2533 | 5/14 (35.7%) |
+| 2 (selected) | 6 | 10 | N/(5*n_class), training labels only | 3 | 7 | 0.7200 | 10/14 (71.4%) |
 
-| Class | Validation support | F1 |
-|---|---:|---:|
-| code | 2 | 0.0000 |
-| dependency | 3 | 0.6000 |
-| environment | 4 | 0.0000 |
-| flaky_test | 2 | 0.6667 |
-| infrastructure | 3 | 0.0000 |
+Run 2 stopped at epoch 10 after three non-improving epochs. Selection follows the declared
+higher-validation-macro-F1 rule; ties would retain run 1. Both runs' full logs, predictions
+and benchmarks are under `ci/encoder/results/run-1` and `run-2`; root result files mirror
+the selected run. Run 2 used 43,121,669 trainable parameters. Training took 1050.49 s versus
+155.94 s for run 1, excluding base loading/download. Peak training process working set was
+1640.41 MiB versus 1137.24 MiB. Weighted and unweighted training losses are different
+objectives and should not be compared directly across runs.
 
-| Epoch | Training loss | Validation macro-F1 | Accuracy |
+| Class | Validation support | Run 1 F1 | Run 2 F1 |
 |---|---:|---:|---:|
-| 1 | 1.5966 | 0.0706 | 3/14 |
-| 2 | 1.4235 | 0.2256 | 5/14 |
-| 3 (selected) | 1.1912 | 0.2533 | 5/14 |
+| code | 2 | 0.0000 | 1.0000 |
+| dependency | 3 | 0.6000 | 0.6000 |
+| environment | 4 | 0.0000 | 0.0000 |
+| flaky_test | 2 | 0.6667 | 1.0000 |
+| infrastructure | 3 | 0.0000 | 1.0000 |
 
-Measured training wall time: 155.94 seconds (excluding base-model download/load); peak
-Windows process working set: 1137.24 MiB. Hardware: Intel i5-11300H, 4 physical cores,
-8 logical processors, 7.7 GiB usable RAM. Training used only two CPU threads.
+The selected model remains below macro-F1 0.75 and accuracy 0.80, and misses the environment
+class. Twenty training templates is a small set: its 60 variants are not independent
+templates, and validation has only five templates/14 variants. This is the final experimental
+comparison checkpoint, not evidence of reliable production diagnosis. No held-out logs used.
 
-| CPU inference workload | Calls after 5 warmups | Median | p95 | Sampled peak process RSS |
+Hardware: i5-11300H, four cores/eight logical processors, 7.7 GiB usable RAM; two CPU threads.
+Selected run CPU inference after five warmups:
+
+| Workload | Calls | Median | p95 | Sampled peak process RSS |
 |---|---:|---:|---:|---:|
-| Fixed short-log smoke | 30 | 38.95 ms | 46.90 ms | 449.93 MiB |
-| 14 validation logs, 3 cycles | 42 | 372.35 ms | 468.56 ms | 510.42 MiB |
+| Short-log smoke | 30 | 38.06 ms | 49.60 ms | 517.72 MiB |
+| 14 validation logs, three cycles | 42 | 385.97 ms | 437.88 ms | 578.22 MiB |
 
-RSS is sampled every 10 ms and includes checkpoint loading. This measures one encoder
-process, not the entire FlowGuard/Docker footprint. The small validation workload does not
-establish production latency or the whole-system 4 GB budget.
+RSS is sampled every 10 ms and includes checkpoint loading. It is one process, not the
+whole FlowGuard/Docker budget. Full per-call measurements and the run-1 comparison remain
+committed. The small workload does not establish production performance.
 
-Weights remain outside git, on the public fork's
-[development release](https://github.com/aziz696902/FlowGuard/releases/tag/encoder-d7-cpu-v1).
-The actual URL, SHA-256 and size are pinned in `ci/encoder/artifact.json`:
+Weights remain outside git on the
+[personal-fork release](https://github.com/aziz696902/FlowGuard/releases/tag/encoder-d7-cpu-final-run2).
+`ci/encoder/artifact.json` pins the actual URL, 247,316,554-byte size and SHA-256:
 
 ```text
-470d1b0fb40a106d1567e80c747329bf171bcbd45aac6409a77b93d6f90b964d
+c9e2930e587eddabd0bff79d82c7e9348e76f5173f03078d483a4719b75396db
 ```
+
+The source is the personal fork `aziz696902/FlowGuard`. Project owner `trad024` may re-host
+the **identical ZIP**, retaining exactly the same SHA-256. Run 1's original release remains
+available with SHA-256 `470d1b0fb40a106d1567e80c747329bf171bcbd45aac6409a77b93d6f90b964d`.
 
 ## Split and data boundary
 
@@ -144,7 +155,7 @@ From the checkout, after importing the verified export:
 pip install -e .
 pip install -r ci/encoder/requirements.txt
 python ci/import_encoder.py --archive PATH_TO/flowguard-corpus-dev.zip --out state/encoder-corpus
-python ci/train_encoder.py --index state/encoder-corpus/index.jsonl --log-root state/encoder-corpus --output state/encoder-training
+python ci/train_encoder.py --index state/encoder-corpus/index.jsonl --log-root state/encoder-corpus --output state/encoder-training --unfreeze-layers 6 --epochs 10 --patience 3 --class-weighted
 ```
 
 Training always selects CPU: seed 31, three epochs, two threads, batch size two, AdamW at
@@ -168,7 +179,7 @@ notebook remains cleared and unrun.
 Download the published checkpoint with checksum verification:
 
 ```powershell
-python ci/download_encoder.py --url https://github.com/aziz696902/FlowGuard/releases/download/encoder-d7-cpu-v1/encoder-weights.zip --sha256 470d1b0fb40a106d1567e80c747329bf171bcbd45aac6409a77b93d6f90b964d --destination state/encoder-downloaded
+python ci/download_encoder.py --url https://github.com/aziz696902/FlowGuard/releases/download/encoder-d7-cpu-final-run2/encoder-weights.zip --sha256 c9e2930e587eddabd0bff79d82c7e9348e76f5173f03078d483a4719b75396db --destination state/encoder-downloaded
 python ci/benchmark_encoder.py --model state/encoder-downloaded --output state/encoder-cpu.json
 python ci/benchmark_encoder.py --model state/encoder-downloaded --index state/encoder-corpus/index.jsonl --log-root state/encoder-corpus --iterations 42 --output state/encoder-cpu-validation.json
 ```
@@ -194,8 +205,7 @@ support and all epoch losses. The source archive manifest's provenance is retain
 held-out file was opened or new corpus generated here.
 
 Not verified: held-out accuracy, calibrated encoder coverage, live orchestrator integration,
-production effectiveness or the complete system's memory budget. No follow-up tuning was
-performed after seeing validation. Twenty training templates is a small set; these results
+production effectiveness or the complete system's memory budget. The only follow-up was the pre-declared architect-requested run 2; no further runs follow. Twenty training templates is a small set; these results
 must not be generalized to independent incidents.
 
 Remaining: review and integration on the other machine, then the separately authorized final

@@ -1,8 +1,15 @@
 {
   "file": "encoder-weights.zip",
-  "sha256": "470d1b0fb40a106d1567e80c747329bf171bcbd45aac6409a77b93d6f90b964d",
-  "size_bytes": 247318246,
-  "url": "https://github.com/aziz696902/FlowGuard/releases/download/encoder-d7-cpu-v1/encoder-weights.zip",
-  "release": "https://github.com/aziz696902/FlowGuard/releases/tag/encoder-d7-cpu-v1",
-  "status": "development checkpoint; low validation accuracy; not adopted for deployment"
+  "sha256": "c9e2930e587eddabd0bff79d82c7e9348e76f5173f03078d483a4719b75396db",
+  "size_bytes": 247316554,
+  "url": "https://github.com/aziz696902/FlowGuard/releases/download/encoder-d7-cpu-final-run2/encoder-weights.zip",
+  "release": "https://github.com/aziz696902/FlowGuard/releases/tag/encoder-d7-cpu-final-run2",
+  "selected_run": 2,
+  "status": "final experimental comparison checkpoint; validation targets not met",
+  "source": {
+    "kind": "personal fork release",
+    "repository": "aziz696902/FlowGuard",
+    "project_owner": "trad024",
+    "rehosting": "trad024 may re-host the identical ZIP; retain exactly the same SHA-256"
+  }
 }

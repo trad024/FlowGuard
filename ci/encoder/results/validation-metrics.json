@@ -2,9 +2,9 @@
   "n": 14,
   "per_class": {
     "code": {
-      "precision": 0.0,
-      "recall": 0.0,
-      "f1": 0.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
       "support": 2
     },
     "dependency": {
@@ -20,22 +20,22 @@
       "support": 4
     },
     "flaky_test": {
-      "precision": 0.5,
+      "precision": 1.0,
       "recall": 1.0,
-      "f1": 0.6666666666666666,
+      "f1": 1.0,
       "support": 2
     },
     "infrastructure": {
-      "precision": 0.0,
-      "recall": 0.0,
-      "f1": 0.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
       "support": 3
     }
   },
-  "macro_f1": 0.2533333333333333,
-  "correct": 5,
-  "accuracy": 0.35714285714285715,
-  "epoch": 3,
-  "training_loss": 1.191198041041692,
-  "epoch_wall_s": 50.26405849994626
+  "macro_f1": 0.72,
+  "correct": 10,
+  "accuracy": 0.7142857142857143,
+  "epoch": 7,
+  "training_loss": 0.2528895853708188,
+  "epoch_wall_s": 98.10360770008992
 }
