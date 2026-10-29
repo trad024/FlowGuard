@@ -62,15 +62,17 @@
       "id": "dev-sec-http2-016",
       "module": "golang.org/x/net",
       "version": "v0.16.0",
-      "cve": "CVE-2023-44487",
-      "epss": 0.99999,
+      "cve": "CVE-2023-45288",
+      "epss": 0.91969,
       "intent": "reachable through existing HTTP/2 server",
       "expected_fix": true,
       "probe": "existing-http2",
-      "advisory": "https://github.com/advisories/GHSA-qppj-fm5r-hxr3",
+      "advisory": "https://pkg.go.dev/vuln/GO-2024-2687",
       "compatibility_pins": {
         "google.golang.org/grpc": "v1.74.3"
-      }
+      },
+      "original_candidate": "CVE-2023-44487",
+      "target_correction": "The current upstream Rapid Reset advisory is MEDIUM (CVSS v3 5.3), so it cannot serve as the required HIGH target. Use the independently documented HIGH CVE-2023-45288 in the same real x/net pin; retain every scan finding. Two high-EPSS cases use distinct module versions of this CVE."
     },
     {
       "id": "dev-sec-jwt4-called",

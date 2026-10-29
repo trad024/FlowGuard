@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from map_govulncheck import reachability
+from map_govulncheck import messages, reachability
 from prepare_development import verify_plan
 
 VULNERABILITY_FIELDS = (
@@ -104,6 +104,7 @@ def collect_case(case, publication, run, jobs, artifacts):
             },
             "scope": "development seed only",
             "govulncheck": mapped,
+            "govulncheck_config": messages(raw["govulncheck.json"].decode("utf-8"))[0]["config"],
             "artifact_sha256": {
                 name: hashlib.sha256(data).hexdigest() for name, data in raw.items()
             },
@@ -129,15 +130,19 @@ def main():
     records = []
     for case in plan["cases"]:
         retained = args.retained / case["id"]
-        records.append(
-            collect_case(
-                case,
-                publication[case["id"]],
-                json.loads((retained / "run.json").read_text(encoding="utf-8")),
-                json.loads((retained / "jobs.json").read_text(encoding="utf-8")),
-                retained / "scan-reports",
-            )
+        record = collect_case(
+            case,
+            publication[case["id"]],
+            json.loads((retained / "run.json").read_text(encoding="utf-8")),
+            json.loads((retained / "jobs.json").read_text(encoding="utf-8")),
+            retained / "scan-reports",
         )
+        artifact_metadata = json.loads((retained / "artifacts.json").read_text(encoding="utf-8"))
+        artifact = next(a for a in artifact_metadata["artifacts"] if a["name"] == "scan-reports")
+        record["source"]["artifact"] = {
+            key: artifact.get(key) for key in ("id", "name", "created_at", "digest")
+        }
+        records.append(record)
     args.out.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
     print(f"Validated {len(records)} real development scan cases: {args.out}")
 

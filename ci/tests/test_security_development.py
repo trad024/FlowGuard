@@ -14,9 +14,9 @@ from flowguard.security import Security, normalize
 from flowguard.stubs import AgentInput
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "security"))
+from development_replay import counterfactual, finding_rows, replay  # noqa: E402
 from prepare_development import verify_plan  # noqa: E402
-
-from replay import counterfactual, finding_rows  # noqa: E402
+from report_development import summarize  # noqa: E402
 
 CVE = "CVE-2000-10000"
 
@@ -129,6 +129,15 @@ def test_counterfactual_preserves_hard_rules(tmp_path, secret, severity):
     )
 
 
+def test_measured_reachability_is_counted_even_when_a_hard_rule_blocks(tmp_path):
+    path, _ = source(tmp_path)
+    item = case(severity="CRITICAL")
+    item.update(run_id=1, bad_release=True, source={"scope": "synthetic fixture"})
+    result = replay([item], path)
+    assert result["signal_effects"]["cases_with_observed_reachability"] == 1
+    assert result["signal_effects"]["reachability_decision_changes_vs_unknown"] == 0
+
+
 def test_missing_epss_still_requires_review_when_probabilities_zeroed(tmp_path):
     path, _ = source(tmp_path)
     item = case(cve="CVE-2000-20000")
@@ -180,3 +189,54 @@ def test_plan_rejects_sample_and_corrupt_compressed_source(tmp_path):
     path.with_suffix(".json").write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="full dated"):
         verify_plan(plan, path)
+
+
+def test_coverage_preserves_policy_unknown_fix_but_reports_provider_no_known_fix():
+    plan = {
+        "development_seed": 31,
+        "requirements": dict.fromkeys(
+            ("reachable", "unreachable", "fixed", "no_fix", "low_epss", "high_epss"), 1
+        ),
+        "epss": {"low_probability_at_most": 0.01, "high_probability_at_least": 0.1},
+        "cases": [],
+    }
+    result = {"epss_provenance": {}, "per_case": {}}
+    for i, (reachable, fixed, probability) in enumerate([(False, True, 0.005), (True, None, 0.2)]):
+        identifier = f"fake-{i}"
+        plan["cases"].append(
+            {
+                "id": identifier,
+                "cve": CVE,
+                "module": "example.invalid/fake",
+                "version": "v1.0.0",
+                "epss": probability,
+            }
+        )
+        result["per_case"][identifier] = {
+            "findings": [
+                {
+                    "cve": CVE,
+                    "module": "example.invalid/fake",
+                    "version": "v1.0.0",
+                    "cvss": 7.5,
+                    "epss": probability,
+                    "reachable": reachable,
+                    "fix_available": fixed,
+                    "trivy_status": "fixed" if fixed else "affected",
+                }
+            ],
+            "L0": {"action": "block_deployment"},
+            "L1": {"action": "request_security_review", "score_basis_points": 5000},
+            "counterfactuals": {
+                "epss_changed_decision": False,
+                "reachability_changed_decision": False,
+            },
+            "source": {"run_url": "https://example.invalid/fake", "sha": "fake"},
+        }
+    summary = summarize(plan, result)
+    assert all(summary["requirements_met"].values())
+    assert summary["coverage"]["no_fix"] == 1
+    assert summary["cases"][1]["fix_available"] is False
+    assert summary["cases"][1]["policy_fix_available"] is None
+    result["per_case"]["fake-0"]["findings"][0]["reachable"] = None
+    assert summarize(plan, result)["requirements_met"]["unreachable"] is False
