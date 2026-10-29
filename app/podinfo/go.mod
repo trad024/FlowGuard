@@ -36,6 +36,8 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
+require github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
+
 // Security floor for x/text (CVE-2022-32149 upstream; raised in FlowGuard for CVE-2026-56851/56852)
 replace golang.org/x/text => golang.org/x/text v0.42.0
 
@@ -54,6 +56,7 @@ require (
 	github.com/go-openapi/jsonreference v0.21.0 // indirect
 	github.com/go-openapi/spec v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
+	github.com/golang-jwt/jwt v3.2.0+incompatible
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
@@ -90,3 +93,5 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/golang-jwt/jwt => github.com/golang-jwt/jwt v3.2.0+incompatible
