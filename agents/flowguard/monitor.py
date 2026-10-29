@@ -401,29 +401,30 @@ class Monitor:
         self.model = model
         self.runtime = RuntimeDetector(model.runtime) if model and model.runtime else None
         self.ci = CIDetector(model.ci) if model and model.ci else None
-        self.alerts: set[str] = set()
-        self.flagged: set[str] = set()
-        self.last: tuple[float, dict] | None = None
+        # Per environment: the live service sends one tick per namespace
+        self.alerts: dict[str, set[str]] = defaultdict(set)
+        self.flagged: set[str] = set()  # entities, namespace first
+        self.last: dict[str, tuple[float, dict]] = {}
         self.failed_runs: set[int] = set()
         self.hash_seen: dict[str, float] = {}
 
     @property
     def alerting(self) -> bool:
         """An L0 alert or a flagged entity right now (an episode is under way)."""
-        return bool(self.alerts or self.flagged)
+        return any(self.alerts.values()) or bool(self.flagged)
 
     def run(self, inp: AgentInput, cfg) -> AgentOutput:
         t = tick_time(inp)
-        self.last = (t, dict(inp.metrics))
+        self.last[inp.environment] = (t, dict(inp.metrics))
         for key in inp.metrics:
             parts = series.split_key(str(key))
             if parts and "/" in parts[0] and (h := series.pod_hash(parts[0].split("/", 1)[1])):
                 self.hash_seen.setdefault(h, t)
         found: list[tuple[str, EvidencePost]] = [
             ("alert_rule", self._alert_post(inp, a, t))
-            for a in sorted(set(inp.alerts) - self.alerts)
+            for a in sorted(set(inp.alerts) - self.alerts[inp.environment])
         ]
-        self.alerts = set(inp.alerts)
+        self.alerts[inp.environment] = set(inp.alerts)
         found += [("ci", p) for p in self._failed_run(inp)]  # at every level, as L0
         score = None
         if cfg.ml:
@@ -466,7 +467,9 @@ class Monitor:
             known = {e.split("/")[0] for e in self.flagged}
             new = sorted(e for e in flagged if e.split("/")[0] not in known)
             posts += [("runtime", self._runtime_post(inp, flagged[e])) for e in new]
-            self.flagged = set(flagged)
+            # A tick speaks for the namespaces in its snapshot; the others keep their episodes
+            here = {e.split("/")[0] for e in features_of(inp.metrics)}
+            self.flagged = {e for e in self.flagged if e.split("/")[0] not in here} | set(flagged)
             if new:
                 score = min(1.0, max(0.0, max(flagged[e].score or 0.0 for e in new)))
         run = inp.params.get("ci_run")
@@ -513,7 +516,8 @@ class Monitor:
         """P1: is the node or cluster under stress right now? CPU and memory against allocatable,
         and container restarts on pods that are not the canary's."""
         t = tick_time(inp)
-        view = dict(self.last[1]) if self.last and t - self.last[0] <= FRESH_S else {}
+        last = self.last.get(inp.environment)  # the canary's namespace
+        view = dict(last[1]) if last and t - last[0] <= FRESH_S else {}
         view.update(inp.metrics)
         cpu = view.get("node:cpu_ratio", view.get("node_cpu_ratio"))
         mem = view.get("node:memory_ratio", view.get("node_memory_ratio"))
@@ -587,7 +591,7 @@ def tick_event(
     ci_run_completed events, see ci_event)."""
     params: dict = {"ts": t}
     return Event(
-        id=f"tick-{int(t)}",
+        id=f"tick-{environment}-{int(t)}",
         type="metrics_tick",
         service=service,
         environment=environment,
