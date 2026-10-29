@@ -13,6 +13,13 @@ from flowguard.audit import AuditLog
 from flowguard.executor import Executor
 from flowguard.incidents import IncidentRecord
 from flowguard.orchestrator import Orchestrator, level
+from flowguard.stubs import Diagnose
+
+
+class NoExamples:
+    def nearest(self, log):
+        return []
+
 
 ROOT = Path(__file__).resolve().parents[2]
 RECORDINGS = ROOT / "evaluation" / "recordings"
@@ -30,6 +37,9 @@ def agent_inputs(rec: Path, tmp_path: Path) -> list:
         executor=Executor(audit=audit),
         audit=audit,
         input_tap=lambda agent, inp: seen.append(inp),
+        diagnose=Diagnose(
+            lambda log, examples=None: {"root_cause": "code"}, retriever=NoExamples()
+        ),
     )
     for event in replay.events(rec):
         orch.handle(event)

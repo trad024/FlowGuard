@@ -2,7 +2,7 @@
 
 import pytest
 
-from flowguard import audit_metrics
+from flowguard import audit_metrics, baselines
 from flowguard.approval import SimulatedApprover
 from flowguard.audit import AuditLog
 from flowguard.contracts import Event
@@ -10,9 +10,26 @@ from flowguard.executor import Executor
 from flowguard.incidents import IncidentRecord
 from flowguard.monitor import ci_event
 from flowguard.orchestrator import Orchestrator, level
+from flowguard.stubs import Diagnose
+
+
+class RegexLLM:
+    """An LLM stand-in that answers as the regex baseline would (deterministic)."""
+
+    def __call__(self, log, examples=None):
+        cls, lines = baselines.classify(log)
+        quotes = [log.splitlines()[n - 1] for n in lines]  # quoted from the log: grounded
+        return {"root_cause": cls, "evidence_lines": lines, "quotes": quotes,
+                "action": baselines.playbook(cls)}  # fmt: skip
+
+
+class NoExamples:
+    def nearest(self, log):
+        return []
 
 
 def make(tmp_path, name="L3", approve=True, live=False, **kw):
+    kw.setdefault("diagnose", Diagnose(RegexLLM(), retriever=NoExamples()))
     db = tmp_path / "state.db"
     audit = AuditLog(db)
     taps = []

@@ -109,6 +109,12 @@ class EncoderDiagnose(Diagnose):
         super().__init__()
         self.predictor = predictor
 
+    def method(self, cfg) -> str:
+        return "encoder" if cfg.ml else "regex"
+
+    def missing(self, cfg) -> str | None:
+        return None  # the predictor is given; a failing one escalates (run below)
+
     def classify(self, inp, cfg):
         if not cfg.ml:
             return super().classify(inp, cfg)

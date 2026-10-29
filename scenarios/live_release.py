@@ -37,6 +37,7 @@ from flowguard.contracts import AgentName  # noqa: E402
 from flowguard.executor import Executor, Refused  # noqa: E402
 from flowguard.incidents import IncidentRecord  # noqa: E402
 from flowguard.orchestrator import Orchestrator, level  # noqa: E402
+from flowguard.stubs import Diagnose  # noqa: E402
 
 ENV = "staging"
 FAULT = {"kind": "http_errors", "delivery": "config", "error_rate": 0.05}
@@ -114,6 +115,7 @@ def undo(port: int, timeout_min: float) -> int:
             audit=audit,
             approver=page,
             calibrators={AgentName.RELEASE: release.calibrator()},
+            diagnose=Diagnose.without_logs(),  # a rollout look carries no log
         )
         say(step="waiting for a human", approval_page=page.url, timeout_min=timeout_min)
         out = orch.handle(event)

@@ -23,6 +23,7 @@ from flowguard.service import (
     report,
     rollout_state,
 )
+from flowguard.stubs import Diagnose
 
 T = 1_800_000_000.0
 
@@ -92,6 +93,7 @@ def make(tmp_path, raw, states, name="L1", approve=True, rollouts=None):
         executor=Executor(audit=audit, dry_run=True, kubectl=lambda a: "ok"),
         audit=audit,
         approver=SimulatedApprover(policy=lambda p: approve),
+        diagnose=Diagnose.without_logs(),
     )
     return Service(orch, Source({**raw, **rollout_series(states)}), rollouts=rollouts)
 

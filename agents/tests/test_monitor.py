@@ -30,6 +30,7 @@ from flowguard.monitor import (
     tick_event,
 )
 from flowguard.orchestrator import Orchestrator, level
+from flowguard.stubs import Diagnose
 
 T0 = 1_800_000_000.0
 STEP = 15.0
@@ -313,6 +314,7 @@ def test_orchestrator_slot_l0_vs_l1_on_the_same_ticks(model, tmp_path):
             record=IncidentRecord(db),
             executor=Executor(audit=audit),
             audit=audit,
+            diagnose=Diagnose.without_logs(),
         )
         assert type(orch.agents[AgentName.MONITOR]) is Monitor  # the real agent, via stubs
         orch.agents[AgentName.MONITOR] = Monitor(MonitorModel(runtime=model))

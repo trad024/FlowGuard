@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from flowguard import logreduce
@@ -129,6 +130,32 @@ def ground(quotes: list[str], log: str) -> tuple[list[int], int]:
 PREFIX = re.compile(r"^L\d+:\s?")
 
 
+def answerer(complete) -> Callable[..., dict]:
+    """The Diagnose agent's LLM callable from an LLM client's `complete` (the same prompt and
+    parser as the dev runs): (log) at L2, (log, examples) at L3. The answer is the model's own:
+    its quoted lines as written and how many are not in the log; the agent applies grounding by
+    level (D8), so the raw quotes stay comparable between L2 and L3."""
+
+    def answer(log: str, examples: list[Example] | None = None) -> dict:
+        content = complete(messages(log, examples or []))["content"]
+        d = parse(content, log, apply_grounding=False)
+        return {
+            "root_cause": d.root_cause,
+            "scores": d.scores,
+            "action": d.action,
+            "quotes": d.quotes,
+            "evidence_lines": d.grounded,
+            "ungrounded": d.ungrounded,
+        }
+
+    return answer
+
+
+def rejected_by_grounding(quotes: list[str], ungrounded: int) -> bool:
+    """D8: an answer whose evidence is missing or not in the log is rejected."""
+    return bool(ungrounded) or not quotes
+
+
 def parse(content: str, log: str, apply_grounding: bool) -> Diagnosis:
     flags = []
     text = content.strip()
@@ -165,7 +192,7 @@ def parse(content: str, log: str, apply_grounding: bool) -> Diagnosis:
     found, missing = ground(quotes, log)
     d = Diagnosis(cls, scores, action, str(data.get("fix") or ""), quotes, found, missing)
     d.flags = flags
-    if apply_grounding and (missing or not quotes):
+    if apply_grounding and rejected_by_grounding(quotes, missing):
         d.rejected = True
         d.flags.append("rejected: evidence not in the log" if missing else "rejected: no evidence")
         d.root_cause, d.action = "unclear", "escalate_to_human"

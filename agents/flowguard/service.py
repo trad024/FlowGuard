@@ -52,6 +52,7 @@ from flowguard.executor import Executor
 from flowguard.incidents import IncidentRecord
 from flowguard.monitor import tick_event
 from flowguard.orchestrator import Orchestrator, level
+from flowguard.stubs import Diagnose
 
 ROLLOUT = "podinfo"
 WARMUP_S = 30.0  # each step's pause before L0's analysis, and before Release's first look
@@ -294,6 +295,8 @@ def make_orchestrator(name: str, audit: AuditLog, approver, live: bool = False) 
         audit=audit,
         approver=approver,
         calibrators={AgentName.RELEASE: release.calibrator()},
+        # metrics ticks and canary looks carry no CI log: D60 answers every Diagnose call
+        diagnose=Diagnose.without_logs(),
     )
 
 

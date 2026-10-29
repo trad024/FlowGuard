@@ -115,7 +115,8 @@ class Orchestrator:
     audit: object | None = None
     approver: object | None = None  # SimulatedApprover or ApprovalPage
     calibrators: dict[AgentName, ConformalCalibrator] = field(default_factory=dict)
-    diagnose_llm: Callable[[str], dict] | None = None
+    diagnose_llm: Callable[[str], dict] | None = None  # shorthand for Diagnose(llm)
+    diagnose: Diagnose | None = None  # Diagnose with its level's method (L1 model, LLM, index)
     input_tap: Callable[[AgentName, AgentInput], None] | None = None
 
     def __post_init__(self):
@@ -124,11 +125,14 @@ class Orchestrator:
         self.gate = RiskGate(threshold=self.cfg.threshold, audit=self.audit)
         self.agents = {
             AgentName.MONITOR: Monitor(),
-            AgentName.DIAGNOSE: Diagnose(self.diagnose_llm),
+            AgentName.DIAGNOSE: self.diagnose or Diagnose(self.diagnose_llm),
             AgentName.RELEASE: Release(),
             AgentName.SECURITY: Security(),
             AgentName.OPTIMIZER: Optimizer(),
         }
+        # Fail at construction, not mid-incident: the level's Diagnose method must be there
+        if problem := self.agents[AgentName.DIAGNOSE].missing(self.cfg):
+            raise ValueError(f"refusing to start: {problem}")
         graph = StateGraph(State)
         graph.add_node("monitor", self._monitor)
         graph.add_node("release", self._release)

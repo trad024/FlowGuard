@@ -68,6 +68,7 @@ from flowguard.calibration import ConformalCalibrator, coverage_by_group  # noqa
 from flowguard.executor import Executor  # noqa: E402
 from flowguard.incidents import IncidentRecord  # noqa: E402
 from flowguard.orchestrator import Orchestrator, level  # noqa: E402
+from flowguard.stubs import Diagnose  # noqa: E402
 
 LABEL = "dev, in-sample"
 UP_LOOKBACK_S = 20.0  # pods up: a sample older than this no longer counts
@@ -244,6 +245,7 @@ def orchestrator(name: str, folder: Path) -> Orchestrator:
         record=IncidentRecord(db),
         executor=Executor(audit=audit, dry_run=True),
         audit=audit,
+        diagnose=Diagnose.without_logs(),  # rollout looks carry no log (P1 asks without one)
     )
 
 
