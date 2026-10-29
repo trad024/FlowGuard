@@ -29,12 +29,12 @@ def prereg():
     return p
 
 
-def test_the_committed_draft_is_not_frozen_and_release_waits_for_the_d54_recordings():
+def test_the_committed_draft_is_not_frozen_and_every_family_has_a_count():
     p = yaml.safe_load(heldout.PREREG.read_text(encoding="utf-8"))
     assert p["status"] == "draft" and p["frozen"] is None
     counts = {name: f["count"] for name, f in p["families"].items()}
-    assert counts.pop("release") is None  # open until the agents-mode recordings are scored
     assert all(isinstance(c, int) and c > 0 for c in counts.values())
+    assert counts["release"] == 72  # 36 bad (6 per kind and band) and 36 good (D54, D56)
     assert p["smallest_effect"]["H4"]["role"].startswith("descriptive")  # D56
     assert set(p["families"]) == set(runner.FAMILIES)
 

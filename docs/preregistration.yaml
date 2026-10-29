@@ -73,13 +73,20 @@ smallest_effect:
 
 families:
   release:                       # DSO3, H4 (node stress), H5
-    count: null                  # OPEN until the D54 dev recordings are scored
+    count: 72                    # D54, D56: 36 bad, 36 good, see count_rule
     count_rule: >-
-      open. No confirmatory test rests on this family since D56, so the count will be set by
-      DSO3's precision once the agents-mode dev recordings (D54) are scored. Proposal under
-      review: 120, i.e. 12 per bad kind and band (6 cells, 72 bad releases: the bad-caught
-      rate's 95% Wilson half-width at most 0.113 at any rate) and 48 good ones, a quarter of
-      each under node stress (30 H4 cases)
+      DSO3 is descriptive (D56): no confirmatory test rests on this family, so the count is set
+      by precision and cluster time. 6 recordings per bad kind and band (2 kinds x 3 bands = 36
+      bad releases) and 36 good ones, a quarter of each under node stress (9 bad, 9 good): the
+      bad-caught rate's 95% Wilson half-width is at most 0.16 at any rate (0.155 at 50%), a
+      false-rollback rate of 0/36 has an upper bound of 0.096. About 13 hours of cluster time
+      under the agents-mode canary (D54), measured at about 7.5 to 10 minutes per recording
+      on dev. The composition per kind and band is exact only with a stratified draw
+    design_limit: >-
+      below-band faults are hard to detect at all: the load is 10 requests per second, so a
+      canary sees about 240 requests per step (20% of the traffic for 120 s), and a 5xx ratio
+      of 0.2 to 0.6% gives about 0 to 1.5 failed requests per step. Stated as a design limit,
+      not tuned for (on dev, L0, L3 and L4 caught 1, 0 and 0 of 2 below-band error releases)
     delivery: config
     recording: >-
       under the agents-mode canary (D53): the same steps and timed pauses as L0's Rollout, an
@@ -100,7 +107,7 @@ families:
     release_data: >-
       per pod-template hash from Prometheus (D21): requests and 5xx from the request counter,
       requests slower than 500 ms from podinfo's histogram buckets (+Inf minus le 0.5, D55)
-    kinds: {none: 0.4, http_errors: 0.3, latency: 0.3}
+    kinds: {none: 0.5, http_errors: 0.25, latency: 0.25}  # 36 good, 18 + 18 bad of 72
     bands:
       http_errors:               # the canary's 5xx ratio against L0's 1%
         below: {weight: 1, params: {error_rate: {dist: uniform, low: 0.002, high: 0.006}}}
