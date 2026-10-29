@@ -14,6 +14,8 @@ dependencies = [
     "drain3==0.9.11",
     "numpy>=2,<3",
     "scikit-learn==1.7.2",
+    "chromadb==1.5.9",  # L3 retrieval (Step 7)
+    "onnxruntime==1.31.0",  # CPU only: the sentence model for chromadb
 ]
 
 [project.optional-dependencies]
