@@ -199,3 +199,48 @@ def test_held_out_and_duplicate_recordings_are_refused(tmp_path):
     write_recording(tmp_path / "dev", "r-2", bad=False)
     with pytest.raises(ValueError, match="twice"):
         rr.release_runs([tmp_path / "dev", tmp_path / "dev"])
+
+
+# ---------------------------------------------------------------- logged step times (D54)
+
+
+def logged(path, rows):
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return path
+
+
+def test_logged_rollout_steps_replace_the_half_scrape_shift(tmp_path, monkeypatch):
+    rec = tmp_path / "recordings"
+    write_recording(rec, "r-good", bad=False)
+    rows = [
+        {"ts": iso(T0 + s), "namespace": "staging", "canary_hash": h, "step_index": i}
+        for s, h, i in [
+            (10, "old", 7),  # the previous rollout, done
+            (52, "new", 0),  # setWeight 20 in progress
+            (57, "new", 1),  # 20% reached
+            (90, "new", 2),
+            (205, "new", 3),
+            (209, "new", 4),  # 50% reached
+        ]
+    ]
+    monkeypatch.setattr(rr, "STEPS_LOG", logged(tmp_path / "steps.jsonl", rows))
+    (run,) = rr.release_runs([rec])
+    line = rr.timeline(rr.load_index(run), "staging", *run["window"])
+    assert line["step_source"] == "logged"
+    assert {w: t - T0 for w, t in line["steps"].items()} == {20: 57, 50: 209}
+    result = rr.score([run])
+    assert result["step_source"] == {"logged": 1} and result["step_source_fallback"] == []
+    assert result["classes"] == {"good / dev": 1}
+
+
+def test_without_a_logged_transition_the_shift_is_used(tmp_path, monkeypatch):
+    rec = tmp_path / "recordings"
+    write_recording(rec, "r-good", bad=False)
+    # the logger started mid-canary: 20% was never seen being reached
+    rows = [{"ts": iso(T0 + 100), "namespace": "staging", "canary_hash": "new", "step_index": 2}]
+    monkeypatch.setattr(rr, "STEPS_LOG", logged(tmp_path / "steps.jsonl", rows))
+    (run,) = rr.release_runs([rec])
+    line = rr.timeline(rr.load_index(run), "staging", *run["window"])
+    assert line["step_source"] == "up_minus_7.5s"
+    assert line["steps"][20] - T0 == STEP_20 - rr.READY_LAG_S
+    assert rr.score([run])["step_source_fallback"] == ["r-good"]

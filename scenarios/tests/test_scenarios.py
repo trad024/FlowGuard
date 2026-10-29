@@ -141,6 +141,8 @@ def stores(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOWGUARD_AUDIT_DB", str(tmp_path / "audit.db"))
     monkeypatch.setenv("FLOWGUARD_GROUNDTRUTH_DB", str(tmp_path / "groundtruth.db"))
     monkeypatch.setattr(runner, "RUNS", tmp_path)
+    monkeypatch.setattr(runner.recorder, "RUN_LOCK", tmp_path / "state" / "run.lock")
+    monkeypatch.setattr(runner, "results_in_prometheus", lambda: 0)  # no Prometheus in tests
     return tmp_path
 
 
@@ -535,6 +537,41 @@ def test_branch_only_families_do_not_wait_for_cluster_alerts(monkeypatch, stores
     assert r.run()["evaluation"]["valid"] is True
 
 
+def test_a_cluster_run_refuses_to_start_with_results_in_prometheus_or_a_held_lock(
+    monkeypatch, stores
+):
+    """D25: the agents read this Prometheus; no scored result may be in it during a run."""
+    r = runner.Runner(spec(), run_id="r-0000abcd")
+    started = []
+    monkeypatch.setattr(r, "_run", lambda: started.append(runner.recorder.RUN_LOCK.is_file()))
+    monkeypatch.setattr(runner, "results_in_prometheus", lambda: 12)
+    with pytest.raises(RuntimeError, match="12 flowguard_result series"):
+        r.run()
+    assert started == [] and not runner.recorder.RUN_LOCK.exists()
+    monkeypatch.setattr(runner, "results_in_prometheus", lambda: 0)
+    r.run()
+    assert started == [True] and not runner.recorder.RUN_LOCK.exists()  # held, then released
+    runner.recorder.RUN_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    runner.recorder.RUN_LOCK.write_text('{"run_id": "r-other"}')
+    with pytest.raises(RuntimeError, match="r-other"):
+        r.run()
+    assert started == [True] and runner.recorder.RUN_LOCK.exists()  # someone else's lock stays
+
+
+def test_the_results_query_counts_flowguard_result_series(monkeypatch):
+    seen = []
+
+    def http_json(url):
+        seen.append(url)
+        return {"data": {"result": [{"value": [1, "7"]}]}}
+
+    monkeypatch.setattr(runner.recorder, "http_json", http_json)
+    assert runner.results_in_prometheus("http://prom:9090") == 7
+    assert "flowguard_result" in seen[0] and "__name__" in seen[0]
+    monkeypatch.setattr(runner.recorder, "http_json", lambda url: {"data": {"result": []}})
+    assert runner.results_in_prometheus() == 0
+
+
 def test_node_stress_sets_the_batch_pods_cpu_request(monkeypatch, stores):
     """D44: the stress pod's CPU request sets its weight against podinfo's."""
     applied = []
@@ -553,3 +590,86 @@ def test_node_stress_sets_the_batch_pods_cpu_request(monkeypatch, stores):
         "pod": "batch-worker-0000abcd",
     }
     assert runner.STRESS_POD["spec"]["containers"][0]["resources"]["requests"]["cpu"] == "10m"
+
+
+# ---------------------------------------------------------------- agents-mode recording (D54)
+
+
+def test_agents_mode_steps_replace_each_l0_analysis_with_an_indefinite_pause():
+    l0, agents = runner.canary_steps("l0"), runner.canary_steps("agents")
+    assert len(l0) == len(agents)
+    for a, b in zip(l0, agents, strict=True):
+        assert b == ({"pause": {}} if "analysis" in a else a)
+    assert runner.canary_mode({"spec": {"strategy": {"canary": {"steps": l0}}}}) == "l0"
+    assert runner.canary_mode({"spec": {"strategy": {"canary": {"steps": agents}}}}) == "agents"
+
+
+class FakeRollout:
+    """A canary that moves one step per resume and pauses at each indefinite pause."""
+
+    def __init__(self, image="img:new"):
+        self.image, self.i, self.resumes = image, 2, []
+        self.steps = runner.canary_steps("agents")
+
+    def rollout(self):
+        done = self.i >= len(self.steps)
+        paused = not done and self.steps[self.i] == {"pause": {}}
+        return {
+            "metadata": {"generation": 2},
+            "spec": {
+                "strategy": {"canary": {"steps": self.steps}},
+                "template": {"spec": {"containers": [{"image": self.image}]}},
+            },
+            "status": {
+                "observedGeneration": "2",
+                "currentStepIndex": self.i,
+                "pauseConditions": [{"reason": "CanaryPauseStep"}] if paused else None,
+                "phase": "Healthy" if done else "Paused",
+                "stableRS": "new" if done else "old",
+                "currentPodHash": "new",
+            },
+        }
+
+    def resume(self, clock):
+        self.resumes.append(clock.t)
+        self.i += 3  # past the next setWeight and timed pause, to the next indefinite pause
+
+
+def test_an_agents_mode_recording_holds_each_pause_past_releases_looks_then_resumes():
+    clock, fake, resumed = Clock(), FakeRollout(), []
+    outcome = runner.pace_canary(
+        fake,
+        "img:new",
+        900,
+        lambda: fake.resume(clock),
+        on_resume=resumed.append,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+    assert outcome == "promoted"
+    assert resumed == [2, 5]  # both indefinite pauses, once each
+    assert fake.resumes[0] >= runner.HOLD_S >= 120  # held past Release's fourth look
+    assert fake.resumes[1] - fake.resumes[0] >= runner.HOLD_S
+
+
+def test_a_canary_that_never_resumes_is_a_timeout_and_an_invalid_recording():
+    clock, fake = Clock(), FakeRollout()
+    outcome = runner.pace_canary(fake, "img:new", 300, lambda: None, sleep=clock.sleep, clock=clock)
+    assert outcome == "timeout"
+
+
+def test_l0_is_not_judged_live_under_agents_mode():
+    assert runner.l0_correct("abort", "offline") is None
+    assert runner.l0_correct("abort", "aborted") is True
+
+
+def test_pilot_counts_agents_mode_runs_apart(tmp_path, monkeypatch):
+    import groundtruth
+    import pilot
+
+    db = groundtruth.GroundTruthDB(tmp_path / "gt.db")
+    for run_id, observed in (("r-1", {"l0": "aborted"}), ("r-2", {"mode": "agents"})):
+        spec = {"id": f"s{run_id[-1]}", "family": "release"}
+        db.record_run(run_id, spec=spec, ground_truth={}, observed=observed, l0_correct=None)
+    assert pilot.done(db) == {"s1"}
+    assert pilot.done(db, "agents") == {"s2"}

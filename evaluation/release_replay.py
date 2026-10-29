@@ -46,7 +46,8 @@ import json
 import statistics
 import sys
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +72,8 @@ LOOKS = tuple(release.WINDOW_S * k for k in range(1, release.LOOKS_PER_STEP + 1)
 PAUSE_S = 30.0  # each step's pause before L0's analysis (base/podinfo.yaml, agents-mode alike)
 OUT = ROOT / "evaluation" / "runs" / "dso3-replay.json"
 SPECS = ROOT / "scenarios" / "dev"
+STEPS_LOG = ROOT / "state" / "rollout-steps.jsonl"  # Rollout step changes, logged every 5 s
+STEP_AFTER = {20: 1, 50: 4}  # the step index right after each setWeight: its weight reached
 EPSILON = 0.1  # conformal coverage target 90%
 
 
@@ -148,10 +151,47 @@ def timeline(idx: series.Index, namespace: str, t0: float, t1: float) -> dict | 
             break
     if canary is None or 20 not in steps:
         return None
-    # A pod is Ready 0 to 15 s (one scrape) before its first `up` sample: steps start half a
-    # scrape earlier than they show
-    steps = {w: t - READY_LAG_S for w, t in steps.items()}
-    return {"stable": stable, "canary": canary, "steps": steps, "end": end, "how": how}
+    logged = logged_steps(namespace, canary, t0, t1)
+    if all(w in logged for w in steps):  # the Rollout's own step times, when they were logged
+        steps, source = {w: logged[w] for w in steps}, "logged"
+    else:
+        # A pod is Ready 0 to 15 s (one scrape) before its first `up` sample: steps start half a
+        # scrape earlier than they show
+        steps, source = {w: t - READY_LAG_S for w, t in steps.items()}, "up_minus_7.5s"
+    return {
+        "stable": stable,
+        "canary": canary,
+        "steps": steps,
+        "end": end,
+        "how": how,
+        "step_source": source,
+    }
+
+
+def logged_steps(
+    namespace: str, canary: str, t0: float, t1: float, log: Path | None = None
+) -> dict[int, float]:
+    """Step starts from the logged Rollout status: when the canary's Rollout moved past each
+    setWeight, counted only where the log saw the step before it too (a 5 s resolution)."""
+    log = STEPS_LOG if log is None else log
+    if not log.is_file():
+        return {}
+    out: dict[int, float] = {}
+    prev = None
+    for line in log.read_text(encoding="utf-8").splitlines():
+        e = json.loads(line)
+        if e.get("namespace") != namespace or "step_index" not in e:
+            continue
+        ts = datetime.fromisoformat(e["ts"].replace("Z", "+00:00")).timestamp()
+        if not t0 <= ts <= t1 or e.get("canary_hash") != canary:
+            prev = None
+            continue
+        i = e.get("step_index") or 0
+        for weight, k in STEP_AFTER.items():
+            if weight not in out and prev is not None and prev < k <= i:
+                out[weight] = ts
+        prev = i
+    return out
 
 
 # ---------------------------------------------------------------- Release on a recording
@@ -370,6 +410,14 @@ def paired(runs: list[dict], a: dict[str, dict], b: dict[str, dict]) -> dict:
     }
 
 
+def classes(runs: list[dict]) -> dict[str, int]:
+    """Recordings per class: bad or good, per band."""
+    out: Counter = Counter()
+    for r in runs:
+        out[("bad" if r["ground_truth"].get("bad_release") else "good") + f" / {band(r)}"] += 1
+    return dict(sorted(out.items()))
+
+
 def node_series(run: dict) -> bool:
     return any(
         s.startswith("node") for s in run["manifest"].get("sources", {}).get("prometheus", {})
@@ -387,12 +435,14 @@ def node_stress(runs: list[dict], res: dict[str, dict]) -> dict:
 
 def score(runs: list[dict]) -> dict:
     results: dict[str, dict[str, dict]] = {"L0": {}, "L3": {}, "L4": {}}
-    live, idx_of = {}, {}
+    live, idx_of, sources = {}, {}, {}
     metrics = l0_canary.load_template()
     with tempfile.TemporaryDirectory(prefix="dso3-replay-") as tmp:
         for r in runs:
             idx = idx_of[r["id"]] = load_index(r)
             results["L0"][r["id"]] = l0_offline(r, idx, metrics)
+            line = timeline(idx, r["spec"].get("environment", "staging"), *r["window"])
+            sources[r["id"]] = line["step_source"] if line else None
             live[r["id"]] = l0_live(r, idx)
             for name in ("L3", "L4"):
                 folder = Path(tmp) / r["id"]
@@ -402,7 +452,11 @@ def score(runs: list[dict]) -> dict:
     return {
         "label": LABEL,
         "recordings": len(runs),
+        "agents_mode": sum(r["observed"].get("mode") == "agents" for r in runs),
         "scored": len(usable),
+        "classes": classes(usable),
+        "step_source": dict(sorted(Counter(sources[r["id"]] for r in usable).items())),
+        "step_source_fallback": sorted(r["id"] for r in usable if sources[r["id"]] != "logged"),
         "no_canary": sorted(r["id"] for r in runs if r not in usable),
         "l0_live_agreement": agreement(usable, results["L0"], live),
         "needs_rerecording": needs_rerecording(usable, idx_of, results),
@@ -415,6 +469,7 @@ def score(runs: list[dict]) -> dict:
             r["id"]: {
                 "bad": bool(r["ground_truth"].get("bad_release")),
                 "band": band(r),
+                "step_source": sources[r["id"]],
                 **{
                     n: {k: v for k, v in res[r["id"]].items() if k != "timeline"}
                     for n, res in results.items()

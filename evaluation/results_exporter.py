@@ -11,16 +11,28 @@ per-hour block (episodes, hours, rate, ci95) and each median becomes
 with stat one of value, ci_low, ci_high, k, n (k = episodes and n = hours for a per-hour rate).
 `path` is the dotted position in the file, so every series is unique; the other labels are
 parsed from it for the dashboard. Scoring side: nothing under agents/ reads this.
+
+The Prometheus that scrapes this also serves the agents (D25), so the exporter refuses to
+start while an evaluation run holds recorder.RUN_LOCK (the runner, in turn, refuses to start a
+run while any flowguard_result series is in Prometheus), and agent selectors can never name a
+flowguard_* metric (series.checked_selector). It listens on one address, never all interfaces
+(flowguard.exporter.bind_address).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "evaluation")]
+
+import recorder  # noqa: E402
+from flowguard.exporter import bind_address  # noqa: E402
+
 RUNS = ROOT / "evaluation" / "runs"
 PORT = 9465
 SOURCES = {"l0-baseline": "l0-baseline.json", "dso1-replay": "dso1-replay.json"}
@@ -113,7 +125,7 @@ def serve(host: str = "127.0.0.1", port: int = PORT, runs: Path = RUNS):
         def log_message(self, *args):
             pass
 
-    return ThreadingHTTPServer((host, port), Handler)
+    return ThreadingHTTPServer((bind_address(host), port), Handler)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -121,7 +133,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=PORT)
     args = parser.parse_args(argv)
-    server = serve(args.host, args.port)
+    if recorder.RUN_LOCK.exists():
+        parser.error(
+            f"an evaluation run holds {recorder.RUN_LOCK}: the scored results stay out of the "
+            "Prometheus the agents read until it ends (D25)"
+        )
+    try:
+        server = serve(args.host, args.port)
+    except ValueError as exc:
+        parser.error(str(exc))
     print(f"serving http://{args.host}:{server.server_address[1]}/metrics", flush=True)
     server.serve_forever()
     return 0

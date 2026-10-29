@@ -4,6 +4,8 @@ escaping, read-only access, a missing file, and the HTTP endpoint on loopback.""
 import threading
 import urllib.request
 
+import pytest
+
 from flowguard import exporter
 from flowguard.audit import AuditLog
 from flowguard.contracts import ActionProposal, ExecutionResult, GateDecision, Incident
@@ -94,6 +96,16 @@ def test_read_only(tmp_path):
     before = path.read_bytes()
     exporter.render(path)
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "[::]", "", " ", "*"])
+def test_it_never_listens_on_every_interface(tmp_path, host, capsys):
+    with pytest.raises(ValueError, match="all interfaces"):
+        exporter.serve(host, 0, tmp_path / "audit.db")
+    with pytest.raises(SystemExit) as exc:
+        exporter.main(["--host", host, "--port", "0"])
+    assert exc.value.code == 2 and "all interfaces" in capsys.readouterr().err
+    assert exporter.bind_address(" 172.18.0.1 ") == "172.18.0.1"  # one interface is fine
 
 
 def test_http_endpoint_on_loopback(tmp_path):
