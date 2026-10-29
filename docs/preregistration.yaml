@@ -606,8 +606,10 @@ llm:
   temperature: 0
   reasoning_effort: low
   repeats: >-
-    3 runs on a seeded random subset of 60 items per LLM level, with the repeat index in the
-    cache key (D28); 1 run elsewhere; mean and spread reported on the subset
+    3 runs on a seeded random subset of 30 items at L3 only, with the repeat index in the cache
+    key (D28, D61); 1 run elsewhere; mean and spread reported on the subset. The subset was cut
+    from 60 items at L2 and L3 to fit the free quota (568 calls, about 3.05M tokens, about 2.4
+    days on 7 lanes); L2's run-to-run variability is not measured
 
 # ------------------------------------------------------------------ calibration (D9, D45)
 calibration:
