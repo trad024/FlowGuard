@@ -92,8 +92,12 @@ py evaluation\step_log_import.py state\rollout-steps.jsonl <recordings folder> .
 ```
 
 Without a step log, the steps come from the pods up per pod-template hash (moved half a scrape
-earlier: a pod is Ready before its first `up` sample). `score` counts each source
-(`step_source`: argo, poll or pods_up_estimate) and lists the recordings on the estimate
+earlier: a pod is Ready before its first `up` sample). The scenario's canary is the one the
+window's first logged rows show; a later canary in the log (the runner's restore) is never
+taken. Sources are per step: a step the log has no start for takes the estimate's start for
+that step only. `score` counts each recording's sources (`step_source`: argo, poll,
+pods_up_estimate, or a mix such as pods_up_estimate+poll), keeps each step's in
+`per_recording`, and lists the recordings with any step on the estimate
 (`step_source_fallback`). Release looks where L0 measures (30 to 120 s
 into each step) on 30 s windows of per-hash counts since the 20% step began. Release
 scenarios are recorded under the agents-mode Rollout (D54), so each canary runs its full
