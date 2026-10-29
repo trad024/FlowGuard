@@ -134,6 +134,63 @@ def test_d_p1_holds_a_rollback_when_the_node_is_under_stress(tmp_path):
     )
 
 
+class ScriptedRelease:
+    """Release stand-in: optionally asks Monitor (P1), then proposes `action` or holds."""
+
+    def __init__(self, action=None, ask_first=False):
+        self.action, self.ask_first = action, ask_first
+
+    def run(self, inp, cfg, ask=None):
+        from flowguard.contracts import ActionProposal, EvidencePost
+        from flowguard.stubs import AgentOutput
+
+        evidence = [EvidencePost(incident_id=inp.incident_id, agent="release", claim="look")]
+        if self.ask_first:
+            evidence.append(ask("monitor", "Is the node or cluster under stress?"))
+        proposals = []
+        if self.action:
+            proposals.append(
+                ActionProposal(id="p-1", incident_id=inp.incident_id, agent="release",
+                               action=self.action, target=inp.target,
+                               environment=inp.environment, confidence=0.0, rationale="x")
+            )  # fmt: skip
+        return AgentOutput(proposals=proposals, evidence=evidence)
+
+
+def incidents(orch):
+    with orch.record._connect() as db:
+        return db.execute("SELECT COUNT(*) FROM incidents").fetchone()[0]
+
+
+def test_a_canary_look_that_holds_opens_no_incident(tmp_path):
+    orch = make(tmp_path)
+    orch.agents["release"] = ScriptedRelease()
+    out = orch.handle(event("rollout_step", in_canary=True))
+    assert "incident_id" not in out and out["output"].proposals == []
+    assert incidents(orch) == 0 and orch.audit.query("SELECT 1 FROM proposals") == []
+    assert [a for a, _ in orch.taps] == ["release"]
+
+
+def test_a_canary_look_that_proposes_opens_one_rollout_incident(tmp_path):
+    orch = make(tmp_path)
+    orch.agents["release"] = ScriptedRelease("rollout_promote")
+    out = orch.handle(event("rollout_step", in_canary=True))
+    incident, _ = orch.record.incident(out["incident_id"])
+    assert incident.source == "rollout" and incident.in_canary and incidents(orch) == 1
+    assert [e.claim for e in orch.record.evidence(incident.id)] == ["look"]
+    assert [d.outcome for d in out["decisions"]] == ["ask_human"]  # medium, no calibration
+
+
+def test_a_p1_question_opens_the_incident_before_it_is_recorded(tmp_path):
+    orch = make(tmp_path, "L4")
+    orch.agents["release"] = ScriptedRelease("escalate_to_human", ask_first=True)
+    out = orch.handle(event("rollout_step", in_canary=True))
+    (request,) = orch.record.requests(out["incident_id"])
+    assert request.to_agent == "monitor" and incidents(orch) == 1
+    claims = [e.claim for e in orch.record.evidence(out["incident_id"])]
+    assert claims[0].startswith("node stress unknown") and "look" in claims
+
+
 def test_medium_actions_go_to_the_approver_and_denials_do_not_run(tmp_path):
     denied = make(tmp_path / "d", approve=False)
     out = denied.handle(event("rollout_step", metrics=WORSE))
