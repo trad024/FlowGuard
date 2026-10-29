@@ -190,3 +190,35 @@ def test_the_raw_quotes_are_recorded_at_l2_and_l3_whatever_grounding_decides(nam
     (p,) = ungrounded_agent(EmptyRetriever()).run(inp(), level(name)).proposals
     assert p.params["diagnose_quotes"] == ["a line the log does not have"]
     assert p.params["diagnose_ungrounded"] == 1
+
+
+class FixingLLM:
+    """An answer with a fix sentence, quoting `quotes`."""
+
+    def __init__(self, quotes):
+        self.quotes = quotes
+
+    def __call__(self, log, examples=None):
+        return {"root_cause": "dependency", "evidence_lines": [1], "action": "pin_dependency",
+                "quotes": self.quotes, "ungrounded": 0,
+                "fix": "Pin golang.org/x/text to v0.20.0."}  # fmt: skip
+
+
+@pytest.mark.parametrize("name", ["L2", "L3"])
+def test_the_class_and_the_models_fix_reach_the_fix_planner(name):
+    agent = Diagnose(FixingLLM(LOG.splitlines()[:1]), retriever=EmptyRetriever())
+    (p,) = agent.run(inp(), level(name)).proposals
+    assert p.params["diagnose_root_cause"] == "dependency"
+    assert p.params["diagnose_fix"] == "Pin golang.org/x/text to v0.20.0."
+
+
+def test_a_rejected_answer_passes_no_class_and_no_fix_to_the_planner():
+    agent = Diagnose(FixingLLM([]), retriever=EmptyRetriever())  # no quotes: rejected at L3
+    (p,) = agent.run(inp(), level("L3")).proposals
+    assert (p.params["diagnose_root_cause"], p.params["diagnose_fix"]) == ("unclear", "")
+
+
+def test_the_regex_and_tfidf_record_their_class_without_a_fix():
+    for name, cls in (("L0", "code"), ("L1", "dependency")):
+        (p,) = full().run(inp(), level(name)).proposals
+        assert p.params["diagnose_root_cause"] == cls and "diagnose_fix" not in p.params

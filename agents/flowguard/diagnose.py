@@ -146,6 +146,7 @@ def answerer(complete) -> Callable[..., dict]:
             "quotes": d.quotes,
             "evidence_lines": d.grounded,
             "ungrounded": d.ungrounded,
+            "fix": d.fix,
         }
 
     return answer

@@ -11,7 +11,8 @@ for calibration (D9) and evidence posts. Steps 6 to 10 replace the logic, not th
   LLM, zero-shot; L3+ the LLM with the 3 nearest training cases of other templates
   (flowguard.retrieval) and grounding (D8). `missing()` names what a level lacks, so the
   orchestrator refuses to start without it; a log reaching a Diagnose without its method raises.
-  Every proposal records the method actually used (`diagnose_method`). Without a log (empty
+  Every proposal records the method used (`diagnose_method`), the class it decided
+  (`diagnose_root_cause`) and, from an LLM, its fix sentence (`diagnose_fix`). Without a log (empty
   or absent) every level takes one path: no model is asked, no class is guessed, the incident
   record gets "no diagnosis (no log)" and the incident goes to a human (escalate_to_human, no
   label scores) (D60).
@@ -138,13 +139,15 @@ class Diagnose:
         scores = answer.get("scores") or {c: (0.9 if c == cls else 0.025) for c in CLASSES}
         action = str(answer.get("action") or "")
         rejected = cfg.grounding and diagnose.rejected_by_grounding(quotes, ungrounded)
-        if rejected:
-            cls, action, lines = "unclear", "escalate_to_human", []
+        fix = str(answer.get("fix") or "")
+        if rejected:  # nothing of a rejected answer reaches an action (D8)
+            cls, action, lines, fix = "unclear", "escalate_to_human", [], ""
         record = {
             "diagnose_quotes": quotes,  # raw, as the model wrote them
             "diagnose_ungrounded": ungrounded,  # raw quotes not found in the log
             "diagnose_grounding": bool(cfg.grounding),
             "diagnose_rejected": bool(rejected),
+            "diagnose_fix": fix,  # the model's one-sentence fix, for the fix planner (D57)
         }
         return cls, scores, lines, action, record
 
@@ -167,6 +170,7 @@ class Diagnose:
             inp,
             f"root cause {cls}; evidence lines {lines[:5]}",
             diagnose_method=method,
+            diagnose_root_cause=cls,  # the class decided (after grounding), for the fix planner
             **record,
         )
         cause = "infrastructure" if cls == "infrastructure" else "release"
