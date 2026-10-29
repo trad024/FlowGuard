@@ -26,9 +26,11 @@ def canary_pods(s, abort_at):
 
 
 def write_recording(root, rid, *, bad, band=None, l0="promoted", abort_at=None, errors=0.0,
-                    slow=0.0, stable_errors=0.0, node_cpu=None, node_stress=False):  # fmt: skip
+                    slow=0.0, stable_errors=0.0, node_cpu=None, node_stress=False,
+                    steps=None):  # fmt: skip
     """A 10-minute staging canary at 10 requests/s: 20% at 60 s, 50% at 210 s, 100% at 360 s,
-    or the canary gone `abort_at` s into its 20% step. Counters grow by their expected values."""
+    or the canary gone `abort_at` s into its 20% step. Counters grow by their expected values.
+    `steps`: the runner's Rollout step log rows, when the recording has one."""
     rec = root / rid
     (rec / "prometheus").mkdir(parents=True)
     times = [T0 + 15 * k for k in range(WINDOW // 15 + 1)]
@@ -80,6 +82,8 @@ def write_recording(root, rid, *, bad, band=None, l0="promoted", abort_at=None, 
         ]
     for name, result in files.items():
         (rec / "prometheus" / f"{name}.json").write_text(json.dumps({"result": result}))
+    if steps is not None:
+        (rec / "rollout-events.jsonl").write_text("".join(json.dumps(r) + "\n" for r in steps))
     spec = {"family": "release", "environment": "staging", "fault": {"kind": "x"}}
     if node_stress:
         spec["node_stress"] = {"cpu_workers": 8, "cpu_request": 7.0}
@@ -111,6 +115,78 @@ def test_timeline_reads_the_steps_and_how_the_canary_ended(tmp_path):
     assert good["end"] - T0 == FULL
     bad = rr.timeline(rr.load_index(runs["r-bad"]), "staging", *runs["r-bad"]["window"])
     assert bad["how"] == "aborted" and STEP_20 + 70 <= bad["end"] - T0 <= STEP_20 + 70 + 25
+
+
+def step_log(pause_20, pause_50=None, end=None, aborted=False):
+    """Step log rows as recorder.RolloutStepLog writes them (seconds into the recording)."""
+    base = {"namespace": "staging", "canary_hash": "new", "stable_hash": "old", "abort": False,
+            "aborted_at": None, "pause_start": None}  # fmt: skip
+    rows = []
+    for weight, pause in ((20, pause_20), (50, pause_50)):
+        if pause is None:
+            continue
+        rows.append({**base, "ts": iso(T0 + pause - 4), "step": "setWeight", "set_weight": weight})
+        rows.append(
+            {
+                **base,
+                "ts": iso(T0 + pause + 2),
+                "step": "pause",
+                "set_weight": weight,
+                "pause_start": iso(T0 + pause),
+            }  # fmt: skip
+        )
+    if end is not None and aborted:
+        rows.append({**base, "ts": iso(T0 + end + 3), "step": "pause", "set_weight": 20,
+                     "abort": True, "aborted_at": iso(T0 + end)})  # fmt: skip
+    elif end is not None:
+        rows.append({**base, "ts": iso(T0 + end), "step": "setWeight", "set_weight": 100})
+    return rows
+
+
+def test_logged_step_times_replace_the_estimate_and_old_recordings_keep_it(tmp_path, monkeypatch):
+    # Argo's own times, different from what the pods up suggest (52.5 s and 202.5 s)
+    write_recording(tmp_path, "r-logged", bad=False, steps=step_log(57, 205, 357))
+    write_recording(tmp_path, "r-old", bad=False)
+    write_recording(tmp_path, "r-stopped", bad=True, l0="aborted", abort_at=70, errors=0.1,
+                    steps=step_log(57, end=131, aborted=True))  # fmt: skip
+    runs = {r["id"]: r for r in rr.release_runs([tmp_path])}
+    idx = {k: rr.load_index(r) for k, r in runs.items()}
+    logged = rr.run_timeline(runs["r-logged"], idx["r-logged"])
+    assert logged["source"] == "rollout_events" and (logged["canary"], logged["stable"]) == (
+        "new", "old"
+    )  # fmt: skip
+    assert {w: t - T0 for w, t in logged["steps"].items()} == {20: 57, 50: 205}
+    assert (logged["end"] - T0, logged["how"]) == (357, "promoted")
+    old = rr.run_timeline(runs["r-old"], idx["r-old"])
+    assert old["source"] == "pods_up_estimate"
+    lag = rr.READY_LAG_S
+    assert {w: t - T0 for w, t in old["steps"].items()} == {20: STEP_20 - lag, 50: STEP_50 - lag}
+    stopped = rr.run_timeline(runs["r-stopped"], idx["r-stopped"])
+    assert (stopped["end"] - T0, stopped["how"]) == (131, "aborted")  # Argo's abortedAt
+
+    # The offline L0 starts each analysis 30 s after the logged pause start; Release looks
+    # from the same times
+    starts, looks = [], []
+    analysis, step_event = rr.l0_canary.analysis, rr.release.step_event
+
+    def spy_analysis(i, start, *a, **k):
+        starts.append(start - T0)
+        return analysis(i, start, *a, **k)
+
+    def spy_step(i, t, *a, **k):
+        looks.append(t - T0)
+        return step_event(i, t, *a, **k)
+
+    monkeypatch.setattr(rr.l0_canary, "analysis", spy_analysis)
+    monkeypatch.setattr(rr.release, "step_event", spy_step)
+    rr.l0_offline(runs["r-logged"], idx["r-logged"])
+    rr.l0_offline(runs["r-old"], idx["r-old"])
+    assert starts == [87, 235, STEP_20 - lag + 30, STEP_50 - lag + 30]
+    rr.replay(runs["r-logged"], "L3", tmp_path, idx["r-logged"])
+    assert looks[:4] == [87, 117, 147, 177] and looks[4] == 235
+    result = rr.score(list(runs.values()))
+    assert result["timeline_sources"] == {"rollout_events": 2, "pods_up_estimate": 1}
+    assert result["per_recording"]["r-logged"]["timeline"] == "rollout_events"
 
 
 @pytest.fixture(scope="module")

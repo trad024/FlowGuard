@@ -81,8 +81,11 @@ py evaluation\release_replay.py score evaluation\recordings       # writes runs\
 py evaluation\release_replay.py calibrate evaluation\recordings   # also writes agents\flowguard\models\release-calibration.json
 ```
 
-The canary's steps come from the pods up per pod-template hash (moved half a scrape earlier:
-a pod is Ready before its first `up` sample); Release looks where L0 measures (30 to 120 s
+The canary's steps come from the recording's Rollout step log (`rollout-events.jsonl`: the
+runner logs every step change from the Rollout's status while it waits on a release, with
+Argo's own pause start and abort times) or, for recordings made before that log, from the pods
+up per pod-template hash (moved half a scrape earlier: a pod is Ready before its first `up`
+sample); `timeline_sources` says which; Release looks where L0 measures (30 to 120 s
 into each step) on 30 s windows of per-hash counts since the 20% step began. Release
 scenarios are recorded under the agents-mode Rollout (D54), so each canary runs its full
 window; on a recording made under the L0 Rollout a level that has not decided where the

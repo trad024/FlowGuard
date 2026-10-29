@@ -9,10 +9,15 @@ L0's live outcome when there was one). Release sees only rollout_step events bui
 (dry-run executor, no approver), so P1 at L4 asks the real Monitor and Diagnose through the
 incident record.
 
-Timeline, from the pods up per pod-template hash (the deployer events are not recorded): the
-stable hash is the one serving at the start, the canary the other; a step starts when the
-canary has 2 pods up (20%) and 5 (50%); the canary ends when it has 10 (100%) or when its pods
-are gone (aborted). Every level decides on the same recording (D54):
+Timeline: from the Rollout step log when the recording has one (rollout-events.jsonl, written
+by the runner from the Rollout's status): a step starts when the pause after its setWeight
+starts (Argo's own startTime), the canary ends at its abort (abortedAt) or when the last
+setWeight begins. Recordings made before the step log fall back to an estimate from the pods
+up per pod-template hash: the stable hash is the one serving at the start, the canary the
+other; a step starts when the canary has 2 pods up (20%) and 5 (50%), moved half a scrape
+(7.5 s) earlier; the canary ends when it has 10 (100%) or when its pods are gone (aborted).
+`timeline_sources` counts which one each recording used. Every level decides on the same
+recording (D54):
 
     L0     the frozen analysis-l0.yaml replayed offline (`l0_canary.py`): after each step's
            30 s pause, 4 measurements 30 s apart; the second failure aborts
@@ -52,8 +57,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "evaluation")]
 
+import l0_baseline  # noqa: E402
 import l0_canary  # noqa: E402
 import monitor_replay  # noqa: E402
+import recorder  # noqa: E402
 import stats  # noqa: E402
 from flowguard import release, series  # noqa: E402
 from flowguard.audit import AuditLog  # noqa: E402
@@ -67,6 +74,7 @@ UP_LOOKBACK_S = 20.0  # pods up: a sample older than this no longer counts
 READY_LAG_S = 7.5  # half of Prometheus' 15 s scrape interval (infra/monitoring/prometheus)
 STEP_PODS = {20: 2, 50: 5}  # canary pods up when a step's weight is reached (10 replicas)
 FULL_PODS = 10
+FULL_WEIGHT = 100
 LOOKS = tuple(release.WINDOW_S * k for k in range(1, release.LOOKS_PER_STEP + 1))
 PAUSE_S = 30.0  # each step's pause before L0's analysis (base/podinfo.yaml, agents-mode alike)
 OUT = ROOT / "evaluation" / "runs" / "dso3-replay.json"
@@ -151,7 +159,65 @@ def timeline(idx: series.Index, namespace: str, t0: float, t1: float) -> dict | 
     # A pod is Ready 0 to 15 s (one scrape) before its first `up` sample: steps start half a
     # scrape earlier than they show
     steps = {w: t - READY_LAG_S for w, t in steps.items()}
-    return {"stable": stable, "canary": canary, "steps": steps, "end": end, "how": how}
+    return {
+        "stable": stable,
+        "canary": canary,
+        "steps": steps,
+        "end": end,
+        "how": how,
+        "source": "pods_up_estimate",
+    }
+
+
+def logged_timeline(rec: Path, namespace: str, t1: float) -> dict | None:
+    """The canary's steps from the runner's Rollout step log (recorder.RolloutStepLog), when
+    the recording has one: a step starts when the pause after its setWeight starts (Argo's
+    own startTime, so no estimate), and the canary ends at its abort (Argo's abortedAt, else
+    when the abort was seen) or when the last setWeight (100%) begins."""
+    path = rec / recorder.ROLLOUT_EVENTS
+    if not path.is_file():
+        return None
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    rows = [r for r in rows if r.get("namespace") == namespace]
+    first = next(
+        (r for r in rows if r.get("canary_hash") and r["canary_hash"] != r.get("stable_hash")),
+        None,
+    )
+    if first is None:
+        return None
+    canary = first["canary_hash"]
+    mine = [r for r in rows if r.get("canary_hash") == canary]
+    steps: dict[int, float] = {}
+    for r in mine:
+        w = r.get("set_weight")
+        if w in STEP_PODS and w not in steps and r.get("step") == "pause" and r.get("pause_start"):
+            steps[w] = l0_baseline.ts(r["pause_start"])
+    end, how = t1, "window_end"
+    for r in mine:
+        if r.get("abort"):
+            end, how = l0_baseline.ts(r.get("aborted_at") or r["ts"]), "aborted"
+            break
+        if r.get("set_weight") == FULL_WEIGHT:
+            end, how = l0_baseline.ts(r["ts"]), "promoted"
+            break
+    if 20 not in steps:
+        return None
+    return {
+        "stable": first.get("stable_hash"),
+        "canary": canary,
+        "steps": steps,
+        "end": min(end, t1),
+        "how": how,
+        "source": "rollout_events",
+    }
+
+
+def run_timeline(run: dict, idx: series.Index) -> dict | None:
+    """Logged step times when the recording has them (D54 recordings); the pods-up estimate
+    only for recordings made before the step log existed."""
+    ns = run["spec"].get("environment", "staging")
+    logged = logged_timeline(Path(run["recording"]), ns, run["window"][1])
+    return logged or timeline(idx, ns, *run["window"])
 
 
 # ---------------------------------------------------------------- Release on a recording
@@ -172,7 +238,7 @@ def replay(run: dict, name: str, folder: Path, idx: series.Index | None = None) 
     """Release's looks on one recording until it rolls back, escalates or reaches 100%."""
     idx = load_index(run) if idx is None else idx
     ns = run["spec"].get("environment", "staging")
-    line = timeline(idx, ns, *run["window"])
+    line = run_timeline(run, idx)
     if line is None:
         return {"outcome": "no_canary", "decisions": []}
     orch = orchestrator(name, folder)
@@ -216,7 +282,7 @@ def replay(run: dict, name: str, folder: Path, idx: series.Index | None = None) 
 def l0_offline(run: dict, idx: series.Index, metrics: list | None = None) -> dict:
     """L0 on the recording (D54): the frozen analysis after each step's pause."""
     ns = run["spec"].get("environment", "staging")
-    line = timeline(idx, ns, *run["window"])
+    line = run_timeline(run, idx)
     if line is None:
         return {"outcome": "no_canary"}
     since, steps = line["steps"][20], []
@@ -238,7 +304,7 @@ def l0_live(run: dict, idx: series.Index) -> dict | None:
     observed = run["observed"].get("l0")
     if observed not in ("aborted", "promoted"):
         return None
-    line = timeline(idx, run["spec"].get("environment", "staging"), *run["window"])
+    line = run_timeline(run, idx)
     if observed == "promoted" or line is None:
         return {"outcome": "promoted" if observed == "promoted" else "rollback"}
     return {"outcome": "rollback", "t": line["end"] - line["steps"][20]}  # canary pods gone
@@ -271,7 +337,7 @@ def needs_rerecording(runs: list[dict], idx_of: dict, results: dict) -> list[dic
     out = []
     for r in runs:
         reasons = []
-        line = timeline(idx_of[r["id"]], r["spec"].get("environment", "staging"), *r["window"])
+        line = run_timeline(r, idx_of[r["id"]])
         # Release's last look and L0's last measurement are both 120 s into a step
         full = line is not None and all(
             w in line["steps"] and line["steps"][w] + LOOKS[-1] <= line["end"] for w in STEP_PODS
@@ -387,11 +453,12 @@ def node_stress(runs: list[dict], res: dict[str, dict]) -> dict:
 
 def score(runs: list[dict]) -> dict:
     results: dict[str, dict[str, dict]] = {"L0": {}, "L3": {}, "L4": {}}
-    live, idx_of = {}, {}
+    live, idx_of, source = {}, {}, {}
     metrics = l0_canary.load_template()
     with tempfile.TemporaryDirectory(prefix="dso3-replay-") as tmp:
         for r in runs:
             idx = idx_of[r["id"]] = load_index(r)
+            source[r["id"]] = (run_timeline(r, idx) or {}).get("source")
             results["L0"][r["id"]] = l0_offline(r, idx, metrics)
             live[r["id"]] = l0_live(r, idx)
             for name in ("L3", "L4"):
@@ -404,6 +471,10 @@ def score(runs: list[dict]) -> dict:
         "recordings": len(runs),
         "scored": len(usable),
         "no_canary": sorted(r["id"] for r in runs if r not in usable),
+        "timeline_sources": {
+            s: sum(source[r["id"]] == s for r in usable)
+            for s in ("rollout_events", "pods_up_estimate")
+        },
         "l0_live_agreement": agreement(usable, results["L0"], live),
         "needs_rerecording": needs_rerecording(usable, idx_of, results),
         "levels": {n: summary(usable, res) for n, res in results.items()},
@@ -415,6 +486,7 @@ def score(runs: list[dict]) -> dict:
             r["id"]: {
                 "bad": bool(r["ground_truth"].get("bad_release")),
                 "band": band(r),
+                "timeline": source[r["id"]],
                 **{
                     n: {k: v for k, v in res[r["id"]].items() if k != "timeline"}
                     for n, res in results.items()

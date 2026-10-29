@@ -140,6 +140,13 @@ def test_record_writes_manifest_ground_truth_and_sources(server, tmp_path, monke
             {"ts": "2026-10-26T19:00:00Z", "event": "later"},
         ],
     )
+    write_lines(
+        runs / "rollout-events.jsonl",
+        [
+            {"ts": "2026-10-26T17:59:00.000Z", "changes": ["step"]},  # before the window
+            {"ts": "2026-10-26T18:01:05.000Z", "changes": ["step", "pause_start"]},
+        ],
+    )
     load = tmp_path / "load.jsonl"
     write_lines(load, [{"ts": "2026-10-26T18:01:00.000Z", "status": 500}])
     monkeypatch.setattr(recorder, "audit_events", lambda s, e: [{"ts": "2026-10-26T18:02:00Z"}])
@@ -166,6 +173,8 @@ def test_record_writes_manifest_ground_truth_and_sources(server, tmp_path, monke
     assert manifest["window"] == {"start": "2026-10-26T18:00:00Z", "end": "2026-10-26T18:10:00Z"}
     assert manifest["sources"]["loadgen"]["lines"] == 1
     assert manifest["sources"]["deployer_events"]["lines"] == 1
+    assert manifest["sources"]["rollout_events"]["lines"] == 1
+    assert "pause_start" in (out / "rollout-events.jsonl").read_text()
     assert manifest["sources"]["audit_events"]["lines"] == 1
     assert manifest["sources"]["ci"][0]["run_id"] == 77
     # D25: nothing about the injection in the manifest; all of it in ground_truth.json and the DB
@@ -177,6 +186,54 @@ def test_record_writes_manifest_ground_truth_and_sources(server, tmp_path, monke
     row = truth_db.run(out.name)
     assert row["family"] == "release" and row["l0_correct"] is True and row["valid"] is True
     assert row["ground_truth"]["bad_release"] is True and row["recording"] == str(out)
+
+
+AGENTS_STEPS = [{"setWeight": 20}, {"pause": {"duration": "30s"}}, {"pause": {}},
+                {"setWeight": 50}, {"pause": {"duration": "30s"}}, {"pause": {}},
+                {"setWeight": 100}]  # fmt: skip
+
+
+def rollout(index, pause=None, abort=False, aborted_at=None, phase="Paused", canary="new"):
+    """A Rollout as `get rollout -o json` shows it, reduced to what the step log reads."""
+    status = {"currentStepIndex": index, "phase": phase, "abort": abort,
+              "currentPodHash": canary, "stableRS": "old",
+              "message": "RolloutAborted: metric failed" if abort else ""}  # fmt: skip
+    if pause:
+        status["pauseConditions"] = [{"reason": "CanaryPauseStep", "startTime": pause}]
+    if aborted_at:
+        status["abortedAt"] = aborted_at
+    return {"spec": {"strategy": {"canary": {"steps": AGENTS_STEPS}}}, "status": status}
+
+
+def test_the_rollout_step_log_keeps_every_change_with_argos_own_times(tmp_path):
+    clock = iter(datetime(2026, 10, 30, 10, 0, s, tzinfo=UTC) for s in range(0, 60, 5))
+    log = recorder.RolloutStepLog(tmp_path / "rollout-events.jsonl", "staging", lambda: next(clock))
+    seen = [
+        log.observe(rollout(0, phase="Progressing")),  # setWeight 20 under way
+        log.observe(rollout(1, "2026-10-30T10:00:03Z")),  # the 30 s pause began at :03
+        log.observe(rollout(1, "2026-10-30T10:00:03Z")),  # nothing changed: no row
+        log.observe(rollout(2, "2026-10-30T10:00:33Z")),  # the decision pause
+        log.observe(rollout(3, phase="Progressing")),  # resumed: setWeight 50
+        log.observe(rollout(3, abort=True, aborted_at="2026-10-30T10:00:41Z", phase="Degraded")),
+    ]
+    assert seen[2] is None
+    rows = [json.loads(x) for x in (tmp_path / "rollout-events.jsonl").read_text().splitlines()]
+    assert [r["changes"] for r in rows] == [
+        ["step", "revision", "phase"],
+        ["step", "pause_start", "phase"],
+        ["step", "pause_start"],
+        ["step", "pause_end", "phase"],
+        ["abort", "phase"],
+    ]
+    assert [(r["step"], r["set_weight"]) for r in rows] == [
+        ("setWeight", 20), ("pause", 20), ("pause", 20), ("setWeight", 50), ("setWeight", 50)
+    ]  # fmt: skip
+    assert rows[1]["pause_start"] == "2026-10-30T10:00:03Z" and rows[1]["ts"].endswith("05.000Z")
+    assert rows[-1]["abort"] and rows[-1]["aborted_at"] == "2026-10-30T10:00:41Z"
+    assert {r["canary_hash"] for r in rows} == {"new"} and rows[0]["stable_hash"] == "old"
+    assert all("message" not in r for r in rows)  # nothing beyond the step state is kept
+    full = recorder.rollout_view(rollout(len(AGENTS_STEPS), phase="Healthy"))
+    assert full["set_weight"] == 100 and full["step"] is None  # every step done
 
 
 def test_recordings_and_heldout_scenarios_are_gitignored():
