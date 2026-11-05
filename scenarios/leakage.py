@@ -80,12 +80,13 @@ def normalize(line: str) -> str:
 TOOL_PHRASES = re.compile(r"\b(exit|status|return|error)[ _-]?code\b", re.IGNORECASE)
 
 # Fixed names of the CI infrastructure, the same in every run of every class: the repository's
-# checkout path and artifact names, the image name, the approved opaque branch form, Alpine's
+# checkout path and artifact names, the image name, the approved opaque branch form and the
+# replay's fixed placeholder for any other branch name (scenario/r-masked), Alpine's
 # git-init-template package and Docker's --label flag. Masked like the tool phrases; a class
 # word elsewhere on the same line still counts.
 INFRA_PHRASES = re.compile(
     r"/home/runner/work/FlowGuard/FlowGuard|\btrad024[~/]FlowGuard\b|flowguard-podinfo"
-    r"|\bscenario/r-[0-9a-f]{8,}\b|\bgit-init-template\b|--label\b",
+    r"|\bscenario/r-(?:[0-9a-f]{8,}|masked)\b|\bgit-init-template\b|--label\b",
     re.IGNORECASE,
 )
 

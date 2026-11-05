@@ -13,6 +13,7 @@ import pytest
 
 from flowguard import fixes
 from flowguard import github_actions as gha
+from flowguard.agent_io import AgentInput, AgentOutput
 from flowguard.audit import AuditLog
 from flowguard.contracts import ActionProposal
 from flowguard.executor import Executor
@@ -372,6 +373,81 @@ def test_both_actions_go_through_the_gate_and_a_dry_run_executor(tmp_path, actio
     assert outcomes == {"staging": "execute", "prod": "ask_human"}  # medium tier, unchanged
     logged = audit.query("SELECT params FROM proposals WHERE id = 'p-staging'")[0]["params"]
     assert json.loads(logged) == params  # what the executor re-reads and compares (D37)
+
+
+# ---------------------------------------------------------------- planning Diagnose's answer (D64)
+
+
+class Answer:
+    """A Diagnose that always gives one proposal."""
+
+    def __init__(self, action, rationale="root cause dependency; evidence lines [3]", **params):
+        self.action, self.rationale, self.params = action, rationale, params
+
+    def missing(self, cfg):
+        return "no model" if cfg == "L9" else None
+
+    def run(self, inp, cfg):
+        p = ActionProposal(id="p-1", agent="diagnose", action=self.action, target="podinfo",
+                           environment="staging", params={**inp.params, **self.params},
+                           confidence=0.0, rationale=self.rationale)  # fmt: skip
+        return AgentOutput(proposals=[p], label_scores={"p-1": {"dependency": 0.9}})
+
+
+def inp(**params):
+    return AgentInput(incident_id="i-1", log="x", params=params)
+
+
+HEAD_PARAMS = {"run_id": 7, "head_sha": HEAD, "head_branch": "scenario/r-1"}
+
+
+def test_diagnoses_fix_is_planned_after_its_answer_and_keeps_its_id():
+    client = github()
+    planned = gha.PlannedDiagnose(Answer("pin_dependency", diagnose_quotes=[UNKNOWN]), client, REPO)
+    assert planned.missing("L5") is None and planned.missing("L9") == "no model"
+    out = planned.run(inp(**HEAD_PARAMS), "L5")
+    (p,) = out.proposals
+    assert (p.id, p.action, out.label_scores) == (
+        "p-1",
+        "pin_dependency",
+        {"p-1": {"dependency": 0.9}},
+    )
+    assert {k: p.params[k] for k in ("module", "version", "head_sha", "base_branch")} == {
+        "module": "github.com/gorilla/websocket", "version": "v1.5.3", "head_sha": HEAD,
+        "base_branch": "scenario/r-1",
+    }  # fmt: skip
+    assert p.params["diagnose_quotes"] == [UNKNOWN] and p.params["run_id"] == 7  # kept
+    assert client.writes() == []  # planning only reads
+    # another action passes untouched, without a GitHub call
+    client = github()
+    out = gha.PlannedDiagnose(Answer("retry_job"), client, REPO).run(inp(**HEAD_PARAMS), "L5")
+    assert out.proposals[0].action == "retry_job" and client.calls == []
+
+
+def test_a_fix_goes_out_as_an_issue_when_no_pin_can_be_planned():
+    def issue(diagnosis, client, **params):
+        (p,) = gha.PlannedDiagnose(diagnosis, client, REPO).run(inp(**params), "L5").proposals
+        assert (p.action, p.params["kind"]) == ("open_fix_pr", "issue")
+        return p
+
+    pin = Answer("pin_dependency", diagnose_quotes=[UNKNOWN])
+    issue(pin, github(), run_id=7)  # no head commit in the event
+    issue(pin, github(), head_sha=HEAD, head_branch="")
+
+    def unreachable(method, path, body=None):
+        raise OSError("network unreachable")
+
+    issue(pin, unreachable, **HEAD_PARAMS)
+    # no quote names a module: an issue, with the class from the rationale and the action's text
+    p = issue(
+        Answer("pin_dependency", diagnose_quotes=["--- FAIL: TestX"]), github(), **HEAD_PARAMS
+    )
+    assert p.params["root_cause"] == "dependency"
+    assert "pin a dependency to a known-good version" in p.params["body"]
+    # Diagnose's own class and fix sentence, when it records them, win over the fallbacks
+    own = Answer("open_fix_pr", rationale="?", diagnose_root_cause="code", diagnose_fix="Fix X.")
+    p = issue(own, github(), **HEAD_PARAMS)
+    assert p.params["root_cause"] == "code" and "Fix X." in p.params["body"]
 
 
 def test_another_agent_may_not_propose_them():

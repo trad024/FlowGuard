@@ -21,7 +21,8 @@ Tests pass a fake transport instead.
 Planning (read-only, after the diagnosis, before the proposal): `plan_fix` finds the last
 commit whose app-ci passed on the failing branch (else on dev), reads module X's version from
 go.mod there and go.sum at the failing commit, and returns the proposal's action and params
-(fixes.fix_action). It needs only a read token.
+(fixes.fix_action). It needs only a read token. `PlannedDiagnose` runs it on Diagnose's fix
+proposals, as the orchestrator's Diagnose on the live CI path (D64).
 
 pin_dependency writes the go.mod edit to a new branch fix/flowguard-eval-<proposal id> from the
 failing commit and starts app-ci there through its workflow_dispatch (app-ci runs on push only
@@ -35,6 +36,8 @@ branch name, and as a label on issues and PRs, so a cleanup can find them all.
 from __future__ import annotations
 
 import base64
+import contextlib
+import dataclasses
 import json
 import re
 import urllib.error
@@ -43,7 +46,7 @@ import urllib.request
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from flowguard import fixes
+from flowguard import diagnose, fixes
 
 GITHUB_API = "https://api.github.com"
 WORKFLOW = "app-ci.yml"
@@ -197,6 +200,45 @@ def plan_fix(
     if action == "pin_dependency" or params.get("kind") == "draft_pr":
         params = {**params, "head_sha": head_sha, "base_branch": head_branch}
     return action, params
+
+
+ROOT_CAUSE = re.compile(r"root cause (\w+);")
+
+
+class PlannedDiagnose:
+    """Diagnose, then D57's planning of its fix (D64): a pin_dependency or open_fix_pr proposal
+    gets its action and params from `plan_fix` with a read-only client, from the CI run's head
+    commit and branch in its params. Y is resolved here, after the diagnosis, never shown to
+    Diagnose. Other proposals pass unchanged, and the proposal keeps its id, so its label
+    scores still apply at the gate. Without a head commit, or when GitHub cannot be reached,
+    the diagnosis goes out as an issue. The orchestrator takes it as its `diagnose`."""
+
+    def __init__(self, diagnose, client: Transport, repo: str):
+        self.diagnose, self.client, self.repo = diagnose, client, repo
+
+    def missing(self, cfg) -> str | None:
+        return self.diagnose.missing(cfg)
+
+    def run(self, inp, cfg):
+        out = self.diagnose.run(inp, cfg)
+        planned = [self._plan(p) if p.action in FIX_ACTIONS else p for p in out.proposals]
+        return dataclasses.replace(out, proposals=planned)
+
+    def _plan(self, p):
+        params = p.params
+        found = ROOT_CAUSE.match(p.rationale)
+        root_cause = str(params.get("diagnose_root_cause") or (found and found[1]) or "unclear")
+        evidence = [str(q) for q in params.get("diagnose_quotes") or []]
+        fix = str(params.get("diagnose_fix") or diagnose.ACTIONS.get(p.action, p.action))
+        head_sha, head_branch = params.get("head_sha"), params.get("head_branch")
+        action, planned = "open_fix_pr", fixes.request(root_cause, evidence, fix)
+        if isinstance(head_sha, str) and isinstance(head_branch, str) and head_branch:
+            with contextlib.suppress(OSError):  # GitHub unreachable: no pin without its lookup
+                action, planned = plan_fix(
+                    self.client, self.repo, p.action, root_cause, evidence, fix, head_sha,
+                    head_branch,
+                )  # fmt: skip
+        return p.model_copy(update={"action": action, "params": {**params, **planned}})
 
 
 # ---------------------------------------------------------------- writes (the executor only)
