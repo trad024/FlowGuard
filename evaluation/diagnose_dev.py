@@ -76,12 +76,27 @@ def tag(level: str, repeat: int | None = None) -> str:
     return level + (f"-r{repeat}" if repeat else "")
 
 
-def run(level: str, repeat: int | None = None, splits=DEV_SPLITS) -> None:
+def retrieved(todo: list[dict], retriever) -> dict[str, list]:
+    """L3's examples per variant, from the index of training and validation cases
+    (diagnose_index.py), never of the variant's own template (D45: each template is diagnosed
+    from the others only). Taken here, before the lanes start, so the index is read by one
+    thread."""
+    out = {}
+    for item in todo:
+        log = item["log"].read_text(encoding="utf-8", errors="replace")
+        out[item["variant"]] = retriever.nearest(log, template=item["template"])
+    return out
+
+
+def run(level: str, repeat: int | None = None, splits=DEV_SPLITS, retriever=None) -> None:
     if level not in ("L2", "L3"):
-        raise SystemExit("only L2 is wired so far; L3 needs retrieval")
-    if level == "L3":
-        raise SystemExit("L3 retrieval is not built yet")
+        raise SystemExit("only the LLM levels run here (L2, L3)")
     todo = items(load_split(), splits)
+    examples: dict[str, list] = {}
+    if level == "L3":
+        from flowguard import retrieval
+
+        examples = retrieved(todo, retriever or retrieval.Retriever())
     live = ready_lanes()
     if not live:
         raise SystemExit("no usable lane")
@@ -101,7 +116,8 @@ def run(level: str, repeat: int | None = None, splits=DEV_SPLITS) -> None:
         for item in queues[lane.name]:
             log = item["log"].read_text(encoding="utf-8", errors="replace")
             try:
-                res = client.complete(diagnose.messages(log), repeat=repeat)
+                shown = examples.get(item["variant"], [])
+                res = client.complete(diagnose.messages(log, shown), repeat=repeat)
             except llm.BudgetExhausted as exc:
                 with lock:
                     print(json.dumps({"lane": lane.name, "stopped": str(exc)}), flush=True)
@@ -131,6 +147,7 @@ def run(level: str, repeat: int | None = None, splits=DEV_SPLITS) -> None:
                 "ungrounded": d.ungrounded,
                 "rejected": d.rejected,
                 "flags": d.flags,
+                "examples": [ex.root_cause for ex in shown],  # L3: the retrieved classes
             }
             with lock, out_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
@@ -174,7 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--level", default="L2")
     parser.add_argument("--repeat", type=int, choices=[2, 3])
     parser.add_argument("--splits", nargs="+", default=list(DEV_SPLITS))
+    parser.add_argument("--out", type=Path, default=OUT, help="answers folder (gitignored)")
     args = parser.parse_args(argv)
+    globals()["OUT"] = args.out
     if args.cmd == "run":
         run(args.level, args.repeat, tuple(args.splits))
     else:

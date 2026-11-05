@@ -98,8 +98,10 @@ def calibrate(level: str, rows: list[dict], scores: list[dict[str, float]]) -> d
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--level", choices=["L1", "L2"], required=True)
+    parser.add_argument("--level", choices=["L1", "L2", "L3"], required=True)
+    parser.add_argument("--out", type=Path, default=diagnose_dev.OUT, help="dev answers folder")
     args = parser.parse_args(argv)
+    diagnose_dev.OUT = args.out  # where the level's answers are, and its report goes
     rows = dev_items()
     scores = l1_scores(rows) if args.level == "L1" else llm_scores(rows, args.level)
     out = calibrate(args.level, rows, scores)
