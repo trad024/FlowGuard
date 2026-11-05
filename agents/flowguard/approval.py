@@ -134,31 +134,96 @@ class ApprovalPage:
         return decision.model_copy(update={"human_verdict": verdict, "approved_by": name})
 
     def render(self) -> str:
+        """The page: one card per pending proposal, most risky first. Every field is escaped;
+        no script runs (the CSP allows inline styles only). While nothing waits, the page
+        reloads itself every 5 s; with a card open it does not, so a name being typed is kept."""
         with self._cond:
             items = sorted(self._pending.values(), key=lambda pd: -pd[1].risk_score)
-        rows = []
+        e = html.escape
+        cards = []
         for p, d in items:
-            e = html.escape
-            buttons = "".join(
-                f'<form method="post" style="display:inline">'
+            tier = str(d.tier)
+            risk = max(0.0, min(1.0, d.risk_score))
+            cards.append(
+                f'<article class="card t-{e(tier)}">'
+                f'<header><span class="tier">{e(tier)} risk</span>'
+                f'<span class="env">{e(p.environment)}</span>'
+                f'<span class="agent">{e(str(p.agent))} agent</span></header>'
+                f'<h2><code>{e(p.action)}</code> <span class="on">on</span> '
+                f"<code>{e(p.target)}</code></h2>"
+                f'<p class="why">{e(p.rationale)}</p>'
+                f'<div class="meta"><div><small>Gate decision</small><b>{e(d.reason)}</b></div>'
+                f"<div><small>Risk score</small><b>{risk:.2f}</b>"
+                f'<i class="bar"><i style="width:{risk * 100:.0f}%"></i></i></div></div>'
+                f'<form method="post">'
                 f'<input type="hidden" name="proposal" value="{e(p.id)}">'
                 f'<input type="hidden" name="token" value="{e(self.token)}">'
-                f'<input name="name" placeholder="your name" required maxlength="64">'
-                f'<button name="verdict" value="{v}">{label}</button></form>'
-                for v, label in (("approved", "Approve"), ("denied", "Deny"))
+                f'<input name="name" placeholder="Your name (recorded in the audit log)" '
+                f'required maxlength="64" autocomplete="name">'
+                f'<button class="ok" name="verdict" value="approved">Approve</button>'
+                f'<button class="no" name="verdict" value="denied">Deny</button></form>'
+                f'<p class="id">Proposal {e(p.id)}</p></article>'
             )
-            rows.append(
-                f"<tr><td>{e(str(d.tier))}</td><td>{d.risk_score:.2f}</td><td>{e(str(p.agent))}</td>"
-                f"<td>{e(p.action)}</td><td>{e(p.target)}</td><td>{e(p.environment)}</td>"
-                f"<td>{e(p.rationale)}</td><td>{e(d.reason)}</td><td>{buttons}</td></tr>"
-            )
-        table = "".join(rows) or '<tr><td colspan="9">Nothing waiting.</td></tr>'
-        return (
-            "<!doctype html><meta charset=utf-8><title>Approvals</title>"
-            "<style>body{font:14px sans-serif;margin:16px}td,th{padding:4px 8px;"
-            "border-bottom:1px solid #ccc;text-align:left}</style>"
-            f"<h1>Waiting for approval</h1><p>No answer within {int(self.timeout_s // 60)} minutes"
-            " counts as a denial.</p><table><tr><th>Tier</th><th>Risk</th><th>Agent</th>"
-            "<th>Action</th><th>Target</th><th>Env</th><th>Rationale</th><th>Gate</th><th></th>"
-            f"</tr>{table}</table>"
+        refresh = "" if cards else '<meta http-equiv="refresh" content="5">'
+        body = "".join(cards) or (
+            '<div class="empty"><b>Nothing waiting.</b>'
+            "<p>Agents act alone only on low-risk actions, and on medium-risk ones in staging"
+            " with enough confidence. Anything else appears here for a person to decide."
+            "</p><p class=small>This page refreshes every 5 seconds.</p></div>"
         )
+        n = len(cards)
+        return (
+            "<!doctype html><html lang=en><meta charset=utf-8>"
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f"{refresh}<title>FlowGuard · Approvals</title><style>{PAGE_CSS}</style>"
+            '<div class="top"><div class="brand"><span class="dot"></span>FlowGuard'
+            '<span class="sub">Human approval</span></div>'
+            f'<div class="count">{n} waiting</div></div><main>'
+            "<h1>Decisions waiting for a person</h1>"
+            f'<p class="lead">The risk gate sent these proposals to a human. No answer within '
+            f"{int(self.timeout_s // 60)} minutes counts as a denial. The executor re-checks every"
+            " verdict in the audit log before it acts.</p>"
+            f"{body}</main>"
+        )
+
+
+PAGE_CSS = (
+    ":root{--ink:#13203A;--muted:#5B6678;--line:#E3E6EC;--bg:#F5F6F8;--card:#FFFFFF;"
+    "--blue:#2F64D6;--ok:#1F7A4D;--no:#B42318;--high:#B42318;--medium:#B76E00;--low:#1F7A4D}"
+    "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);"
+    "font:15px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}"
+    ".top{display:flex;justify-content:space-between;align-items:center;padding:14px 28px;"
+    "background:var(--ink);color:#EEF2F7}.brand{font-weight:700;font-size:17px;display:flex;"
+    "align-items:center;gap:10px}.brand .sub{font-weight:400;color:#9FB0C8;font-size:14px;"
+    "padding-left:10px;border-left:1px solid #33425E}.dot{width:10px;height:10px;"
+    "border-radius:50%;background:#E8833A;display:inline-block}.count{background:#22314F;"
+    "padding:4px 12px;border-radius:999px;font-size:13px}"
+    "main{max-width:900px;margin:0 auto;padding:28px 20px 60px}h1{font-size:24px;margin:0 0 6px}"
+    ".lead{color:var(--muted);margin:0 0 22px}"
+    ".card{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--low);"
+    "border-radius:12px;padding:18px 20px;margin:0 0 16px;box-shadow:0 1px 2px #0000000d}"
+    ".card.t-high{border-left-color:var(--high)}.card.t-medium{border-left-color:var(--medium)}"
+    ".card header{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}"
+    ".card header span{font-size:12px;font-weight:600;text-transform:uppercase;"
+    "letter-spacing:.5px;padding:3px 9px;border-radius:999px;background:#EEF1F6;color:var(--muted)}"
+    ".t-high .tier{background:#FDECEA;color:var(--high)}"
+    ".t-medium .tier{background:#FFF4E0;color:var(--medium)}"
+    ".t-low .tier{background:#E7F5EE;color:var(--low)}"
+    ".card h2{font-size:19px;margin:4px 0 6px;font-weight:600}.card h2 .on{color:var(--muted);"
+    "font-weight:400}code{font:600 16px ui-monospace,Consolas,monospace;background:#F1F3F7;"
+    "padding:1px 6px;border-radius:5px}.why{margin:0 0 12px;color:#2B3A55}"
+    ".meta{display:grid;grid-template-columns:1fr 180px;gap:16px;padding:10px 0;"
+    "border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:14px}"
+    ".meta small{display:block;color:var(--muted);font-size:12px}"
+    ".bar{display:block;height:6px;background:#EEF1F6;border-radius:3px;margin-top:6px;"
+    "overflow:hidden}.bar i{display:block;height:6px;background:var(--blue)}"
+    "form{display:flex;gap:10px;flex-wrap:wrap}"
+    "input[name=name]{flex:1;min-width:220px;padding:10px 12px;border:1px solid #C9CFDA;"
+    "border-radius:8px;font:inherit}input[name=name]:focus{outline:2px solid var(--blue);"
+    "border-color:transparent}button{border:0;border-radius:8px;padding:10px 20px;font:600 15px "
+    "system-ui,sans-serif;color:#fff;cursor:pointer}.ok{background:var(--ok)}.no{background:var(--no)}"
+    "button:hover{filter:brightness(1.1)}.id{margin:10px 0 0;color:var(--muted);font-size:12px}"
+    ".empty{background:var(--card);border:1px dashed #C9CFDA;border-radius:12px;"
+    "padding:36px;text-align:center;color:var(--muted)}.empty b{color:var(--ink);font-size:18px}"
+    ".small{font-size:13px}"
+)
