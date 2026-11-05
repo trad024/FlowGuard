@@ -215,6 +215,9 @@ def test_diagnose_freeze_covers_the_diagnose_code_and_its_artifacts(tmp_path, mo
     (pkg / "stubs.py").write_text("x = 2\n")  # the Diagnose agent itself
     with pytest.raises(SystemExit, match="changed since diagnose-freeze"):
         heldout.diagnose_frozen(tmp_path)
+    (tmp_path / "docs" / "preregistration.yaml").write_text("status: draft\n")
+    with pytest.raises(SystemExit, match="not frozen"):
+        heldout.diagnose_frozen(tmp_path)
 
 
 def test_the_draft_registers_effects_methods_and_intervals():
