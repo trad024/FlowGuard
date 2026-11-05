@@ -272,6 +272,21 @@ Each step needs explicit approval before it starts. Each step ships with tests, 
 
 ---
 
+### Step 7 Diagnose artifacts (untracked, hashed in `scenarios/diagnose-freeze.sha256`)
+
+All six come from the corpus split committed in `ba1b51e` (file SHA-256 `6e7223ae...`, canonical
+hash `a1003ffa...`): 20 training, 5 validation and 5 test templates; none of them read a test
+template or LogChunks. Local dev runs used Python 3.13.0 (CI runs 3.11).
+
+| Artifact | Command | Code commit | Input | Date |
+|---|---|---|---|---|
+| `state/models/diagnose-l1.pkl` | `py evaluation/diagnose_l1.py` (fits on the training templates, scores validation; its score file was written in the same second) | not established: run from the working tree 11 minutes before `evaluation/diagnose_l1.py` was first committed in `10ee3a2` | 60 training variants | 2026-10-28 22:04 |
+| `diagnose-calibration-L1.json` | `py evaluation/diagnose_calibrate.py --level L1` (L1 refit without each template, D45) | not established: run 30 minutes before `diagnose_calibrate.py` was first committed in `6a22694` | 74 training and validation variants, 25 templates | 2026-10-28 23:47 |
+| `diagnose-calibration-L2.json` | `py evaluation/diagnose_calibrate.py --level L2` on the L2 dev answers rerun under D51 | `659908a` was HEAD (D51 settings from `cae928b`); a clean working tree is not recorded | 74 variants, 25 templates | 2026-10-29 02:37 |
+| `diagnose-calibration-L3.json` | `py evaluation/diagnose_dev.py run --level L3 --out state/diagnose-dev`, then `py evaluation/diagnose_calibrate.py --level L3 --out state/diagnose-dev` | `ccd7ddc` (clean tree, recorded in `state/diagnose-dev/L3-code-commit.txt`) | 74 variants, 25 templates; examples never from the item's own template | 2026-11-05 22:09 |
+| `state/chroma/index-manifest.json` | `py evaluation/diagnose_index.py build` | `0c4f194` (built 15 minutes before that commit; the code at `ccd7ddc` reproduces the manifest byte for byte) | 74 training and validation variants; all-MiniLM-L6-v2 as chromadb 1.5.9 pins it | 2026-10-29 22:00 |
+| `state/encoder/` | `py ci/download_encoder.py` with the URL and SHA-256 of `ci/encoder/artifact.json` | `b258485` (downloader, unchanged since) | run 2, the pre-declared final checkpoint (`docs/d7-encoder.md`), archive SHA-256 `c9e2930e...` | 2026-10-29 23:58 |
+
 ### Step 8 dev results (DSO3)
 
 | Set (dev, in-sample) | Level | Bad caught before 100% | False rollbacks | Median time to rollback | Wrong decisions |
