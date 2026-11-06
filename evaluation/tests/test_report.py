@@ -593,7 +593,10 @@ def test_one_command_writes_all_outputs_from_synthetic_inputs(inputs, tmp_path):
     assert report.main(["--audit", str(audit), "--truth", str(truth), "--out", str(out)]) == 0
     result = json.loads((out / "results.json").read_text())
     assert result["metadata"]["bootstrap_resamples"] == 10000
-    assert not result["metadata"]["confirmatory"]  # repository preregistration is still draft
+    # Synthetic fixtures are never confirmatory, whatever the pre-registration's status
+    assert not result["metadata"]["confirmatory"] and result["metadata"]["reason"]
+    assert result["metadata"]["synthetic"] is True  # read from the fixture marker
+    assert result["metadata"]["development"] is False
     assert len(result["figures"]) == 8
     assert len((out / "ablation.csv").read_text().splitlines()) == (
         6 * len(result["metadata"]["primary_metrics"]) + 1
