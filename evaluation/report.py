@@ -5,6 +5,12 @@
 Default inputs are state/audit.db and evaluation/runs/groundtruth.db. Replays are structured
 replay_result audit events, or an optional --replays JSONL. --demo uses synthetic databases
 only and never opens the default databases.
+
+Confirmatory only for proven held-out inputs (report_scope): a frozen pre-registration, the
+eval-freeze tag with agents/ unchanged, the held-out run order with the seed matching its
+committed hash, and every scored id in that run order. No flag can make a report confirmatory;
+--confirmatory only refuses one that is not. The synthetic and development labels are read
+from the inputs (the fixture marker, dev spec ids), not from the command line.
 """
 
 import argparse
@@ -22,6 +28,7 @@ sys.path.insert(0, str(ROOT / "agents"))
 from report_data import load  # noqa: E402
 from report_metrics import analyze  # noqa: E402
 from report_policy import policy  # noqa: E402
+from report_scope import confirmatory_scope, labels  # noqa: E402
 
 
 def write_csv(path, rows, fields):
@@ -52,7 +59,6 @@ def build(
     setting="default",
     seed=20261028,
     make_plots=True,
-    synthetic=False,
     dev_bundle=None,
     require_confirmatory=False,
 ):
@@ -64,14 +70,19 @@ def build(
     ]["levels"] != ["L3", "L4"]:
         raise ValueError("unsupported preregistration comparisons")
     inference = policy(specification)
+    # Blockers the pre-registration alone shows refuse --confirmatory before any database opens
     blockers = []
-    if synthetic or dev_bundle is not None:
-        blockers.append("synthetic or development dry-run inputs")
     if specification["status"] != "frozen":
         blockers.append("pre-registration is not frozen")
     if inference["h4_mode"] == "pending_amendment":
         blockers.append("H4 amendment is pending")
     blockers.extend(f"unset pre-registered count: {path}" for path in inference["unset_counts"])
+    if require_confirmatory and blockers:
+        raise ValueError("confirmatory output refused: " + "; ".join(blockers))
+    found = labels(truth, dev_bundle)
+    synthetic = found["synthetic"]
+    if (reason := confirmatory_scope(specification, truth)) is not None and reason not in blockers:
+        blockers.insert(0, reason)  # the first held-out check that failed
     if require_confirmatory and blockers:
         raise ValueError("confirmatory output refused: " + "; ".join(blockers))
     joined, coverage = load(audit, truth, replays)
@@ -82,7 +93,7 @@ def build(
     result["metadata"] = {
         "format": 1,
         "synthetic": synthetic,
-        "development": dev_bundle is not None,
+        "development": found["development"],
         "preregistration_status": specification["status"],
         "preregistration_sha256": hashlib.sha256(prereg.read_bytes()).hexdigest(),
         "primary_metric_definitions": specification["metrics"],
@@ -106,6 +117,7 @@ def build(
         if dev_bundle is not None
         else "offline supplied results",
         "confirmatory": not blockers,
+        "reason": blockers[0] if blockers else None,  # the first check that failed
         "confirmatory_blockers": blockers,
         "pairing": "intersection of scenario IDs; repeat 1 only; fixed setting",
         "holm_family": inference["holm_family"],
@@ -323,7 +335,6 @@ def main(argv=None):
             args.l5_setting,
             args.seed,
             not args.no_plots,
-            args.demo,
             args.dev_bundle,
             args.confirmatory,
         )
@@ -334,8 +345,10 @@ def main(argv=None):
             {
                 "out": str(args.out),
                 "coverage": result["metadata"]["coverage"],
-                "synthetic": args.demo,
-                "development": args.dev_bundle is not None,
+                "synthetic": result["metadata"]["synthetic"],
+                "development": result["metadata"]["development"],
+                "confirmatory": result["metadata"]["confirmatory"],
+                "reason": result["metadata"]["reason"],
                 "figures": result["figures"],
             },
             indent=2,

@@ -6,7 +6,28 @@ Scenario specs and the runner that executes, records and cleans them up (Step 4a
 py scenarios\runner.py --validate scenarios\dev\*.yaml     # check every spec
 py scenarios\runner.py scenarios\dev\release-errors-05.yaml # run one scenario
 py scenarios\verify_templates.py                           # check the CI failure templates locally
+py scenarios\cleanup_fixes.py [--apply]                     # list (or close and delete) fix issues, PRs, branches
+py scenarios\runner.py --ci-agents dry-run scenarios\dev\<ci spec>.yaml  # live CI path, writes nothing
 ```
+
+Live CI path (D64, `ci_live.py`): with `--ci-agents dry-run` or `live`, a `ci` scenario whose
+app-ci run fails is decided once by the agents at L5 (default gate setting). The failed run is
+recorded into a scratch folder by the recorder and its event built by the replay, the same code
+the offline levels use. Diagnose's fix proposal is planned read-only (Y from the last green
+commit), and a proposal the gate sends to a human waits on the approval page (127.0.0.1, the
+port and timeout from `--approval-port` and `--approval-timeout-min`; no simulated approver,
+D17). `dry-run` writes nothing to GitHub; `live` executes with `GITHUB_TOKEN_WRITE`, then checks
+each executed pin's app-ci run on its fix branch. It needs `LLM_API_KEY`, the retrieval index,
+and a read token that can read Actions and Contents. L0 to L4 decide offline on the recording of
+the same run: `py evaluation\ci_levels.py evaluation\recordings\<run id>`.
+
+Fix actions (D57): every issue, draft PR and `fix/flowguard-eval-<proposal id>` branch the fix
+handlers create carries the `flowguard-eval` marker (label or branch name). `cleanup_fixes.py`
+lists them, and with `--apply` closes the issues and PRs and deletes the branches; it needs
+`GITHUB_TOKEN_WRITE`. For each `pin_dependency` executed during a `ci` run, the runner polls the
+app-ci run the pin started on its fix branch (at most the 40-minute CI timeout, shared by all
+pins) and logs its conclusion to the audit log as `fix_ci_completed` at the pin's level; scoring
+counts the pin as resolved only if that run succeeded.
 
 Each run gets an opaque run id (`r-<8 hex>`), writes audit events under it, and is recorded
 into `evaluation/recordings/<run id>/` (see `evaluation/README.md`) with the ground truth and

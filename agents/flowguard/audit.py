@@ -26,7 +26,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PATH = ROOT / "state" / "audit.db"  # system state, outside the evaluation tree (D25)
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: approvals.channel and the refusals table (D58)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -75,8 +75,9 @@ CREATE TABLE IF NOT EXISTS approvals (
     scenario_id TEXT,
     level TEXT NOT NULL,
     verdict TEXT NOT NULL,         -- approved, denied, timeout
-    approver TEXT,                 -- team member, or "simulated" (D17)
-    wait_seconds REAL
+    approver TEXT,                 -- who answered: the team member's name, or "simulated" (D17)
+    wait_seconds REAL,
+    channel TEXT                   -- page or simulated (D58)
 );
 CREATE TABLE IF NOT EXISTS executions (
     id INTEGER PRIMARY KEY,
@@ -88,8 +89,17 @@ CREATE TABLE IF NOT EXISTS executions (
     validated INTEGER,             -- NULL = not applicable
     output TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS refusals (  -- D58: what the executor refused, and why; never ran
+    id INTEGER PRIMARY KEY,
+    ts TEXT NOT NULL,
+    proposal_id TEXT,              -- as handed over (it may not be in proposals)
+    scenario_id TEXT,
+    level TEXT NOT NULL,
+    reason TEXT NOT NULL
+);
 """
 
+MIGRATIONS = (("approvals", "channel", "TEXT"),)  # schema 1 -> 2 (D58); refusals is new
 VERDICTS = ("approved", "denied", "timeout")
 OUTCOMES = ("execute", "ask_human", "reject")
 
@@ -121,8 +131,12 @@ class AuditLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as db, db:
             db.executescript(SCHEMA)
+            for table, column, ddl in MIGRATIONS:  # an older file gains the new columns
+                have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
+                if column not in have:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
             db.execute(
-                "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
             )
 
@@ -215,6 +229,7 @@ class AuditLog:
         verdict: str,
         approver: str | None,
         wait_seconds: float | None = None,
+        channel: str | None = None,
     ) -> int:
         if verdict not in VERDICTS:
             raise ValueError(f"verdict must be one of {VERDICTS}")
@@ -226,6 +241,7 @@ class AuditLog:
                 "verdict": verdict,
                 "approver": approver,
                 "wait_seconds": wait_seconds,
+                "channel": channel,
             },
         )
 
@@ -241,6 +257,12 @@ class AuditLog:
                 "validated": None if validated is None else int(bool(validated)),
                 "output": r.get("output", ""),
             },
+        )
+
+    def refusal(self, proposal_id: str | None, reason: str) -> int:
+        """D58: an attempt the executor refused (nothing ran); executions are untouched."""
+        return self._insert(
+            "refusals", {"ts": utc_now(), "proposal_id": proposal_id, "reason": reason[:500]}
         )
 
     # ------------------------------------------------------------------ readers

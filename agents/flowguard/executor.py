@@ -5,14 +5,19 @@ refuses everything else even if called directly (defence in depth). The decision
 is not trusted: the proposal, the gate decision and the approval are re-read from the audit
 log by proposal id, and anything missing, different, unapproved or already executed is refused
 (D37), so an executor without an audit log runs nothing. Every execution is written to the
-audit log. Agents never hold write credentials: kubectl writes and the GitHub write
-token (GITHUB_TOKEN_WRITE) appear only in this module (agents/tests/test_executor.py checks).
+audit log, and so is every refusal (D58), in its own table with the reason, before Refused is
+raised: `executions` holds only what ran, so a refused attempt never counts as executed. Agents
+never hold
+write credentials: kubectl writes and the GitHub write token (GITHUB_TOKEN_WRITE) appear only in
+this module (agents/tests/test_executor.py checks).
 
 dry_run=True records what would be done and changes nothing (tests, replays). Live handlers:
 rollout actions through `kubectl patch` on the Argo Rollout, restarts and scaling of the
-Rollout, CI reruns through the GitHub API; deployment, review and escalation decisions are
-audit events the deployment flow reads. Fix PRs and dependency pins (Step 7) and plan changes
-(Step 10) are not available live yet and say so.
+Rollout, CI reruns through the GitHub API, dependency pins and fix PRs or issues through
+flowguard.github_actions (D57, D62: the executor reads the write token once and hands the
+module a transport built with it; the module never reads the environment); deployment, review
+and escalation decisions are audit events the deployment flow reads. Plan changes (Step 10)
+are not available live yet and say so.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ import urllib.request
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+from flowguard import github_actions
 from flowguard.contracts import ActionProposal, ExecutionResult, GateDecision
 
 GITHUB_API = "https://api.github.com"
@@ -34,7 +40,7 @@ RECORDED = {
     "request_security_review",
     "escalate_to_human",
 }
-NOT_YET = {"pin_dependency": 7, "open_fix_pr": 7, "reorder_jobs": 10, "skip_jobs": 10}
+NOT_YET = {"reorder_jobs": 10, "skip_jobs": 10}
 
 
 class Refused(RuntimeError):
@@ -56,6 +62,7 @@ class Executor:
         token: str | None = None,
         kubectl: Callable[[list[str]], str] | None = None,
         github: Callable[[str, str], int] | None = None,
+        json_github: github_actions.Transport | None = None,
     ):
         self.audit = audit
         self.dry_run = dry_run
@@ -63,11 +70,16 @@ class Executor:
         self.token = token if token is not None else os.environ.get("GITHUB_TOKEN_WRITE", "")
         self._kubectl = kubectl or self._run_kubectl
         self._github = github or self._post_github
+        self._json_github = json_github  # built from the write token on first live use
 
     def execute(self, proposal: ActionProposal, decision: GateDecision) -> ExecutionResult:
-        if decision.proposal_id != proposal.id or not allowed(decision):
-            raise Refused(f"{proposal.id}: gate outcome {decision.outcome}, not executable")
-        self._verify(proposal, decision)
+        try:
+            if decision.proposal_id != proposal.id or not allowed(decision):
+                raise Refused(f"{proposal.id}: gate outcome {decision.outcome}, not executable")
+            self._verify(proposal, decision)
+        except Refused as exc:
+            self._record_refusal(proposal, str(exc))
+            raise
         if self.dry_run:
             result = ExecutionResult(
                 proposal_id=proposal.id, success=True, output=f"dry run: {proposal.action}"
@@ -119,6 +131,10 @@ class Executor:
         if self.audit.query("SELECT 1 FROM executions WHERE proposal_id = ?", (pid,)):
             raise Refused(f"{pid}: already executed")
 
+    def _record_refusal(self, proposal: ActionProposal, reason: str) -> None:
+        if self.audit is not None:  # without a log nothing runs, and there is nowhere to write
+            self.audit.refusal(proposal.id, reason)
+
     # ------------------------------------------------------------ live handlers
 
     def _live(self, p: ActionProposal) -> str:
@@ -131,6 +147,12 @@ class Executor:
             if self.audit is not None:
                 self.audit.event("executor", p.action, environment=ns, target=name, params=p.params)
             return f"recorded {p.action} for {name}"
+        if p.action in github_actions.HANDLERS:  # pin_dependency, open_fix_pr (D62)
+            if self._json_github is None:
+                if not self.token:
+                    raise ValueError("no GitHub write token (GITHUB_TOKEN_WRITE)")
+                self._json_github = github_actions.urllib_transport(self.token)
+            return github_actions.HANDLERS[p.action](self._json_github, self.repo, p.id, p.params)
         if p.action == "rollout_abort":
             return self._patch_status(ns, name, {"status": {"abort": True}})
         if p.action == "rollout_promote":

@@ -30,6 +30,10 @@ Decisions per look (rollout_step):
     no canary requests at the end   escalate_to_human (an unmeasurable canary is not promoted)
     the Rollout is aborted          rollout_undo (back to the previous revision; high tier)
 rollout_set_weight is never proposed: without a traffic router the weight is set by the steps.
+A Monitor incident mid-canary reaches Release with the same windows (the service adds them to
+its metrics_tick) and is decided by the same test, with the looks made so far in the step, so
+it never promotes. One decision per step: once Release proposed for the step (`decided`), the
+incident is only evidence and proposes nothing.
 Below L1 (L0) the canary is judged alone on the frozen L0 thresholds over its last minute.
 
 Label scores (D9): {"rollback": 1 - p, "continue": p} with p the smaller always-valid p-value
@@ -257,10 +261,15 @@ class Release:
     def run(self, inp: AgentInput, cfg, ask=None) -> AgentOutput:
         if inp.params.get("aborted"):
             return self._out(inp, "rollout_undo", "aborted canary: back to the previous revision")
+        if inp.params.get("decided"):  # one decision per step
+            claim = "Release already proposed for this canary step: the incident is evidence only"
+            post = EvidencePost(incident_id=inp.incident_id, agent=self.name, claim=claim)
+            return AgentOutput(evidence=[post])
         ws = inp.metrics.get("windows")
         if not isinstance(ws, list) or not ws:
             return self._out(inp, "escalate_to_human", "no per-hash canary counts to test")
-        looks = int(inp.params.get("looks_in_step") or LOOKS_PER_STEP)
+        looks = inp.params.get("looks_in_step")
+        looks = LOOKS_PER_STEP if looks is None else int(looks)  # 0 before the step's 1st look
         verdict = judge(ws, looks) if cfg.ml else judge_l0(ws, looks)
         evidence = [self._post(inp, verdict, ws)]
         if verdict.outcome == "hold":

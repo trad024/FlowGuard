@@ -1,0 +1,13 @@
+{
+  "platform": "Windows-10-10.0.26300-SP0",
+  "cpu": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel",
+  "threads": 2,
+  "iterations": 30,
+  "warmup_iterations": 5,
+  "latency_median_ms": 38.95484999520704,
+  "latency_p95_ms": 46.89989995677024,
+  "baseline_rss_mib": 178.32421875,
+  "sampled_peak_rss_mib": 449.9296875,
+  "peak_increment_mib": 271.60546875,
+  "scope": "process RSS sampled every 10ms, including checkpoint load; fixed short log"
+}

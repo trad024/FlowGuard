@@ -1,0 +1,170 @@
+[
+  {
+    "variant_id": "code-01",
+    "actual_root_cause": "code",
+    "predicted_root_cause": "code",
+    "scores": {
+      "code": 0.6261890530586243,
+      "dependency": 0.09127279371023178,
+      "environment": 0.07080060243606567,
+      "flaky_test": 0.15929090976715088,
+      "infrastructure": 0.0524466298520565
+    }
+  },
+  {
+    "variant_id": "code-01.v2",
+    "actual_root_cause": "code",
+    "predicted_root_cause": "code",
+    "scores": {
+      "code": 0.47797513008117676,
+      "dependency": 0.049193814396858215,
+      "environment": 0.05399254709482193,
+      "flaky_test": 0.38602587580680847,
+      "infrastructure": 0.032812487334012985
+    }
+  },
+  {
+    "variant_id": "dependency-03",
+    "actual_root_cause": "dependency",
+    "predicted_root_cause": "dependency",
+    "scores": {
+      "code": 0.009035341441631317,
+      "dependency": 0.971473217010498,
+      "environment": 0.006472535897046328,
+      "flaky_test": 0.004567886237055063,
+      "infrastructure": 0.008450977504253387
+    }
+  },
+  {
+    "variant_id": "dependency-03.v2",
+    "actual_root_cause": "dependency",
+    "predicted_root_cause": "dependency",
+    "scores": {
+      "code": 0.0090943593531847,
+      "dependency": 0.9714245200157166,
+      "environment": 0.006354943849146366,
+      "flaky_test": 0.004568825010210276,
+      "infrastructure": 0.008557426743209362
+    }
+  },
+  {
+    "variant_id": "dependency-03.v3",
+    "actual_root_cause": "dependency",
+    "predicted_root_cause": "dependency",
+    "scores": {
+      "code": 0.009238481521606445,
+      "dependency": 0.9710113406181335,
+      "environment": 0.006261304020881653,
+      "flaky_test": 0.004710133653134108,
+      "infrastructure": 0.008778691291809082
+    }
+  },
+  {
+    "variant_id": "environment-01",
+    "actual_root_cause": "environment",
+    "predicted_root_cause": "dependency",
+    "scores": {
+      "code": 0.0073564620688557625,
+      "dependency": 0.9708465933799744,
+      "environment": 0.008819335140287876,
+      "flaky_test": 0.0038300349842756987,
+      "infrastructure": 0.009147541597485542
+    }
+  },
+  {
+    "variant_id": "environment-01.v2",
+    "actual_root_cause": "environment",
+    "predicted_root_cause": "dependency",
+    "scores": {
+      "code": 0.007391097489744425,
+      "dependency": 0.9709575176239014,
+      "environment": 0.00887893047183752,
+      "flaky_test": 0.0037960198242217302,
+      "infrastructure": 0.008976344019174576
+    }
+  },
+  {
+    "variant_id": "environment-01.v3",
+    "actual_root_cause": "environment",
+    "predicted_root_cause": "dependency",
+    "scores": {
+      "code": 0.00746536860242486,
+      "dependency": 0.9707674980163574,
+      "environment": 0.008831018581986427,
+      "flaky_test": 0.0038167843595147133,
+      "infrastructure": 0.009119250811636448
+    }
+  },
+  {
+    "variant_id": "environment-01.v4",
+    "actual_root_cause": "environment",
+    "predicted_root_cause": "dependency",
+    "scores": {
+      "code": 0.007481602020561695,
+      "dependency": 0.9704561233520508,
+      "environment": 0.008958336897194386,
+      "flaky_test": 0.003829129971563816,
+      "infrastructure": 0.009274778887629509
+    }
+  },
+  {
+    "variant_id": "flaky_test-01",
+    "actual_root_cause": "flaky_test",
+    "predicted_root_cause": "flaky_test",
+    "scores": {
+      "code": 0.16953490674495697,
+      "dependency": 0.023074327036738396,
+      "environment": 0.02271946333348751,
+      "flaky_test": 0.7668298482894897,
+      "infrastructure": 0.017841462045907974
+    }
+  },
+  {
+    "variant_id": "flaky_test-01.v2",
+    "actual_root_cause": "flaky_test",
+    "predicted_root_cause": "flaky_test",
+    "scores": {
+      "code": 0.12310045957565308,
+      "dependency": 0.014309201389551163,
+      "environment": 0.019036464393138885,
+      "flaky_test": 0.8298845291137695,
+      "infrastructure": 0.013669301755726337
+    }
+  },
+  {
+    "variant_id": "infrastructure-01",
+    "actual_root_cause": "infrastructure",
+    "predicted_root_cause": "infrastructure",
+    "scores": {
+      "code": 0.013822413980960846,
+      "dependency": 0.018896404653787613,
+      "environment": 0.023351898416876793,
+      "flaky_test": 0.011966153047978878,
+      "infrastructure": 0.9319632053375244
+    }
+  },
+  {
+    "variant_id": "infrastructure-01.v2",
+    "actual_root_cause": "infrastructure",
+    "predicted_root_cause": "infrastructure",
+    "scores": {
+      "code": 0.01252151932567358,
+      "dependency": 0.02364378049969673,
+      "environment": 0.02522844448685646,
+      "flaky_test": 0.011689741164445877,
+      "infrastructure": 0.9269164800643921
+    }
+  },
+  {
+    "variant_id": "infrastructure-01.v3",
+    "actual_root_cause": "infrastructure",
+    "predicted_root_cause": "infrastructure",
+    "scores": {
+      "code": 0.013579952530562878,
+      "dependency": 0.020586246624588966,
+      "environment": 0.023638423532247543,
+      "flaky_test": 0.011209750548005104,
+      "infrastructure": 0.9309856295585632
+    }
+  }
+]

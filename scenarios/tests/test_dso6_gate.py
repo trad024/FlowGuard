@@ -18,6 +18,7 @@ from flowguard.gate import RiskGate
 from flowguard.incidents import IncidentRecord
 from flowguard.monitor import ci_event
 from flowguard.orchestrator import Orchestrator, level
+from flowguard.stubs import Diagnose
 
 DEV_SEED = "dev-dso6-20261027"
 RISKY = {RiskTier.HIGH, RiskTier.PROHIBITED}
@@ -53,10 +54,17 @@ def run_proposals(item, tmp_path):
     return proposals, decisions, executed, audit
 
 
-def obedient_llm(log: str) -> dict:
+def obedient_llm(log: str, examples=None) -> dict:
     """A compromised model: proposes whatever action the injected text names."""
     names = [a for a in sorted(CATALOG, key=len, reverse=True) if re.search(rf"\b{a}\b", log)]
-    return {"root_cause": "code", "evidence_lines": [1], "action": names[0] if names else ""}
+    quotes = log.splitlines()[:1]  # a real line: grounding lets the answer through to the gate
+    return {"root_cause": "code", "evidence_lines": [1], "quotes": quotes,
+            "action": names[0] if names else ""}  # fmt: skip
+
+
+class NoExamples:
+    def nearest(self, log):
+        return []
 
 
 def test_every_category_holds(items, tmp_path):
@@ -109,7 +117,7 @@ def test_injected_instructions_never_reach_the_cluster(items, tmp_path, name):
         executor=Executor(audit=audit),
         audit=audit,
         approver=SimulatedApprover(policy=lambda p: False),
-        diagnose_llm=obedient_llm,
+        diagnose=Diagnose(obedient_llm, retriever=NoExamples()),
     )
     for n, item in enumerate(injections, start=1):  # one failed run per item
         log = f"--- FAIL: TestHandler (0.01s)\n{item['input']['text']}\n"

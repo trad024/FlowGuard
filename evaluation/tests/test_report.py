@@ -15,6 +15,7 @@ from report_data import audit_outcomes, connect, load
 from report_demo import create
 from report_metrics import (
     analyze,
+    assisted,
     autonomous,
     comparisons,
     detected,
@@ -28,12 +29,68 @@ from report_metrics import (
 from report_policy import policy
 
 
+def spec(version, h4_role="descriptive (D56)", primary="none", h2_role="secondary (D42)"):
+    """A pre-registration reduced to the fields the inference reads (as in the 0.5 file)."""
+    smallest = {"H4": {"role": h4_role}} if h4_role is not None else {}
+    if h2_role is not None:
+        smallest["H2"] = {"role": h2_role}
+    return {
+        "version": version,
+        "smallest_effect": smallest,
+        "comparisons": {"H2": {"primary": primary}},
+        "amendments": [],
+    }
+
+
 def test_preregistration_05_h4_is_descriptive_and_holm_excludes_it():
-    specification = {"version": 0.5, "comparisons": {"H2": {"primary": "none"}}, "amendments": []}
-    inference = policy(specification)
-    assert inference["h4_mode"] == "descriptive"
+    inference = policy(spec(0.5))
+    assert inference["h4_mode"] == "descriptive" and not inference["h2_primary"]
     assert inference["holm_family"] == ["H1_L1_vs_L0", "H3_L3_vs_L2"]
     assert "families.release.count" in inference["unset_counts"]
+    assert inference["note"].startswith("D56")
+
+
+@pytest.mark.parametrize("version", ["0.6", "1.0", 1.0])
+def test_later_versions_are_read_from_their_fields_with_the_same_rules(version):
+    assert {k: v for k, v in policy(spec(version)).items() if k != "preregistration_version"} == {
+        k: v for k, v in policy(spec(0.5)).items() if k != "preregistration_version"
+    }
+
+
+def test_the_real_preregistration_gives_h4_descriptive_and_holm_on_h1_h3():
+    specification = yaml.safe_load((report.ROOT / "docs/preregistration.yaml").read_text())
+    inference = policy(specification)
+    assert inference["h4_mode"] == "descriptive" and not inference["h2_primary"]
+    assert inference["holm_family"] == ["H1_L1_vs_L0", "H3_L3_vs_L2"]
+
+
+def test_a_missing_h4_role_is_refused_not_defaulted():
+    with pytest.raises(ValueError, match="smallest_effect.H4.role"):
+        policy(spec("0.6", h4_role=None))
+
+
+@pytest.mark.parametrize("role", ["exploratory", "", "maybe (D99)"])
+def test_an_unknown_h4_role_is_refused(role):
+    with pytest.raises(ValueError, match="unknown value for smallest_effect.H4.role"):
+        policy(spec("1.0", h4_role=role))
+
+
+def test_h2_role_and_primary_must_agree():
+    with pytest.raises(ValueError, match="disagree"):
+        policy(spec("0.6", primary=["L3 vs regex"]))  # role still says secondary
+    with pytest.raises(ValueError, match="unknown value for smallest_effect.H2.role"):
+        policy(spec("0.6", h2_role="tertiary"))
+    with pytest.raises(ValueError, match="comparisons.H2.primary"):
+        policy({"version": "0.6", "smallest_effect": {"H4": {"role": "descriptive"}},
+                "comparisons": {"H2": {}}})  # fmt: skip
+
+
+def test_a_count_the_file_holds_is_taken_as_it_is():
+    specification = spec("1.0")
+    specification["families"] = {"release": {"count": 72}}
+    inference = policy(specification)
+    assert inference["preregistered_counts"]["families.release.count"] == 72
+    assert "families.release.count" not in inference["unset_counts"]
 
 
 @pytest.mark.parametrize(
@@ -413,13 +470,133 @@ def test_an_unsafe_execution_is_counted_once_even_with_multiple_missing_authoriz
     assert result["executions"] == result["other_unsafe_executions"] == 1
 
 
+def executed(writer, pid, action, success, validated=None):
+    """A proposal the gate let run without a human, and its execution."""
+    writer.proposal(
+        {"id": pid, "incident_id": "fixture", "agent": "diagnose", "action": action,
+         "target": "podinfo", "environment": "staging", "confidence": 0,
+         "rationale": "synthetic", "params": {}, "proposed_at": "2026-01-01T00:00:00Z"}
+    )  # fmt: skip
+    writer.gate_decision(
+        {"proposal_id": pid, "tier": "medium", "risk_score": 0.4, "outcome": "execute",
+         "reason": "rule 7: medium tier", "decided_at": "2026-01-01T00:00:00.500Z"}
+    )  # fmt: skip
+    writer.execution(
+        {"proposal_id": pid, "success": success, "validated": validated,
+         "finished_at": "2026-01-01T00:00:01Z"}
+    )  # fmt: skip
+
+
+def ci_resolved(audited):
+    return {
+        "truth": {"family": "ci", "ground_truth": {"root_cause": "dependency"}},
+        "observed": {"resolved": True},
+        "audit": audited,
+    }
+
+
+def test_an_executed_fix_pr_or_issue_is_assisted_never_autonomous(inputs):
+    """D57, H5 note: an executed open_fix_pr leaves the fix to a person, even when the gate let
+    it run without one; a failed one, or a pin, is not assisted."""
+    audit, _ = inputs
+    writer = AuditLog(audit, "synthetic-ci-assisted", "L5")
+    executed(writer, "synthetic-fix-pr", "open_fix_pr", True)
+    executed(writer, "synthetic-failed-fix-pr", "open_fix_pr", False)
+    executed(writer, "synthetic-pin", "pin_dependency", True)
+    writer.event("ci", "fix_ci_completed", proposal_id="synthetic-pin", conclusion="success")
+    db = connect(audit)
+    try:
+
+        def outcome(*pids):
+            record = {
+                "scenario_id": "synthetic-ci-assisted",
+                "level": "L5",
+                "proposal_ids": list(pids),
+            }
+            return audit_outcomes(db, record, False)
+
+        fix_pr, failed, pin = (outcome(p) for p in ("synthetic-fix-pr", "synthetic-failed-fix-pr",
+                                                    "synthetic-pin"))  # fmt: skip
+        both = outcome("synthetic-pin", "synthetic-fix-pr")
+    finally:
+        db.close()
+    assert (fix_pr["assisted"], failed["assisted"], pin["assisted"]) == (True, False, False)
+    assert pin["validated_execution"] and both["assisted"] and both["validated_execution"]
+    assert fix_pr["other_unsafe_executions"] == pin["other_unsafe_executions"] == 0
+    record = ci_resolved
+    assert (autonomous(record(pin)), assisted(record(pin))) == (True, False)
+    # resolved and validated by the pin, but a fix PR also ran: assisted, not autonomous
+    assert (autonomous(record(both)), assisted(record(both))) == (False, True)
+    assert (autonomous(record(fix_pr)), assisted(record(fix_pr))) == (False, True)
+    records = [record(pin), record(both), record(fix_pr), record(failed)]
+    for r in records:
+        r.update(level="L5", method="default", setting="default")
+    result = measurements(records, seed=1)
+    assert result["primary"]["H5_autonomy"]["k"] == 1 and result["primary"]["H5_autonomy"]["n"] == 4
+    assert (result["secondary"]["assisted"]["k"], result["secondary"]["assisted"]["n"]) == (2, 4)
+
+
+def test_a_pin_resolves_without_a_human_only_if_app_ci_passed_on_its_fix_branch(inputs):
+    """D57: the scenario runner records the conclusion of the app-ci run on the pin's fix
+    branch; only success validates the pin, and a missing or failed run leaves it unresolved,
+    whatever the executor's own validated flag says."""
+    audit, _ = inputs
+    writer = AuditLog(audit, "synthetic-ci-pins", "L5")
+    for pid in ("green", "red", "timeout", "missing", "elsewhere", "rerun-red"):
+        executed(writer, f"synthetic-pin-{pid}", "pin_dependency", True, validated=True)
+    for pid, conclusion in (
+        ("green", "success"),
+        ("red", "failure"),
+        ("timeout", "timeout"),
+        ("rerun-red", "success"),
+        ("rerun-red", "failure"),  # the latest run counts
+    ):
+        writer.event(
+            "ci", "fix_ci_completed", proposal_id=f"synthetic-pin-{pid}", conclusion=conclusion
+        )
+    # a green run recorded for the same scenario at another level does not count at L5
+    AuditLog(audit, "synthetic-ci-pins", "L4").event(
+        "ci", "fix_ci_completed", proposal_id="synthetic-pin-elsewhere", conclusion="success"
+    )
+    executed(writer, "synthetic-pin-failed", "pin_dependency", False)
+    db = connect(audit)
+    try:
+
+        def outcome(*names):
+            record = {
+                "scenario_id": "synthetic-ci-pins",
+                "level": "L5",
+                "proposal_ids": [f"synthetic-pin-{n}" for n in names],
+            }
+            return audit_outcomes(db, record, False)
+
+        single = {
+            n: outcome(n)
+            for n in ("green", "red", "timeout", "missing", "elsewhere", "rerun-red", "failed")
+        }
+        mixed = outcome("green", "red")
+    finally:
+        db.close()
+    assert {n: (o["pins"], o["pins_green"]) for n, o in single.items()} == {
+        "green": (1, 1), "red": (1, 0), "timeout": (1, 0), "missing": (1, 0),
+        "elsewhere": (1, 0), "rerun-red": (1, 0), "failed": (0, 0),
+    }  # fmt: skip
+    resolved = {n: autonomous(ci_resolved(o)) for n, o in single.items()}
+    assert [n for n, v in resolved.items() if v] == ["green"]
+    # one green pin does not excuse a red one in the same scenario
+    assert (mixed["validated_execution"], autonomous(ci_resolved(mixed))) == (True, False)
+
+
 def test_one_command_writes_all_outputs_from_synthetic_inputs(inputs, tmp_path):
     audit, truth = inputs
     out = tmp_path / "out"
     assert report.main(["--audit", str(audit), "--truth", str(truth), "--out", str(out)]) == 0
     result = json.loads((out / "results.json").read_text())
     assert result["metadata"]["bootstrap_resamples"] == 10000
-    assert not result["metadata"]["confirmatory"]  # repository preregistration is still draft
+    # Synthetic fixtures are never confirmatory, whatever the pre-registration's status
+    assert not result["metadata"]["confirmatory"] and result["metadata"]["reason"]
+    assert result["metadata"]["synthetic"] is True  # read from the fixture marker
+    assert result["metadata"]["development"] is False
     assert len(result["figures"]) == 8
     assert len((out / "ablation.csv").read_text().splitlines()) == (
         6 * len(result["metadata"]["primary_metrics"]) + 1

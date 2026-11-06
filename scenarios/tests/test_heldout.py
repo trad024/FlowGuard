@@ -29,12 +29,13 @@ def prereg():
     return p
 
 
-def test_the_committed_draft_is_not_frozen_and_release_waits_for_the_d54_recordings():
+def test_the_committed_preregistration_is_frozen_and_every_family_has_a_count():
     p = yaml.safe_load(heldout.PREREG.read_text(encoding="utf-8"))
-    assert p["status"] == "draft" and p["frozen"] is None
+    assert p["status"] == "frozen" and str(p["version"]) == "1.0"
+    assert str(p["frozen"]) == "2026-11-06"
     counts = {name: f["count"] for name, f in p["families"].items()}
-    assert counts.pop("release") is None  # open until the agents-mode recordings are scored
     assert all(isinstance(c, int) and c > 0 for c in counts.values())
+    assert counts["release"] == 72  # 36 bad (6 per kind and band) and 36 good (D54, D56)
     assert p["smallest_effect"]["H4"]["role"].startswith("descriptive")  # D56
     assert set(p["families"]) == set(runner.FAMILIES)
 
@@ -65,6 +66,9 @@ def test_a_seed_that_does_not_match_the_hash_is_refused(tmp_path):
 
 def test_generate_refuses_a_draft_and_needs_step_11(monkeypatch, tmp_path):
     monkeypatch.setattr(heldout, "OUT", tmp_path / "heldout")
+    draft = tmp_path / "draft.yaml"  # never the real, frozen file: generation stays unreachable
+    draft.write_text("status: draft\nfamilies: {}\n", encoding="utf-8")
+    monkeypatch.setattr(heldout, "PREREG", draft)
     with pytest.raises(SystemExit, match="not frozen"):
         heldout.main(["generate", "--confirm-step-11"])
     frozen = tmp_path / "prereg.yaml"
@@ -162,7 +166,7 @@ def test_generation_needs_the_eval_freeze_tag_and_unchanged_agents(tmp_path):
         heldout.frozen_agents(tmp_path)
 
 
-def test_diagnose_freeze_covers_only_the_diagnose_code(tmp_path):
+def test_diagnose_freeze_covers_the_diagnose_code_and_its_artifacts(tmp_path, monkeypatch):
     def git(*args):
         heldout.subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
 
@@ -171,21 +175,53 @@ def test_diagnose_freeze_covers_only_the_diagnose_code(tmp_path):
     git("config", "user.name", "t")
     pkg = tmp_path / "agents" / "flowguard"
     pkg.mkdir(parents=True)
-    (pkg / "diagnose.py").write_text("x = 1\n")
-    (pkg / "gate.py").write_text("y = 1\n")
+    for name in ("diagnose.py", "stubs.py", "gate.py"):
+        (pkg / name).write_text("x = 1\n")
     (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "preregistration.yaml").write_text("status: draft\n")
+    (tmp_path / "docs" / "preregistration.yaml").write_text("status: frozen\n")
+    (tmp_path / "scenarios").mkdir()
+    # untracked artifacts (state/ is gitignored in the real repo)
+    (tmp_path / ".gitignore").write_text("state/\n")
+    models = tmp_path / "state" / "models"
+    models.mkdir(parents=True)
+    (models / "diagnose-l1.pkl").write_bytes(b"model")
+    encoder = tmp_path / "state" / "encoder"
+    encoder.mkdir()
+    (encoder / "model.safetensors").write_bytes(b"weights")
+    artifacts = ("state/models/diagnose-l1.pkl", "state/encoder")
+    monkeypatch.setattr(heldout, "DIAGNOSE_ARTIFACTS", artifacts)
     git("add", ".")
     git("commit", "-q", "-m", "agents")
     git("tag", heldout.DIAGNOSE_TAG)
-    with pytest.raises(SystemExit, match="not frozen"):
+    with pytest.raises(SystemExit, match="no frozen artifact hashes"):
         heldout.diagnose_frozen(tmp_path)
-    (tmp_path / "docs" / "preregistration.yaml").write_text("status: frozen\n")
+    hashes = heldout.freeze_diagnose(tmp_path)
+    assert b"\r" not in hashes.read_bytes()  # LF on every platform (the repo's eol=lf)
+    assert {line.split("  ")[1] for line in hashes.read_text().splitlines()} == {
+        "state/models/diagnose-l1.pkl",
+        "state/encoder/model.safetensors",
+    }
+    with pytest.raises(SystemExit, match="changed since diagnose-freeze"):  # not committed yet
+        heldout.diagnose_frozen(tmp_path)
+    git("add", ".")
+    git("commit", "-q", "-m", "freeze")
+    git("tag", "-f", heldout.DIAGNOSE_TAG)
     heldout.diagnose_frozen(tmp_path)
-    (pkg / "gate.py").write_text("y = 2\n")  # Steps 6 and 8 go on: not Diagnose code
+    (pkg / "gate.py").write_text("x = 2\n")  # Steps 6 and 8 go on: not Diagnose code
     heldout.diagnose_frozen(tmp_path)
-    (pkg / "diagnose.py").write_text("x = 2\n")
+    (encoder / "model.safetensors").write_bytes(b"other weights")
+    with pytest.raises(SystemExit, match="artifacts changed"):
+        heldout.diagnose_frozen(tmp_path)
+    (encoder / "model.safetensors").write_bytes(b"weights")
+    (models / "diagnose-l1.pkl").unlink()
+    with pytest.raises(SystemExit, match="missing"):
+        heldout.diagnose_frozen(tmp_path)
+    (models / "diagnose-l1.pkl").write_bytes(b"model")
+    (pkg / "stubs.py").write_text("x = 2\n")  # the Diagnose agent itself
     with pytest.raises(SystemExit, match="changed since diagnose-freeze"):
+        heldout.diagnose_frozen(tmp_path)
+    (tmp_path / "docs" / "preregistration.yaml").write_text("status: draft\n")
+    with pytest.raises(SystemExit, match="not frozen"):
         heldout.diagnose_frozen(tmp_path)
 
 
@@ -198,7 +234,10 @@ def test_the_draft_registers_effects_methods_and_intervals():
     assert p["families"]["release"]["node_stress"]["share_of_bad"] > 0
     for key in ("dso4_dependency_pool", "dso5_commit_sequence", "dso6_adversarial_set"):
         assert key in p
-    assert p["dso5_commit_sequence"]["count"] is None and p["dso6_adversarial_set"]["count"] is None
+    assert p["dso5_commit_sequence"]["count"] == 30 and p["dso6_adversarial_set"]["count"] == 300
+    trivy = p["dso4_dependency_pool"]["trivy"]
+    assert trivy["db_date"] == "2026-11-06T12:55:02Z" and trivy["db_version"] == 2
+    assert "never dropped or replaced" in p["dso4_dependency_pool"]["db_drift"]
 
 
 @pytest.mark.parametrize(

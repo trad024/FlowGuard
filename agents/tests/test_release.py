@@ -14,6 +14,7 @@ from flowguard.contracts import AgentName
 from flowguard.executor import Executor
 from flowguard.incidents import IncidentRecord
 from flowguard.orchestrator import Orchestrator, level
+from flowguard.stubs import Diagnose
 
 SCHEDULE = [(60, 240)] * 4 + [(150, 150)] * 4  # canary, stable requests per 30 s window
 T = 1_800_000_000.0
@@ -133,6 +134,7 @@ def make(tmp_path, name):
         record=IncidentRecord(db),
         executor=Executor(audit=audit, dry_run=True),
         audit=audit,
+        diagnose=Diagnose.without_logs(),
     )
 
 

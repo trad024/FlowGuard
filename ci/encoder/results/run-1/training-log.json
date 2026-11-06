@@ -1,0 +1,231 @@
+{
+  "base_model": "distilbert/distilbert-base-uncased",
+  "revision": "12040accade4e8a0f71eabdb258fecc2e7e948be",
+  "seed": 31,
+  "split_sha256": "a1003ffa6cfefe6f80588ce22f7cbac3231e4cf070580c893b74dcb9ccaa2beb",
+  "classes": [
+    "code",
+    "dependency",
+    "environment",
+    "flaky_test",
+    "infrastructure"
+  ],
+  "device": "cpu",
+  "cpu": "Intel64 Family 6 Model 140 Stepping 1, GenuineIntel",
+  "platform": "Windows-10-10.0.26300-SP0",
+  "threads": 2,
+  "batch_size": 2,
+  "unfrozen_transformer_layers": 2,
+  "trainable_parameters": 14770181,
+  "training_wall_s": 155.9401191000361,
+  "training_process_rss_mib": 830.0703125,
+  "windows_peak_rss_mib": 1137.23828125,
+  "torch": "2.5.1+cpu",
+  "index_sha256": "dbcdd4c5e73c9ce02b87184527dfc5dfcff5a4001a8e551046317448318c9c52",
+  "train_variants": [
+    "code-02",
+    "code-02.v2",
+    "code-02.v3",
+    "code-03",
+    "code-03.v2",
+    "code-04",
+    "code-04.v2",
+    "code-05",
+    "code-05.v2",
+    "code-05.v3",
+    "code-05.v4",
+    "dependency-01",
+    "dependency-01.v2",
+    "dependency-01.v3",
+    "dependency-01.v4",
+    "dependency-02",
+    "dependency-02.v2",
+    "dependency-02.v3",
+    "dependency-02.v4",
+    "dependency-05",
+    "dependency-05.v2",
+    "dependency-05.v3",
+    "dependency-05.v4",
+    "dependency-06",
+    "dependency-06.v2",
+    "dependency-06.v3",
+    "dependency-07",
+    "dependency-07.v2",
+    "dependency-07.v3",
+    "environment-02",
+    "environment-02.v2",
+    "environment-03",
+    "environment-03.v2",
+    "environment-05",
+    "environment-05.v2",
+    "environment-05.v3",
+    "environment-06",
+    "environment-06.v2",
+    "environment-06.v3",
+    "flaky_test-03",
+    "flaky_test-03.v2",
+    "flaky_test-03.v3",
+    "flaky_test-04",
+    "flaky_test-04.v2",
+    "flaky_test-04.v3",
+    "flaky_test-05",
+    "flaky_test-05.v2",
+    "flaky_test-05.v3",
+    "flaky_test-06",
+    "flaky_test-06.v2",
+    "flaky_test-06.v3",
+    "infrastructure-02",
+    "infrastructure-02.v2",
+    "infrastructure-02.v3",
+    "infrastructure-03",
+    "infrastructure-03.v2",
+    "infrastructure-03.v3",
+    "infrastructure-06",
+    "infrastructure-06.v2",
+    "infrastructure-06.v3"
+  ],
+  "validation_variants": [
+    "code-01",
+    "code-01.v2",
+    "dependency-03",
+    "dependency-03.v2",
+    "dependency-03.v3",
+    "environment-01",
+    "environment-01.v2",
+    "environment-01.v3",
+    "environment-01.v4",
+    "flaky_test-01",
+    "flaky_test-01.v2",
+    "infrastructure-01",
+    "infrastructure-01.v2",
+    "infrastructure-01.v3"
+  ],
+  "epochs": [
+    {
+      "n": 14,
+      "per_class": {
+        "code": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 2
+        },
+        "dependency": {
+          "precision": 0.21428571428571427,
+          "recall": 1.0,
+          "f1": 0.35294117647058826,
+          "support": 3
+        },
+        "environment": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 4
+        },
+        "flaky_test": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 2
+        },
+        "infrastructure": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 3
+        }
+      },
+      "macro_f1": 0.07058823529411765,
+      "correct": 3,
+      "accuracy": 0.21428571428571427,
+      "epoch": 1,
+      "training_loss": 1.5965927124023438,
+      "epoch_wall_s": 53.41461489989888
+    },
+    {
+      "n": 14,
+      "per_class": {
+        "code": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 2
+        },
+        "dependency": {
+          "precision": 0.3,
+          "recall": 1.0,
+          "f1": 0.4615384615384615,
+          "support": 3
+        },
+        "environment": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 4
+        },
+        "flaky_test": {
+          "precision": 0.5,
+          "recall": 1.0,
+          "f1": 0.6666666666666666,
+          "support": 2
+        },
+        "infrastructure": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 3
+        }
+      },
+      "macro_f1": 0.22564102564102564,
+      "correct": 5,
+      "accuracy": 0.35714285714285715,
+      "epoch": 2,
+      "training_loss": 1.423543651898702,
+      "epoch_wall_s": 50.89717789995484
+    },
+    {
+      "n": 14,
+      "per_class": {
+        "code": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 2
+        },
+        "dependency": {
+          "precision": 0.42857142857142855,
+          "recall": 1.0,
+          "f1": 0.6,
+          "support": 3
+        },
+        "environment": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 4
+        },
+        "flaky_test": {
+          "precision": 0.5,
+          "recall": 1.0,
+          "f1": 0.6666666666666666,
+          "support": 2
+        },
+        "infrastructure": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 3
+        }
+      },
+      "macro_f1": 0.2533333333333333,
+      "correct": 5,
+      "accuracy": 0.35714285714285715,
+      "epoch": 3,
+      "training_loss": 1.191198041041692,
+      "epoch_wall_s": 50.26405849994626
+    }
+  ],
+  "best_validation_macro_f1": 0.2533333333333333,
+  "best_epoch": 3,
+  "selection": "best validation macro-F1; no final-test evaluation"
+}

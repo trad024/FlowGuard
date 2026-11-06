@@ -1,0 +1,4 @@
+torch==2.5.1
+transformers==4.46.3
+safetensors==0.4.5
+psutil==6.1.0

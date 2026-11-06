@@ -5,6 +5,7 @@ import json
 import random
 import tarfile
 import typing
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -204,6 +205,71 @@ def test_wait_ci_retries_network_errors(stores):
     assert run["conclusion"] == "failure" and len(calls) == 3
     assert len(list(r.truth_db.events("r-0000abcd", "poll_retry"))) == 2
     assert list(r.audit.events()) == []  # experiment events never reach the audit log
+
+
+def test_the_app_ci_conclusion_on_each_pins_fix_branch_goes_to_the_audit_log(stores):
+    """D57: each pin executed in this run is validated by the app-ci run it started on its fix
+    branch; the runner polls it until it completes or the CI timeout ends, and logs the result
+    at the pin's level. Failed pins, other actions and other runs are not polled."""
+    r = runner.Runner(
+        spec(family="ci", fault={"kind": "dependency", "delivery": "commit"}), run_id="r-0000abcd"
+    )
+
+    def executed(pid, success=True, scenario="r-0000abcd", action="pin_dependency"):
+        writer = runner.AuditLog(r.audit.path, scenario, "L5")
+        writer.proposal(
+            {"id": pid, "incident_id": "i", "agent": "diagnose", "action": action,
+             "target": "podinfo", "environment": "staging", "confidence": 0, "rationale": "r",
+             "params": {}, "proposed_at": "2026-01-01T00:00:00Z"}
+        )  # fmt: skip
+        writer.execution({"proposal_id": pid, "success": success, "finished_at": "2026-01-01"})
+
+    for pid in ("p-green", "p-none", "p-red", "p-slow"):
+        executed(pid)
+    executed("p-failed", success=False)
+    executed("p-issue", action="open_fix_pr")
+    executed("p-other", scenario="r-ffff0000")
+    now = [0.0]
+
+    class FixGitHub:
+        cfg = type("C", (), {"repo": "acme/app"})
+        polls: typing.ClassVar[list] = []
+
+        def get(self, path):
+            url = urllib.parse.urlsplit(path)
+            query = dict(urllib.parse.parse_qsl(url.query))
+            assert url.path == "/repos/acme/app/actions/workflows/app-ci.yml/runs"
+            assert (query["event"], query["per_page"]) == ("workflow_dispatch", "1")
+            branch = query["branch"].removeprefix("fix/flowguard-eval-")
+            self.polls.append(branch)
+            if self.polls.count(branch) == 1 and branch == "p-green":
+                raise OSError("The handshake operation timed out")  # retried
+            done = branch == "p-red" or branch == "p-green" and self.polls.count(branch) > 2
+            run = {
+                "id": len(self.polls),
+                "status": "completed" if done else "in_progress",
+                "conclusion": {"p-green": "success", "p-red": "failure"}.get(branch),
+            }
+            return {"workflow_runs": [] if branch == "p-none" else [run]}
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    found = r.record_fix_ci(FixGitHub(), timeout=600, sleep=sleep, clock=lambda: now[0])
+    assert found == {"p-green": "success", "p-none": "no run", "p-red": "failure",
+                     "p-slow": "timeout"}  # fmt: skip
+    # p-none used up the 600 s; p-red and p-slow, polled after it, still got one look each
+    assert FixGitHub.polls.count("p-red") == FixGitHub.polls.count("p-slow") == 1
+    assert set(FixGitHub.polls) == {"p-green", "p-none", "p-red", "p-slow"}
+    logged = list(r.audit.events(kind="fix_ci_completed"))
+    seen = {(e["level"], e["payload"]["proposal_id"], e["payload"]["conclusion"]) for e in logged}
+    assert seen == {
+        ("L5", "p-green", "success"), ("L5", "p-none", "no run"), ("L5", "p-red", "failure"),
+        ("L5", "p-slow", "timeout"),
+    }  # fmt: skip
+    green = next(e for e in logged if e["payload"]["proposal_id"] == "p-green")
+    assert green["payload"]["branch"] == "fix/flowguard-eval-p-green" and green["source"] == "ci"
+    assert len(list(r.truth_db.events("r-0000abcd", "poll_retry"))) == 1
 
 
 def test_host_sleep_is_detected_in_the_load_log(tmp_path):

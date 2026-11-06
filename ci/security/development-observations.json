@@ -1,0 +1,1921 @@
+[
+  {
+    "id": "dev-sec-text-called",
+    "run_id": 40927548134,
+    "bad_release": true,
+    "ground_truth_scope": "vulnerable development pin; runtime exploitation is not established",
+    "counts": {
+      "trivy_high": 2,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-56851",
+                "PkgName": "golang.org/x/text",
+                "InstalledVersion": "v0.40.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.41.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              }
+            ]
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-56851",
+                "PkgName": "golang.org/x/text",
+                "InstalledVersion": "v0.40.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.41.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              }
+            ]
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "target": {
+      "cve": "CVE-2026-56851",
+      "module": "golang.org/x/text",
+      "version": "v0.40.0",
+      "epss": 0.00466,
+      "advisory": "https://pkg.go.dev/vuln/GO-2026-6629"
+    },
+    "source": {
+      "id": "dev-sec-text-called",
+      "branch": "scenario/security-dev-31-text-called",
+      "sha": "732ad5df9be4380864af6ebeb19112f7c43768f8",
+      "workflow_base": "74eb6071d0d2c5c4e92012c862d2f2174e521b87",
+      "application_source_base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+      "development_seed": 31,
+      "local_build": {
+        "id": "dev-sec-text-called",
+        "base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+        "development_seed": 31,
+        "local_linux_build": "passed",
+        "local_only": true,
+        "files": {
+          "go.mod": "16d83e5c552c080876960e2afdea1cb59742c19025ffe5fda9a9ffe6773486d0",
+          "go.sum": "c3fb9532925f8da62d74bd0eb8fae9eba3948f1bc3586f0948c1e359612510b4"
+        }
+      },
+      "plan_sha256": "914a22bda7be263ea674ec2b883b1f1c5df5c700c42d2bdfaf51d88f3223e81d",
+      "run_id": 40927548134,
+      "run_url": "https://github.com/trad024/FlowGuard/actions/runs/40927548134",
+      "created_at": "2026-10-29T18:05:47Z",
+      "run_conclusion": "success",
+      "required_job_conclusions": {
+        "build": "success",
+        "unit": "success",
+        "scans": "success"
+      },
+      "scope": "development seed only",
+      "govulncheck": {
+        "complete": true,
+        "scanner_version": "v1.4.0",
+        "reachable_by_cve": {
+          "CVE-2026-81870": true,
+          "CVE-2026-56851": true,
+          "CVE-2026-78661": false,
+          "CVE-2026-97045": false
+        },
+        "reason": "explicit findings only; absence of a CVE leaves reachability unknown"
+      },
+      "govulncheck_config": {
+        "protocol_version": "v1.0.0",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.4.0",
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-10-27T21:16:18Z",
+        "go_version": "go1.26.10",
+        "scan_level": "symbol",
+        "scan_mode": "source"
+      },
+      "artifact_sha256": {
+        "trivy.json": "cd4c2db92744607b74b9d989ec591cd0dfab2f5a0afb931691dc1d0fa92f76e8",
+        "gitleaks.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+        "govulncheck.json": "a345bf5b348895847bcb422a0efa851bd928b8bc7fb9fafc0abdf66e541cfde4",
+        "govulncheck-reachability.json": "4491bc8f0c068f2ea5d1b9e84d50e0a63de6df8447f35a963cb8c0564adfb2ed"
+      },
+      "artifact": {
+        "id": 12920609277,
+        "name": "scan-reports",
+        "created_at": "2026-10-29T18:12:09Z",
+        "digest": "sha256:b6cdfddd1ecb6b529f99c264415527572ef4bb9141d6ac138ef91d5122f02ae9"
+      }
+    }
+  },
+  {
+    "id": "dev-sec-text-uncalled",
+    "run_id": 40927335241,
+    "bad_release": true,
+    "ground_truth_scope": "vulnerable development pin; runtime exploitation is not established",
+    "counts": {
+      "trivy_high": 2,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-56851",
+                "PkgName": "golang.org/x/text",
+                "InstalledVersion": "v0.40.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.41.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              }
+            ]
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2026-56851",
+                "PkgName": "golang.org/x/text",
+                "InstalledVersion": "v0.40.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.41.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              }
+            ]
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "target": {
+      "cve": "CVE-2026-56851",
+      "module": "golang.org/x/text",
+      "version": "v0.40.0",
+      "epss": 0.00466,
+      "advisory": "https://pkg.go.dev/vuln/GO-2026-6629"
+    },
+    "source": {
+      "id": "dev-sec-text-uncalled",
+      "branch": "scenario/security-dev-31-text-uncalled",
+      "sha": "53634e8d1facd1ed9be64670c0d8eb256992a6ff",
+      "workflow_base": "74eb6071d0d2c5c4e92012c862d2f2174e521b87",
+      "application_source_base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+      "development_seed": 31,
+      "local_build": {
+        "id": "dev-sec-text-uncalled",
+        "base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+        "development_seed": 31,
+        "local_linux_build": "passed",
+        "local_only": true,
+        "files": {
+          "go.mod": "16d83e5c552c080876960e2afdea1cb59742c19025ffe5fda9a9ffe6773486d0",
+          "go.sum": "c3fb9532925f8da62d74bd0eb8fae9eba3948f1bc3586f0948c1e359612510b4"
+        }
+      },
+      "plan_sha256": "914a22bda7be263ea674ec2b883b1f1c5df5c700c42d2bdfaf51d88f3223e81d",
+      "run_id": 40927335241,
+      "run_url": "https://github.com/trad024/FlowGuard/actions/runs/40927335241",
+      "created_at": "2026-10-29T18:04:28Z",
+      "run_conclusion": "success",
+      "required_job_conclusions": {
+        "build": "success",
+        "unit": "success",
+        "scans": "success"
+      },
+      "scope": "development seed only",
+      "govulncheck": {
+        "complete": true,
+        "scanner_version": "v1.4.0",
+        "reachable_by_cve": {
+          "CVE-2026-81870": true,
+          "CVE-2026-78661": false,
+          "CVE-2026-97045": false,
+          "CVE-2026-56851": false
+        },
+        "reason": "explicit findings only; absence of a CVE leaves reachability unknown"
+      },
+      "govulncheck_config": {
+        "protocol_version": "v1.0.0",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.4.0",
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-10-27T21:16:18Z",
+        "go_version": "go1.26.10",
+        "scan_level": "symbol",
+        "scan_mode": "source"
+      },
+      "artifact_sha256": {
+        "trivy.json": "141f380328a95a5cc87a34c6f867ee62fdd221ef757b8cf2875fa4ce3b080181",
+        "gitleaks.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+        "govulncheck.json": "f02259dd8ddba8fc4aecad551e04cf2f9466d186e93c22e2ae11168cfa2456e1",
+        "govulncheck-reachability.json": "4fc84a2754c9795955fa9a881024430a4f9e4c8ee796dc3a1cdedc1c6efe9451"
+      },
+      "artifact": {
+        "id": 12921172631,
+        "name": "scan-reports",
+        "created_at": "2026-10-29T18:10:41Z",
+        "digest": "sha256:76200b2c059fd9ce49cc071b8a5620b721d6280e7ec307c6fda819e2b3ba7d6d"
+      }
+    }
+  },
+  {
+    "id": "dev-sec-http2-022",
+    "run_id": 40927321818,
+    "bad_release": true,
+    "ground_truth_scope": "vulnerable development pin; runtime exploitation is not established",
+    "counts": {
+      "trivy_high": 22,
+      "trivy_critical": 2,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2023-45288",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.23.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2024-45338",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.33.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-25681",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+                    "V3Score": 8.1
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-27136",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+                    "V3Score": 8.1
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-33814",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.53.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-39821",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:C/C:H/I:H/A:N",
+                    "V3Score": 8.2
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-46600",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.56.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-78669",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.60.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-33186",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "CRITICAL",
+                "CVSS": {
+                  "ghsa": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+                    "V3Score": 9.1
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+                    "V3Score": 9.1
+                  }
+                },
+                "FixedVersion": "1.79.3",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-84304",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "1.83.1",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-84445",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "1.82.2, 1.83.2, 1.84.0-dev.0.20260825144003-d5a41119e0e3, 1.85.0-dev.0.20260825072537-93e31b48545e",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "GHSA-hrxh-6v49-42gf",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.8
+                  }
+                },
+                "FixedVersion": "1.82.1",
+                "Status": "fixed"
+              }
+            ]
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2023-45288",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.23.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2024-45338",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.33.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-25681",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+                    "V3Score": 8.1
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-27136",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+                    "V3Score": 8.1
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-33814",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.53.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-39821",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:C/C:H/I:H/A:N",
+                    "V3Score": 8.2
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-46600",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.56.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-78669",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.22.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.60.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-33186",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "CRITICAL",
+                "CVSS": {
+                  "ghsa": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+                    "V3Score": 9.1
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+                    "V3Score": 9.1
+                  }
+                },
+                "FixedVersion": "1.79.3",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-84304",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "1.83.1",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-84445",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "1.82.2, 1.83.2, 1.84.0-dev.0.20260825144003-d5a41119e0e3, 1.85.0-dev.0.20260825072537-93e31b48545e",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "GHSA-hrxh-6v49-42gf",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.8
+                  }
+                },
+                "FixedVersion": "1.82.1",
+                "Status": "fixed"
+              }
+            ]
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "target": {
+      "cve": "CVE-2023-45288",
+      "module": "golang.org/x/net",
+      "version": "v0.22.0",
+      "epss": 0.91969,
+      "advisory": "https://pkg.go.dev/vuln/GO-2024-2687"
+    },
+    "source": {
+      "id": "dev-sec-http2-022",
+      "branch": "scenario/security-dev-31-http2-022",
+      "sha": "d34d557cdd7ffe201921595b4e4bb7c7a9ae3c57",
+      "workflow_base": "74eb6071d0d2c5c4e92012c862d2f2174e521b87",
+      "application_source_base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+      "development_seed": 31,
+      "local_build": {
+        "id": "dev-sec-http2-022",
+        "base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+        "development_seed": 31,
+        "local_linux_build": "passed",
+        "local_only": true,
+        "files": {
+          "go.mod": "a16f77a80752ba99940f6c9ef1319fd5bf893a9cdea6e69bb17eadd1be6152c8",
+          "go.sum": "2ac1b2cc64e32858e4f0073c5c67e1bc8cfcd8202ec778d8d9f97d89b25a3310"
+        }
+      },
+      "plan_sha256": "914a22bda7be263ea674ec2b883b1f1c5df5c700c42d2bdfaf51d88f3223e81d",
+      "run_id": 40927321818,
+      "run_url": "https://github.com/trad024/FlowGuard/actions/runs/40927321818",
+      "created_at": "2026-10-29T18:04:23Z",
+      "run_conclusion": "success",
+      "required_job_conclusions": {
+        "build": "success",
+        "unit": "success",
+        "scans": "success"
+      },
+      "scope": "development seed only",
+      "govulncheck": {
+        "complete": true,
+        "scanner_version": "v1.4.0",
+        "reachable_by_cve": {
+          "CVE-2026-81870": true,
+          "CVE-2023-45288": true,
+          "CVE-2024-45338": false,
+          "CVE-2025-22870": false,
+          "CVE-2025-22872": false,
+          "CVE-2025-47911": false,
+          "CVE-2025-58190": false,
+          "CVE-2026-33814": false,
+          "CVE-2026-42506": false,
+          "CVE-2026-39821": false,
+          "CVE-2026-42502": false,
+          "CVE-2026-25680": false,
+          "CVE-2026-25681": false,
+          "CVE-2026-27136": false,
+          "CVE-2026-46600": false,
+          "CVE-2026-78659": true,
+          "CVE-2026-78660": false,
+          "CVE-2026-78669": true,
+          "CVE-2026-78663": true,
+          "CVE-2026-97032": true,
+          "CVE-2026-78661": false,
+          "CVE-2026-97045": false,
+          "CVE-2026-33186": true,
+          "CVE-2026-84304": true,
+          "CVE-2026-84303": false,
+          "CVE-2026-84445": true
+        },
+        "reason": "explicit findings only; absence of a CVE leaves reachability unknown"
+      },
+      "govulncheck_config": {
+        "protocol_version": "v1.0.0",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.4.0",
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-10-27T21:16:18Z",
+        "go_version": "go1.26.10",
+        "scan_level": "symbol",
+        "scan_mode": "source"
+      },
+      "artifact_sha256": {
+        "trivy.json": "2f32700e78905e452e894b8dd1538fd0944b323718eb643bca37b5bb1f5dd4a0",
+        "gitleaks.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+        "govulncheck.json": "a63f227fe0503d57a4539f6f89e7bce517cbba06d97e701a729ccc0d1bfd3da8",
+        "govulncheck-reachability.json": "b2d5dc5181a852ed9287042ef48550ffac0a03eb768d0fb672a86692f7019bed"
+      },
+      "artifact": {
+        "id": 12919779980,
+        "name": "scan-reports",
+        "created_at": "2026-10-29T18:10:56Z",
+        "digest": "sha256:bf2c8366e288e8c9a9ff76101378b8f4276ddf9e76babfe2ad3857dbe06926f8"
+      }
+    }
+  },
+  {
+    "id": "dev-sec-http2-016",
+    "run_id": 40927540025,
+    "bad_release": true,
+    "ground_truth_scope": "vulnerable development pin; runtime exploitation is not established",
+    "counts": {
+      "trivy_high": 24,
+      "trivy_critical": 2,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2023-39325",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.17.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2023-45288",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.23.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2024-45338",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.33.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-25681",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+                    "V3Score": 8.1
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-27136",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+                    "V3Score": 8.1
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-33814",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.53.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-39821",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:C/C:H/I:H/A:N",
+                    "V3Score": 8.2
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-46600",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.56.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-78669",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.60.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-33186",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "CRITICAL",
+                "CVSS": {
+                  "ghsa": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+                    "V3Score": 9.1
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+                    "V3Score": 9.1
+                  }
+                },
+                "FixedVersion": "1.79.3",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-84304",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "1.83.1",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-84445",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "1.82.2, 1.83.2, 1.84.0-dev.0.20260825144003-d5a41119e0e3, 1.85.0-dev.0.20260825072537-93e31b48545e",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "GHSA-hrxh-6v49-42gf",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.8
+                  }
+                },
+                "FixedVersion": "1.82.1",
+                "Status": "fixed"
+              }
+            ]
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2023-39325",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.17.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2023-45288",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.23.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2024-45338",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.33.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-25681",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+                    "V3Score": 8.1
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-27136",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+                    "V3Score": 8.1
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-33814",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "nvd": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.53.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-39821",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:C/C:H/I:H/A:N",
+                    "V3Score": 8.2
+                  }
+                },
+                "FixedVersion": "0.55.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-46600",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.56.0",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-78669",
+                "PkgName": "golang.org/x/net",
+                "InstalledVersion": "v0.16.0",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "bitnami": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "0.60.0",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-33186",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "CRITICAL",
+                "CVSS": {
+                  "ghsa": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+                    "V3Score": 9.1
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+                    "V3Score": 9.1
+                  }
+                },
+                "FixedVersion": "1.79.3",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-84304",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "1.83.1",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "CVE-2026-84445",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "1.82.2, 1.83.2, 1.84.0-dev.0.20260825144003-d5a41119e0e3, 1.85.0-dev.0.20260825072537-93e31b48545e",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              },
+              {
+                "VulnerabilityID": "GHSA-hrxh-6v49-42gf",
+                "PkgName": "google.golang.org/grpc",
+                "InstalledVersion": "v1.74.3",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N",
+                    "V40Score": 8.8
+                  }
+                },
+                "FixedVersion": "1.82.1",
+                "Status": "fixed"
+              }
+            ]
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "target": {
+      "cve": "CVE-2023-45288",
+      "module": "golang.org/x/net",
+      "version": "v0.16.0",
+      "epss": 0.91969,
+      "advisory": "https://pkg.go.dev/vuln/GO-2024-2687"
+    },
+    "source": {
+      "id": "dev-sec-http2-016",
+      "branch": "scenario/security-dev-31-http2-016",
+      "sha": "5bcb308e18554b62806ab01530fc1e1b8037ab37",
+      "workflow_base": "74eb6071d0d2c5c4e92012c862d2f2174e521b87",
+      "application_source_base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+      "development_seed": 31,
+      "local_build": {
+        "id": "dev-sec-http2-016",
+        "base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+        "development_seed": 31,
+        "local_linux_build": "passed",
+        "local_only": true,
+        "files": {
+          "go.mod": "ba360c2fea24828f7a98d925546459e7f054ddfec59e30f1e8e1174dc787961f",
+          "go.sum": "c66acceac3baf6c5c30c13a07c8517f3a0bfaead30150a4a0ff6056150f2e524"
+        }
+      },
+      "plan_sha256": "914a22bda7be263ea674ec2b883b1f1c5df5c700c42d2bdfaf51d88f3223e81d",
+      "run_id": 40927540025,
+      "run_url": "https://github.com/trad024/FlowGuard/actions/runs/40927540025",
+      "created_at": "2026-10-29T18:05:44Z",
+      "run_conclusion": "success",
+      "required_job_conclusions": {
+        "build": "success",
+        "unit": "success",
+        "scans": "success"
+      },
+      "scope": "development seed only",
+      "govulncheck": {
+        "complete": true,
+        "scanner_version": "v1.4.0",
+        "reachable_by_cve": {
+          "CVE-2026-81870": true,
+          "CVE-2026-33186": true,
+          "CVE-2026-84304": true,
+          "CVE-2026-84303": false,
+          "CVE-2026-84445": true,
+          "CVE-2023-39325": true,
+          "CVE-2023-45288": true,
+          "CVE-2024-45338": false,
+          "CVE-2025-22870": false,
+          "CVE-2025-22872": false,
+          "CVE-2025-47911": false,
+          "CVE-2025-58190": false,
+          "CVE-2026-33814": false,
+          "CVE-2026-42506": false,
+          "CVE-2026-39821": false,
+          "CVE-2026-42502": false,
+          "CVE-2026-25680": false,
+          "CVE-2026-25681": false,
+          "CVE-2026-27136": false,
+          "CVE-2026-46600": false,
+          "CVE-2026-78659": true,
+          "CVE-2026-78660": false,
+          "CVE-2026-78669": true,
+          "CVE-2026-78663": true,
+          "CVE-2026-97032": true,
+          "CVE-2026-78661": false,
+          "CVE-2026-97045": false
+        },
+        "reason": "explicit findings only; absence of a CVE leaves reachability unknown"
+      },
+      "govulncheck_config": {
+        "protocol_version": "v1.0.0",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.4.0",
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-10-27T21:16:18Z",
+        "go_version": "go1.26.10",
+        "scan_level": "symbol",
+        "scan_mode": "source"
+      },
+      "artifact_sha256": {
+        "trivy.json": "1656b5d16204c7cfa6da44007722f8670898e6f72eaa10620c03af4139ae2f92",
+        "gitleaks.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+        "govulncheck.json": "8ed8d3f1666f2cd57ae606ca3ddc11e0d95d6aecef2a5cd998118b12f7b6a935",
+        "govulncheck-reachability.json": "23765384e0276c681a6f40171f3192f9b89a171bd7e69379a782e8bf28013bd4"
+      },
+      "artifact": {
+        "id": 12920429949,
+        "name": "scan-reports",
+        "created_at": "2026-10-29T18:12:15Z",
+        "digest": "sha256:4a19c3ed6d13db2e5b4632ec169eb6e5d5741035d01d02805e80250fe8297a24"
+      }
+    }
+  },
+  {
+    "id": "dev-sec-jwt4-called",
+    "run_id": 40927168160,
+    "bad_release": true,
+    "ground_truth_scope": "vulnerable development pin; runtime exploitation is not established",
+    "counts": {
+      "trivy_high": 1,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2025-30204",
+                "PkgName": "github.com/golang-jwt/jwt/v4",
+                "InstalledVersion": "v4.5.1",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "4.5.2",
+                "Status": "fixed",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              }
+            ]
+          },
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "target": {
+      "cve": "CVE-2025-30204",
+      "module": "github.com/golang-jwt/jwt/v4",
+      "version": "v4.5.1",
+      "epss": 0.00811,
+      "advisory": "https://pkg.go.dev/vuln/GO-2025-3553"
+    },
+    "source": {
+      "id": "dev-sec-jwt4-called",
+      "branch": "scenario/security-dev-31-jwt4-called",
+      "sha": "8fba3e0e9fb05696d2916c068ecb3665dbd43e06",
+      "workflow_base": "74eb6071d0d2c5c4e92012c862d2f2174e521b87",
+      "application_source_base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+      "development_seed": 31,
+      "local_build": {
+        "id": "dev-sec-jwt4-called",
+        "base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+        "development_seed": 31,
+        "local_linux_build": "passed",
+        "local_only": true,
+        "files": {
+          "go.mod": "41dda5c3844120f8bf8a8e483eb5fafb99235139039d66035319ad7b30d6fe50",
+          "go.sum": "5549cc89a65d93814e5766178d20174ad167e8002a34b6fd6c5665b8844c8230"
+        }
+      },
+      "plan_sha256": "914a22bda7be263ea674ec2b883b1f1c5df5c700c42d2bdfaf51d88f3223e81d",
+      "run_id": 40927168160,
+      "run_url": "https://github.com/trad024/FlowGuard/actions/runs/40927168160",
+      "created_at": "2026-10-29T18:03:24Z",
+      "run_conclusion": "success",
+      "required_job_conclusions": {
+        "build": "success",
+        "unit": "success",
+        "scans": "success"
+      },
+      "scope": "development seed only",
+      "govulncheck": {
+        "complete": true,
+        "scanner_version": "v1.4.0",
+        "reachable_by_cve": {
+          "CVE-2026-81870": true,
+          "CVE-2025-30204": true,
+          "CVE-2026-78661": false,
+          "CVE-2026-97045": false
+        },
+        "reason": "explicit findings only; absence of a CVE leaves reachability unknown"
+      },
+      "govulncheck_config": {
+        "protocol_version": "v1.0.0",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.4.0",
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-10-27T21:16:18Z",
+        "go_version": "go1.26.10",
+        "scan_level": "symbol",
+        "scan_mode": "source"
+      },
+      "artifact_sha256": {
+        "trivy.json": "18c4509163e20c555ab4ede280983dad3a256caa7d2ddcaa53d51ffc78b51606",
+        "gitleaks.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+        "govulncheck.json": "a88b9e79a1b95dea9d221188299eabdd0bd1f66f69482dc6a7f0bccac979562e",
+        "govulncheck-reachability.json": "e3955b9c1f17d04f54322dce4f2a220fb7c6d594adda6b6376afb170c1d270f4"
+      },
+      "artifact": {
+        "id": 12921202778,
+        "name": "scan-reports",
+        "created_at": "2026-10-29T18:09:55Z",
+        "digest": "sha256:ace1686c8394f94bad2ec8e35dc7c2799e0731e2855377788474482c0c51782f"
+      }
+    }
+  },
+  {
+    "id": "dev-sec-jwt5-uncalled",
+    "run_id": 40927311190,
+    "bad_release": true,
+    "ground_truth_scope": "vulnerable development pin; runtime exploitation is not established",
+    "counts": {
+      "trivy_high": 1,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2025-30204",
+                "PkgName": "github.com/golang-jwt/jwt/v5",
+                "InstalledVersion": "v5.2.1",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "FixedVersion": "5.2.2",
+                "Status": "fixed",
+                "Reachable": false,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              }
+            ]
+          },
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "target": {
+      "cve": "CVE-2025-30204",
+      "module": "github.com/golang-jwt/jwt/v5",
+      "version": "v5.2.1",
+      "epss": 0.00811,
+      "advisory": "https://pkg.go.dev/vuln/GO-2025-3553"
+    },
+    "source": {
+      "id": "dev-sec-jwt5-uncalled",
+      "branch": "scenario/security-dev-31-jwt5-uncalled",
+      "sha": "6a506d670e7f0996e6d1c30660dcffd375ed1526",
+      "workflow_base": "74eb6071d0d2c5c4e92012c862d2f2174e521b87",
+      "application_source_base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+      "development_seed": 31,
+      "local_build": {
+        "id": "dev-sec-jwt5-uncalled",
+        "base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+        "development_seed": 31,
+        "local_linux_build": "passed",
+        "local_only": true,
+        "files": {
+          "go.mod": "fb6115bc9aaba32593cbab3e2d143ead7520cf85dea2501179f6bd23a806e86b",
+          "go.sum": "7f23dabd67187126e7b0436bc6af2cf1ce0f6e240e8753dd380fbdd08011fd43"
+        }
+      },
+      "plan_sha256": "914a22bda7be263ea674ec2b883b1f1c5df5c700c42d2bdfaf51d88f3223e81d",
+      "run_id": 40927311190,
+      "run_url": "https://github.com/trad024/FlowGuard/actions/runs/40927311190",
+      "created_at": "2026-10-29T18:04:19Z",
+      "run_conclusion": "success",
+      "required_job_conclusions": {
+        "build": "success",
+        "unit": "success",
+        "scans": "success"
+      },
+      "scope": "development seed only",
+      "govulncheck": {
+        "complete": true,
+        "scanner_version": "v1.4.0",
+        "reachable_by_cve": {
+          "CVE-2026-81870": true,
+          "CVE-2026-78661": false,
+          "CVE-2026-97045": false,
+          "CVE-2025-30204": false
+        },
+        "reason": "explicit findings only; absence of a CVE leaves reachability unknown"
+      },
+      "govulncheck_config": {
+        "protocol_version": "v1.0.0",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.4.0",
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-10-27T21:16:18Z",
+        "go_version": "go1.26.10",
+        "scan_level": "symbol",
+        "scan_mode": "source"
+      },
+      "artifact_sha256": {
+        "trivy.json": "f8c8ecc27b2d11d8ca19463f69b5df9efed73105f20fba43dee2346ab249d716",
+        "gitleaks.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+        "govulncheck.json": "e8fec9ff5f36526a382719a72a7bcb11b94e2e27629e938098ff3caa3cce180e",
+        "govulncheck-reachability.json": "766f78d9dafb3a5744034aa0fb668a6c1b632fd45ef4dabad2c007b3f1e6d25c"
+      },
+      "artifact": {
+        "id": 12921621301,
+        "name": "scan-reports",
+        "created_at": "2026-10-29T18:10:02Z",
+        "digest": "sha256:adedb400eb6ac4446f3bdb5197ecb9e2e4d60e39e8c56dcf73476dc5f5053279"
+      }
+    }
+  },
+  {
+    "id": "dev-sec-legacy-jwt-320",
+    "run_id": 40927521742,
+    "bad_release": true,
+    "ground_truth_scope": "vulnerable development pin; runtime exploitation is not established",
+    "counts": {
+      "trivy_high": 1,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2025-30204",
+                "PkgName": "github.com/golang-jwt/jwt",
+                "InstalledVersion": "v3.2.0+incompatible",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "Status": "affected",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              }
+            ]
+          },
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "target": {
+      "cve": "CVE-2025-30204",
+      "module": "github.com/golang-jwt/jwt",
+      "version": "v3.2.0+incompatible",
+      "epss": 0.00811,
+      "advisory": "https://vuln.go.dev/ID/GO-2025-3553.json"
+    },
+    "source": {
+      "id": "dev-sec-legacy-jwt-320",
+      "branch": "scenario/security-dev-31-legacy-jwt-320",
+      "sha": "0bf8eae76b84baee203975d520ad47180ea6beb2",
+      "workflow_base": "74eb6071d0d2c5c4e92012c862d2f2174e521b87",
+      "application_source_base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+      "development_seed": 31,
+      "local_build": {
+        "id": "dev-sec-legacy-jwt-320",
+        "base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+        "development_seed": 31,
+        "local_linux_build": "passed",
+        "local_only": true,
+        "files": {
+          "go.mod": "af846ec14ffd13848f937d6c12310efee64b2e0f22cca845bea12fa2d0dd4fd8",
+          "go.sum": "ca97cb6bb8473ea35b0e222ee4bb69d20f342079379921e51eb8136f48b8b773"
+        }
+      },
+      "plan_sha256": "914a22bda7be263ea674ec2b883b1f1c5df5c700c42d2bdfaf51d88f3223e81d",
+      "run_id": 40927521742,
+      "run_url": "https://github.com/trad024/FlowGuard/actions/runs/40927521742",
+      "created_at": "2026-10-29T18:05:37Z",
+      "run_conclusion": "success",
+      "required_job_conclusions": {
+        "build": "success",
+        "unit": "success",
+        "scans": "success"
+      },
+      "scope": "development seed only",
+      "govulncheck": {
+        "complete": true,
+        "scanner_version": "v1.4.0",
+        "reachable_by_cve": {
+          "CVE-2026-81870": true,
+          "CVE-2025-30204": true,
+          "CVE-2026-78661": false,
+          "CVE-2026-97045": false
+        },
+        "reason": "explicit findings only; absence of a CVE leaves reachability unknown"
+      },
+      "govulncheck_config": {
+        "protocol_version": "v1.0.0",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.4.0",
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-10-27T21:16:18Z",
+        "go_version": "go1.26.10",
+        "scan_level": "symbol",
+        "scan_mode": "source"
+      },
+      "artifact_sha256": {
+        "trivy.json": "f5f42c54af82f98c7b69047ff414eaff45c819671411a20804094a3b176191bc",
+        "gitleaks.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+        "govulncheck.json": "525da932731127bc1b4fc6ae9a3ed83acc8a0c0388dddbf78304e3be1fcdd746",
+        "govulncheck-reachability.json": "e3955b9c1f17d04f54322dce4f2a220fb7c6d594adda6b6376afb170c1d270f4"
+      },
+      "artifact": {
+        "id": 12921556619,
+        "name": "scan-reports",
+        "created_at": "2026-10-29T18:11:44Z",
+        "digest": "sha256:d06320c9fee0778af961a0471456a49e4f98cf14d79ef4e76ced4db5d096cbac"
+      }
+    }
+  },
+  {
+    "id": "dev-sec-legacy-jwt-322",
+    "run_id": 40927530355,
+    "bad_release": true,
+    "ground_truth_scope": "vulnerable development pin; runtime exploitation is not established",
+    "counts": {
+      "trivy_high": 1,
+      "trivy_critical": 0,
+      "gitleaks": 0
+    },
+    "reports": {
+      "trivy": {
+        "Results": [
+          {
+            "Vulnerabilities": []
+          },
+          {
+            "Vulnerabilities": [
+              {
+                "VulnerabilityID": "CVE-2025-30204",
+                "PkgName": "github.com/golang-jwt/jwt",
+                "InstalledVersion": "v3.2.2+incompatible",
+                "Severity": "HIGH",
+                "CVSS": {
+                  "ghsa": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V40Vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N",
+                    "V3Score": 7.5,
+                    "V40Score": 8.7
+                  },
+                  "redhat": {
+                    "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+                    "V3Score": 7.5
+                  }
+                },
+                "Status": "affected",
+                "Reachable": true,
+                "ReachabilitySource": "govulncheck:v1.4.0:source-symbol"
+              }
+            ]
+          },
+          {
+            "Vulnerabilities": []
+          }
+        ]
+      },
+      "gitleaks": []
+    },
+    "target": {
+      "cve": "CVE-2025-30204",
+      "module": "github.com/golang-jwt/jwt",
+      "version": "v3.2.2+incompatible",
+      "epss": 0.00811,
+      "advisory": "https://vuln.go.dev/ID/GO-2025-3553.json"
+    },
+    "source": {
+      "id": "dev-sec-legacy-jwt-322",
+      "branch": "scenario/security-dev-31-legacy-jwt-322",
+      "sha": "8fd84951f6bf4ccef36022f4c26db5b5a76d9741",
+      "workflow_base": "74eb6071d0d2c5c4e92012c862d2f2174e521b87",
+      "application_source_base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+      "development_seed": 31,
+      "local_build": {
+        "id": "dev-sec-legacy-jwt-322",
+        "base": "7d5fe087ea87623dcf9e58ee74fc76b5d3f7f586",
+        "development_seed": 31,
+        "local_linux_build": "passed",
+        "local_only": true,
+        "files": {
+          "go.mod": "131ec64c5168fa82cc21b80d09770c689bb7313d168cea3595ffe6593faa3eb1",
+          "go.sum": "5b0346768854838b4c684843c219d472d12eda0cbc53664b5d73018102f97a1f"
+        }
+      },
+      "plan_sha256": "914a22bda7be263ea674ec2b883b1f1c5df5c700c42d2bdfaf51d88f3223e81d",
+      "run_id": 40927530355,
+      "run_url": "https://github.com/trad024/FlowGuard/actions/runs/40927530355",
+      "created_at": "2026-10-29T18:05:40Z",
+      "run_conclusion": "success",
+      "required_job_conclusions": {
+        "build": "success",
+        "unit": "success",
+        "scans": "success"
+      },
+      "scope": "development seed only",
+      "govulncheck": {
+        "complete": true,
+        "scanner_version": "v1.4.0",
+        "reachable_by_cve": {
+          "CVE-2025-30204": true,
+          "CVE-2026-81870": true,
+          "CVE-2026-78661": false,
+          "CVE-2026-97045": false
+        },
+        "reason": "explicit findings only; absence of a CVE leaves reachability unknown"
+      },
+      "govulncheck_config": {
+        "protocol_version": "v1.0.0",
+        "scanner_name": "govulncheck",
+        "scanner_version": "v1.4.0",
+        "db": "https://vuln.go.dev",
+        "db_last_modified": "2026-10-27T21:16:18Z",
+        "go_version": "go1.26.10",
+        "scan_level": "symbol",
+        "scan_mode": "source"
+      },
+      "artifact_sha256": {
+        "trivy.json": "71cd991dc31b164b229c1d2e0b71a68fe20eedd30dc84beae08afbf652377ebb",
+        "gitleaks.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+        "govulncheck.json": "8ee322770d9252a8d45bb498c5a218624f886226f028fff173fe45e847a43ea9",
+        "govulncheck-reachability.json": "bb5a78eea6cf549e2ea131b53d3386f356181836fd3661613d598e69a5120a48"
+      },
+      "artifact": {
+        "id": 12920888543,
+        "name": "scan-reports",
+        "created_at": "2026-10-29T18:11:41Z",
+        "digest": "sha256:dd298e65d1b1300f88f2271ced6fb886d904100f84fe182d5125f1c52e07820a"
+      }
+    }
+  }
+]

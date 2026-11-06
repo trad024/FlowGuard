@@ -44,6 +44,7 @@ env:
   TRIVY_IMAGE: aquasec/trivy:0.75.0
   GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1
   SYFT_IMAGE: anchore/syft:v1.54.1
+  GOVULNCHECK_VERSION: v1.4.0
 
 jobs:
   plan:
@@ -209,6 +210,26 @@ jobs:
             > reports/gitleaks.json
           python3 -c "import json; print('Gitleaks findings', len(json.load(open('reports/gitleaks.json'))))" \
             | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: ${{ env.APP_DIR }}/go.mod
+          cache-dependency-path: ${{ env.APP_DIR }}/go.sum
+      - name: Install pinned govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
+      - name: Go source reachability (JSON)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          if (cd "$APP_DIR" && govulncheck -json -scan=symbol ./cmd/podinfo ./cmd/podcli) > reports/govulncheck.json; then
+            scan_status=0
+          else
+            scan_status=$?
+          fi
+          python3 ci/security/map_govulncheck.py --input reports/govulncheck.json \
+            --exit-code "$scan_status" --trivy reports/trivy.json \
+            --out reports/govulncheck-reachability.json
       - name: SonarCloud
         run: |
           if [ -z "$SONAR_TOKEN" ]; then
@@ -241,6 +262,7 @@ jobs:
           print(f"::notice title=scan-counts::trivy_high={high} trivy_critical={critical} gitleaks={leaks}")
           PY
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: scan-reports
           path: reports/

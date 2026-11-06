@@ -47,3 +47,32 @@ def test_calibration_reports_coverage_per_held_apart_template(tmp_path, monkeypa
     assert set(out["folds"]) == set(LOGS) and out["coverage"]["n"] == 15
     assert out["examples"] == 15 and not out["calibrated"]  # under MIN_CALIBRATION
     assert (tmp_path / "models" / "diagnose-calibration-L1.json").is_file()
+
+
+def test_l3_calibrates_through_the_same_code_and_schema_as_l1_and_l2(tmp_path, monkeypatch):
+    """L3's answers are read like L2's, from the dev answers folder, and calibrated by the same
+    leave-one-template-out code: the output differs only in the level."""
+    import json
+
+    import diagnose_dev
+
+    r = rows(tmp_path, monkeypatch)
+    monkeypatch.setattr(diagnose_calibrate, "MODELS", tmp_path / "models")
+    monkeypatch.setattr(diagnose_calibrate, "ROOT", tmp_path)
+    answers = tmp_path / "answers"
+    answers.mkdir()
+    for level in ("L2", "L3"):
+        with (answers / f"{level}.jsonl").open("w", encoding="utf-8") as f:
+            for x in r:
+                cls = diagnose_calibrate.truth(x["variant"])
+                f.write(json.dumps({"variant": x["variant"], "scores": {cls: 0.8, "code": 0.2}}))
+                f.write("\n")
+    monkeypatch.setattr(diagnose_dev, "OUT", answers)
+    l2 = diagnose_calibrate.calibrate("L2", r, diagnose_calibrate.llm_scores(r, "L2"))
+    l3 = diagnose_calibrate.calibrate("L3", r, diagnose_calibrate.llm_scores(r, "L3"))
+    assert set(l3) == set(l2) and set(l3["folds"]) == set(l2["folds"]) == set(LOGS)
+    assert {k: v for k, v in l3.items() if k not in ("level", "calibration_file")} == {
+        k: v for k, v in l2.items() if k not in ("level", "calibration_file")
+    }
+    saved = json.loads((tmp_path / "models" / "diagnose-calibration-L3.json").read_text())
+    assert saved["level"] == "L3" and saved["method"] == "leave-one-template-out (D45)"
