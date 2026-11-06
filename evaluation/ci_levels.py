@@ -1,7 +1,10 @@
 """Offline levels on ci recordings (D64): L0 to L4 decide on the same failed run that the live
 CI path decided at L5, from the recording's files.
 
-    python evaluation/ci_levels.py <recording> [<recording> ...]
+    python evaluation/ci_levels.py <recording> [<recording> ...] [--confirm-step-11]
+
+A held-out recording (test-split template, held-out id or folder) runs only with
+--confirm-step-11 and the staged freeze (heldout_guard), as every held-out Diagnose run.
 
 Each level handles the recording's ci_run_completed event (replay.events) once, with a
 dry-run executor and no approver, so no level acts on anything: a proposal the gate sends to
@@ -19,8 +22,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "ci")]
+sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "ci"), str(ROOT / "evaluation")]
 
+import heldout_guard  # noqa: E402
 import replay  # noqa: E402
 from flowguard.audit import AuditLog  # noqa: E402
 from flowguard.executor import Executor  # noqa: E402
@@ -66,7 +70,11 @@ def full_diagnose(audit: AuditLog):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("recordings", nargs="+", type=Path)
+    parser.add_argument(heldout_guard.FLAG, action="store_true", help="Step 11 only")
     args = parser.parse_args(argv)
+    held = [r.name for r in args.recordings if heldout_guard.is_heldout_recording(r)]
+    if held:  # before any LLM client exists
+        heldout_guard.require_step_11(args.confirm_step_11, f"ci_levels on {', '.join(held)}")
     audit = AuditLog.open()
     diagnose = full_diagnose(audit)
     for rec in args.recordings:

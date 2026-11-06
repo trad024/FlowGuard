@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "evaluation"), str(ROOT / "scenarios")]
 
-import heldout  # noqa: E402
+import heldout_guard  # noqa: E402
 import stats  # noqa: E402
 from flowguard import diagnose, lanes, llm  # noqa: E402
 from flowguard.audit import AuditLog  # noqa: E402
@@ -36,11 +36,11 @@ LANE_SEED = "lanes-20261028"
 DEV_SPLITS = ("train", "validation")
 
 
-def items(split: dict, splits=DEV_SPLITS) -> list[dict]:
-    """Verified variants of the given splits. Test templates need the D39 staged freeze:
-    a frozen pre-registration and the Diagnose code unchanged since diagnose-freeze."""
+def items(split: dict, splits=DEV_SPLITS, confirm_step_11: bool = False) -> list[dict]:
+    """Verified variants of the given splits. Test templates need --confirm-step-11 and the
+    D39 staged freeze (heldout_guard); this runner still scores dev templates only."""
     if any(s not in DEV_SPLITS for s in splits):
-        heldout.diagnose_frozen()
+        heldout_guard.require_step_11(confirm_step_11, "diagnose_dev with test templates")
     test = {t for t, s in split["templates"].items() if s == "test"}
     out = []
     for variant, meta in sorted(split["variants"].items()):
@@ -88,10 +88,16 @@ def retrieved(todo: list[dict], retriever) -> dict[str, list]:
     return out
 
 
-def run(level: str, repeat: int | None = None, splits=DEV_SPLITS, retriever=None) -> None:
+def run(
+    level: str,
+    repeat: int | None = None,
+    splits=DEV_SPLITS,
+    retriever=None,
+    confirm_step_11: bool = False,
+) -> None:
     if level not in ("L2", "L3"):
         raise SystemExit("only the LLM levels run here (L2, L3)")
-    todo = items(load_split(), splits)
+    todo = items(load_split(), splits, confirm_step_11)
     examples: dict[str, list] = {}
     if level == "L3":
         from flowguard import retrieval
@@ -192,10 +198,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repeat", type=int, choices=[2, 3])
     parser.add_argument("--splits", nargs="+", default=list(DEV_SPLITS))
     parser.add_argument("--out", type=Path, default=OUT, help="answers folder (gitignored)")
+    parser.add_argument(
+        heldout_guard.FLAG, action="store_true", help="Step 11 only: allow test templates"
+    )
     args = parser.parse_args(argv)
     globals()["OUT"] = args.out
     if args.cmd == "run":
-        run(args.level, args.repeat, tuple(args.splits))
+        run(args.level, args.repeat, tuple(args.splits), confirm_step_11=args.confirm_step_11)
     else:
         score(tag(args.level, args.repeat))
     return 0
