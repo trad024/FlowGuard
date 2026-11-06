@@ -31,13 +31,27 @@ class. Twenty training templates is a small set: its 60 variants are not indepen
 templates, and validation has only five templates/14 variants. This is the final experimental
 comparison checkpoint, not evidence of reliable production diagnosis. No held-out logs used.
 
-Hardware: i5-11300H, four cores/eight logical processors, 7.7 GiB usable RAM; two CPU threads.
-Selected run CPU inference after five warmups:
+Selected run CPU inference after five warmups, two CPU threads, on two machines:
 
-| Workload | Calls | Median | p95 | Sampled peak process RSS |
-|---|---:|---:|---:|---:|
-| Short-log smoke | 30 | 38.06 ms | 49.60 ms | 517.72 MiB |
-| 14 validation logs, three cycles | 42 | 385.97 ms | 437.88 ms | 578.22 MiB |
+| Machine | Workload | Calls | Median | p95 | Sampled peak process RSS |
+|---|---|---:|---:|---:|---:|
+| A: training machine. i5-11300H (4 cores/8 threads), 7.7 GiB usable RAM, Windows 10.0.26300; torch 2.5.1+cpu, transformers 4.46.3; Python version not recorded | Short-log smoke | 30 | 38.06 ms | 49.60 ms | 517.72 MiB |
+| A | 14 validation logs, three cycles | 42 | 385.97 ms | 437.88 ms | 578.22 MiB |
+| B: integration laptop, 2026-11-06. i5-11300H (4 cores/8 threads), 19.8 GiB usable RAM, Windows 11 10.0.26200; torch 2.11.0+cpu, transformers 5.13.0; Python 3.13.0; the k3d cluster running, idle | Short-log smoke | 30 | 31.35 ms | 39.26 ms | 591.19 MiB |
+| B | 14 validation logs, three cycles | 42 | 319.36 ms | 344.78 ms | 646.00 MiB |
+
+Machine B ran the same script and workloads (`ci/benchmark_encoder.py`, the run-2 weights by their
+SHA-256), with newer torch and transformers, so the two rows are not a like-for-like timing
+comparison; both stay well inside the laptop budget.
+
+Library versions: machine A torch 2.5.1+cpu, transformers 4.46.3 (`results/run-2/package-versions.json`);
+machine B torch 2.11.0+cpu, transformers 5.13.0, onnxruntime 1.31.0, Python 3.13.0.
+
+Consistency check on machine B (2026-11-07): the run-2 weights predict the 14 validation logs
+exactly as `results/run-2/validation-predictions.json` records them. Every predicted class is
+identical, the largest difference in a class probability is 2.4e-7, and macro-F1 is 0.720 (10 of
+14 correct), as recorded. The text fed to the model is `encoder_data.load_examples`, the training
+pipeline's own.
 
 RSS is sampled every 10 ms and includes checkpoint loading. It is one process, not the
 whole FlowGuard/Docker budget. Full per-call measurements and the run-1 comparison remain
