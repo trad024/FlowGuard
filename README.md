@@ -152,8 +152,8 @@ observed on the cluster.
   an agent receives for class names, experiment words and ground-truth values.
 - **Pre-registration (D26b):** [`docs/preregistration.yaml`](docs/preregistration.yaml) fixes
   everything before any held-out result exists: families, counts, metrics, tests, exclusions and
-  run order. It also holds the SHA-256 of a secret seed. As of this README it is draft 0.6; it is
-  frozen before Step 11.
+  run order. It also holds the SHA-256 of a secret seed. Version 1.0 was frozen on 2026-11-06;
+  any later change is a dated amendment listed in the report.
 - **Held-out set:** generated only at Step 11 by `scenarios/heldout.py` from the frozen
   pre-registration and the secret seed. Development uses only `scenarios/dev/`.
   - The CI failure corpus is split by template, not by run (D6).
