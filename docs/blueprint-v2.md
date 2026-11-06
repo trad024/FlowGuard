@@ -278,6 +278,12 @@ All six come from the corpus split committed in `ba1b51e` (file SHA-256 `6e7223a
 hash `a1003ffa...`): 20 training, 5 validation and 5 test templates; none of them read a test
 template or LogChunks. Local dev runs used Python 3.13.0 (CI runs 3.11).
 
+Reproduced at `40f37b6` (2026-11-06, into `state/repro/`, no LLM call): the L1 and L2
+calibrations byte for byte; the L1 model in content (identical vocabulary, IDF weights,
+coefficients, and predictions and probabilities on all 74 dev variants); its pickle differs only in
+scikit-learn's `_stop_words_id`, the memory address of an object in the fitting process. The hash
+file is unchanged.
+
 | Artifact | Command | Code commit | Input | Date |
 |---|---|---|---|---|
 | `state/models/diagnose-l1.pkl` | `py evaluation/diagnose_l1.py` (fits on the training templates, scores validation; its score file was written in the same second) | not established: run from the working tree 11 minutes before `evaluation/diagnose_l1.py` was first committed in `10ee3a2` | 60 training variants | 2026-10-28 22:04 |
