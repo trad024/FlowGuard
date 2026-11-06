@@ -340,7 +340,7 @@ def freeze_diagnose(root: Path = ROOT, path: Path | None = None) -> Path:
     """Write the artifacts' hashes (commit this file together with the diagnose-freeze tag)."""
     path = path or root / DIAGNOSE_HASHES.relative_to(ROOT)
     lines = [f"{h}  {name}" for name, h in sorted(artifact_hashes(root).items())]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")  # LF on Windows too
     return path
 
 

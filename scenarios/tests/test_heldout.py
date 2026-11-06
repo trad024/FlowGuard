@@ -192,6 +192,7 @@ def test_diagnose_freeze_covers_the_diagnose_code_and_its_artifacts(tmp_path, mo
     with pytest.raises(SystemExit, match="no frozen artifact hashes"):
         heldout.diagnose_frozen(tmp_path)
     hashes = heldout.freeze_diagnose(tmp_path)
+    assert b"\r" not in hashes.read_bytes()  # LF on every platform (the repo's eol=lf)
     assert {line.split("  ")[1] for line in hashes.read_text().splitlines()} == {
         "state/models/diagnose-l1.pkl",
         "state/encoder/model.safetensors",
