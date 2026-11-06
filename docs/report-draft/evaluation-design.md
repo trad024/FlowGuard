@@ -22,6 +22,14 @@ The confirmatory family is H1 and H3, with Holm's correction across the two at a
 α = 0.05 (D31, D42, D56). Secondary and per-band results are reported uncorrected and labelled
 as such. Analyses not in the pre-registration are labelled exploratory.
 
+**The ladder (D10).** The six levels are configuration flags of the same agent service, and the
+ladder is cumulative (`architecture.md`, "Ablation levels"). Every level decides on the same
+scenarios, in the same seeded order.
+
+**The information firewall (D25)** keeps ground truth out of every agent input
+(`architecture.md`, "Information firewall"). The agent-input leakage test runs on every
+recording before scoring.
+
 ## Pre-registration and staged freezes
 
 `docs/preregistration.yaml` fixes, before the held-out set exists:
@@ -30,7 +38,7 @@ as such. Analyses not in the pre-registration are labelled exploratory.
 - the exclusion rules.
 
 Once frozen, it is never edited. A later change is a dated amendment with its reason, and the
-report lists every amendment.
+report lists every amendment. Version 1.0 was frozen on 2026-11-06.
 
 Two freezes protect the agent code from the test data:
 - **`diagnose-freeze` (D39).** Once the pre-registration is frozen and Step 7 is done, the
@@ -73,6 +81,14 @@ fully offline on the corpus and on LogChunks.
 
 A smaller set of live end-to-end runs shows the whole loop working: detection, gate,
 approval, execution and recovery. Live and replayed results are reported separately.
+
+**The live ci family (D64).** Each of the 12 ci scenarios runs the full system once at L5, at
+the default gate setting, after its CI fails:
+- a team member approves on the approval page;
+- an executed pin is checked by its own app-ci run on a fix branch.
+
+L0 to L4 are compared offline on the same logs. One live run per scenario keeps the cluster and
+the GitHub quota bounded, and the levels still see identical inputs.
 
 **Conditions that keep runs comparable:**
 - **Quiet start (D50).** No fault is injected while an L0 alert is firing: the runner waits
@@ -125,10 +141,16 @@ recording, with coverage reported leave-one-recording-out.
 
 - **Per band.** Every release and runtime result is also reported per intensity band (below,
   near or above the frozen L0 thresholds), descriptively.
-- **LLM variability (D18, D27, D28).** The model id, temperature (0) and reasoning effort are
-  pinned and logged per call. Responses are cached by a hash of the model, the settings and the
-  prompt. Repeats: set at freeze (the draft has 3 runs on a seeded 60-item subset per LLM
-  level, with the repeat index in the cache key).
+- **LLM variability (D18, D27, D28, D61).**
+  - The model id, temperature (0) and reasoning effort are pinned and logged per call.
+  - Responses are cached by a hash of the model, the settings and the prompt.
+  - Repeats: 3 runs on a seeded 30-item subset at L3 only, with the repeat index in the cache
+    key. The report states that the subset was cut from 60 items at L2 and L3 to fit the free
+    quota, so L2's run-to-run variability is not measured.
+- **Which level made each LLM call (D64).** L2 and L3 call the model. L4 and L5 reuse L3's
+  cached answer for an identical input (D39). On a live ci scenario the L5 run calls first. The
+  audit log's `llm_call` event records the level of each real call, and the analysis attributes
+  cached answers by joining on the cache key.
 
 ## Sample sizes (D16)
 
@@ -149,10 +171,22 @@ of interest (D43). It starts from the dev L0 baselines measured in Step 4b:
 | Normal traffic for false alerts | At least 4 hours | |
 | DSO2 live end-to-end CI runs | 12 | One per test-split variant |
 | DSO4 security scenarios | 14 | |
-| Release scenarios (DSO3, H4, H5) | Set at freeze | No confirmatory test rests on this family since D56; the count follows DSO3's precision once the agents-mode dev recordings are scored |
-| DSO5 commit sequence | Set at freeze | |
-| DSO6 adversarial and conflict set | Set at freeze | |
-| LLM repeats | Set at freeze | |
+| Release scenarios (DSO3, H4, H5) | 72: 36 bad, 36 good, a quarter of each under node stress | No confirmatory test rests on this family (D56). 6 recordings per bad kind and band give a bad-caught Wilson half-width of at most 0.16, and a 0/36 false-rollback rate an upper bound of 0.096 (D54) |
+| DSO5 commit sequence | 30 commits, in both plan modes | |
+| DSO6 adversarial and conflict set | 300 items | |
+| LLM repeats | 30 items × 3 runs at L3 (D61) | Fits the free quota: about 2.4 days on 7 lanes |
 
 **Margin from Holm.** Holm now runs across H1 and H3 only. The counts sized at α/3 are kept,
 so their power is somewhat above 80%.
+
+## When a report is confirmatory
+
+The analysis toolkit (`evaluation/report.py`, `report_scope.py`) labels a report confirmatory
+only for proven held-out inputs. No flag can set that label. All four checks must hold:
+1. the pre-registration is frozen;
+2. the `eval-freeze` tag exists and `agents/` is unchanged since it;
+3. the held-out run order exists and the seed matches its committed hash;
+4. every scored scenario id is in that run order.
+
+Otherwise the report says `confirmatory: false`, with the first check that failed as its
+reason.
