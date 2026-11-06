@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: draft
-version: 0.5
+version: 0.6
 drafted: 2026-10-27
 frozen: null
 amendments: []
@@ -61,7 +61,8 @@ smallest_effect:
       D44's rule, set before the rate was measured: L3's dev wrong-decision rate on the
       node-stress release recordings is 0/5, under 10%, and node stress slows stable and
       canary alike (D44 rescale). H4 is reported with n and Wilson intervals per level, no
-      test, and leaves the Holm family (H1 and H3)
+      test, and leaves the Holm family (H1 and H3). D56 amendment (decision log, verbatim):
+      On 12 dev node-stress releases (5 earlier, 7 from the second dev recordings), L3's wrong-decision rate is 2/12 counting every wrong outcome, 1/11 without the truncated r-4e1fc2f0, and 0/8 by H4's pre-registered metric (false rollbacks; no wrong fixes are in scope for releases). The pre-registered metric decides: H4 stays descriptive. P1 fired 3 times at L4 (with the fitted Monitor), all on bad releases under node stress (r-3846eb8d, r-cdb74aaa, r-ef073e74), escalating to a human where L3 rolled back; no false rollback was prevented on dev. On the 32 agents-mode recordings L3's rate by the pre-registered metric is 0/12 node-stress releases, so H4 stays descriptive. At the default gate setting (0.70) every staging Release decision on the 32 executes without a human, the 5 wrong promotions included; at 0.80 or more every Release action needs a human (reported in H5; threshold unchanged)
 
 # ------------------------------------------------------------------ scenario families
 # count: null until the power analysis (D16) sets it; the v1 placeholders are noted.
@@ -598,7 +599,14 @@ llm:
     assignment, all of an item's calls on one lane, lane and provider recorded per call; no
     key rotation (D41). The report states that the calls ran on team members' individual
     free-tier accounts
-  levels_calling: [L2, L3]      # L4 and L5 reuse L3's cached answers for identical inputs (D39)
+  levels_calling: >-
+    The LLM is called for distinct inputs at L2 and L3. On a live ci scenario the L5 run makes
+    that call first, and levels with identical inputs reuse the cached answer (D39, D64).
+    Which level made each call is recorded by the audit log's llm_call event (cache_key,
+    level); the analysis derives it by joining on cache_key (evaluation/llm_provenance.py)
+  no_log: >-
+    an incident without a log makes no LLM call at any level (D60), so runtime incidents
+    cost no tokens
   providers: Groq only; OpenRouter (D40) dropped (D46)
   prompt_experiments: may use a second free Groq model; validation and final runs use the pinned model (D39)
   request_budget: >-
@@ -632,7 +640,8 @@ calibration:
     apart. Validation-only fitting is dropped
   dev_coverage: >-
     L1 67/74, L2 67/74 at a 90% target (L2 rerun under D51 on 2026-10-29;
-    evaluation/diagnose_calibrate.py)
+    evaluation/diagnose_calibrate.py); L3 72/74 (2026-11-05, code ccd7ddc). Mean prediction
+    set size: L1 2.54, L2 3.35, L3 3.15
 
 # ------------------------------------------------------------------ metrics
 # Every rate with its count (n) and a 95% Wilson interval; event rates per hour get an exact
@@ -648,16 +657,22 @@ metrics:
       The reported rate is per quote, from the model's raw quotes before grounding, at L2 and L3
       alike: sum of diagnose_ungrounded over sum of diagnose_quotes; the per-item boolean
       (diagnose_ungrounded > 0) is used only for the paired exact McNemar
-  H4: {primary: wrong decisions (false rollbacks and wrong fixes) in collaboration scenarios}
+  H4: {metric: false rollbacks (no wrong fixes are in scope for releases), role: descriptive (D56)}
   H5: {primary: share of incidents resolved without a human at each gate setting,
        constraint: 0 unapproved high-risk actions,
        note: an executed open_fix_pr (a draft PR, or an issue without a patch) counts as
          assisted, never as resolved without a human; pin_dependency sets one module to one
-         version and is proposed only where a pin fixes the failure (D57)}
+         version and is proposed only where a pin fixes the failure (D57),
+       no_log: an incident without a log takes one deterministic path at every level that runs
+         Diagnose (no model call, no guessed class) and is escalated to a human, so it never
+         counts as resolved without a human (D60)}
   DSO3: [bad releases caught before 100%, false rollbacks, time to rollback, change failure rate]
   DSO4: [injected criticals blocked, false-block rate]
   DSO5: [pipeline duration, failures missed vs full pipeline, time to first failure, MAE, AUC]
   DSO6: [unapproved high-risk actions, high-risk recall, escalation precision, approvals per incident]
+  executions: >-
+    only what ran counts as executed: executor refusals are written to their own table
+    (refusals) and reported apart, never counted as executions or as unapproved actions (D58)
 false_alerts_per_hour:
   interval: exact Poisson (Garwood) 95% interval on the alert count, divided by the hours observed
 
