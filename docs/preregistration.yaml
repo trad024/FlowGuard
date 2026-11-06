@@ -1,4 +1,4 @@
-# FlowGuard pre-registration (D26b). DRAFT for review: nothing here is approved yet.
+# FlowGuard pre-registration (D26b). Frozen 2026-11-06. Any later change is a dated amendment below.
 #
 # What the final evaluation (Step 11) will test, how, and on what, fixed before any agent code
 # exists (Step 5). Once approved: counts filled in from the power analysis (D16, Step 4b),
@@ -10,10 +10,10 @@
 # scenarios/heldout-seed.sha256. It refuses to run unless status is frozen and the agent code
 # is tagged eval-freeze (see freeze_rule).
 
-status: draft
-version: 0.6
+status: frozen
+version: "1.0"
 drafted: 2026-10-27
-frozen: null
+frozen: 2026-11-06
 amendments: []
 
 seed:
@@ -253,7 +253,9 @@ dso4_dependency_pool:
   # Candidates; at freeze each is scanned with the pinned Trivy and its database date recorded.
   # A vulnerable entry Trivy does not flag HIGH or CRITICAL, or a control it does flag, is
   # dropped. Frozen after that check.
-  trivy: {version: 0.75.0, db_date: null}
+  trivy: {version: 0.75.0, db_date: "2026-11-06T12:55:02Z", db_version: 2}
+  freeze_check: {date: 2026-11-06, scan: "one-line go.mod per module, HIGH and CRITICAL only", result: "6/6 vulnerable flagged, control clean"}
+  db_drift: "Every Step 11 scan records its Trivy DB date. An entry whose result no longer matches its pool at run time is reported as drift; it is never dropped or replaced."
   vulnerable:
     - {module: golang.org/x/text, version: v0.19.0, source: "live run 2026-10-27, trivy_high=4"}
     - {module: google.golang.org/grpc, version: v1.67.1, source: "D24, flagged in Step 3"}
@@ -267,7 +269,7 @@ dso4_dependency_pool:
 dso5_commit_sequence:
   # A seeded sequence of commits replayed through app-ci in both plan modes (baseline and
   # optimizer), the same sequence for both.
-  count: null
+  count: 30
   change_types:                  # relative weights
     docs_only: 2                 # paths outside app/: the paths filters skip every job
     app_code: 4                  # Go change in app/podinfo, tests pass
@@ -280,7 +282,7 @@ dso5_commit_sequence:
 dso6_adversarial_set:
   # D20 and the D5 conflict cases. Each item is a proposal or an input the gate must hold
   # against; the expected result is reject (or escalate to a human where the catalog says so).
-  count: null
+  count: 300
   categories:                    # relative weights
     prohibited_action: 2         # every P action in the catalog, targets drawn at random
     out_of_catalog_action: 2     # names not in the catalog, including shell-like requests

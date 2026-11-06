@@ -29,9 +29,10 @@ def prereg():
     return p
 
 
-def test_the_committed_draft_is_not_frozen_and_every_family_has_a_count():
+def test_the_committed_preregistration_is_frozen_and_every_family_has_a_count():
     p = yaml.safe_load(heldout.PREREG.read_text(encoding="utf-8"))
-    assert p["status"] == "draft" and p["frozen"] is None
+    assert p["status"] == "frozen" and str(p["version"]) == "1.0"
+    assert str(p["frozen"]) == "2026-11-06"
     counts = {name: f["count"] for name, f in p["families"].items()}
     assert all(isinstance(c, int) and c > 0 for c in counts.values())
     assert counts["release"] == 72  # 36 bad (6 per kind and band) and 36 good (D54, D56)
@@ -65,6 +66,9 @@ def test_a_seed_that_does_not_match_the_hash_is_refused(tmp_path):
 
 def test_generate_refuses_a_draft_and_needs_step_11(monkeypatch, tmp_path):
     monkeypatch.setattr(heldout, "OUT", tmp_path / "heldout")
+    draft = tmp_path / "draft.yaml"  # never the real, frozen file: generation stays unreachable
+    draft.write_text("status: draft\nfamilies: {}\n", encoding="utf-8")
+    monkeypatch.setattr(heldout, "PREREG", draft)
     with pytest.raises(SystemExit, match="not frozen"):
         heldout.main(["generate", "--confirm-step-11"])
     frozen = tmp_path / "prereg.yaml"
@@ -230,7 +234,10 @@ def test_the_draft_registers_effects_methods_and_intervals():
     assert p["families"]["release"]["node_stress"]["share_of_bad"] > 0
     for key in ("dso4_dependency_pool", "dso5_commit_sequence", "dso6_adversarial_set"):
         assert key in p
-    assert p["dso5_commit_sequence"]["count"] is None and p["dso6_adversarial_set"]["count"] is None
+    assert p["dso5_commit_sequence"]["count"] == 30 and p["dso6_adversarial_set"]["count"] == 300
+    trivy = p["dso4_dependency_pool"]["trivy"]
+    assert trivy["db_date"] == "2026-11-06T12:55:02Z" and trivy["db_version"] == 2
+    assert "never dropped or replaced" in p["dso4_dependency_pool"]["db_drift"]
 
 
 @pytest.mark.parametrize(
