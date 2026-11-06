@@ -1,10 +1,49 @@
-"""Inferential scope from the supplied read-only pre-registration, including D42 and D44."""
+"""Inferential scope from the supplied read-only pre-registration, including D42, D44 and D56.
+
+The rules are read from the file's own fields, not from its version: H4's mode from
+smallest_effect.H4.role, H2's from comparisons.H2.primary (cross-checked against
+smallest_effect.H2.role when present). A field the inference needs that is missing, or a role
+it does not know, raises ValueError naming the field; nothing falls back to a default. Only the
+0.2 and 0.3 drafts, written before H4 had a role, keep their version rules (0.3: H4 waits for a
+dated development-rate amendment, D44).
+"""
 
 import math
 from datetime import date
 
 H1, H3, H4 = "H1_L1_vs_L0", "H3_L3_vs_L2", "H4_L4_vs_L3"
 H2 = ("H2_L3_vs_regex", "H2_L3_vs_tfidf_lr")
+LEGACY = ("0.2", "0.3")  # drafts without smallest_effect.H4.role
+H4_ROLES = {"descriptive": "descriptive", "confirmatory": "test", "test": "test"}
+H2_ROLES = {"secondary": False, "primary": True, "confirmatory": True}
+# Counts the report needs; a path the file lacks is listed as unset (it blocks confirmatory
+# output), never filled in. A count the file holds is taken as it is.
+REQUIRED_COUNTS = (
+    "families.release.count",
+    "families.runtime.count",
+    "families.ci.count",
+    "families.security.count",
+    "families.pipeline.count",
+    "dso5_commit_sequence.count",
+    "dso6_adversarial_set.count",
+    "external.logchunks.sample.size",
+)
+
+
+def _field(specification, path):
+    value = specification
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            raise ValueError(f"pre-registration field missing: {path}")
+        value = value[part]
+    return value
+
+
+def _role(value, known, path):
+    word = str(value).strip().split(" ", 1)[0].lower() if value is not None else ""
+    if word not in known:
+        raise ValueError(f"unknown value for {path}: {value!r}")
+    return known[word]
 
 
 def declared_counts(specification):
@@ -28,32 +67,27 @@ def declared_counts(specification):
                 walk(item, f"{path}[{index}]")
 
     walk(specification)
-    if str(specification["version"]) == "0.5":
-        for path in (
-            "families.release.count",
-            "families.runtime.count",
-            "families.ci.count",
-            "families.security.count",
-            "families.pipeline.count",
-            "dso5_commit_sequence.count",
-            "dso6_adversarial_set.count",
-            "external.logchunks.sample.size",
-        ):
-            counts.setdefault(path, None)
+    for path in REQUIRED_COUNTS:
+        counts.setdefault(path, None)
     return counts
 
 
 def policy(specification):
-    version = str(specification["version"])
-    if version not in ("0.2", "0.3", "0.5"):
-        raise ValueError("unsupported pre-registration version; review its inference rules first")
-    primary = specification["comparisons"]["H2"].get("primary")
+    version = str(_field(specification, "version"))
+    primary = _field(specification, "comparisons.H2.primary")
     h2_primary = primary is not None and primary != "none" and primary != []
+    h2_role = (specification.get("smallest_effect") or {}).get("H2")
+    if (
+        isinstance(h2_role, dict)
+        and "role" in h2_role
+        and _role(h2_role["role"], H2_ROLES, "smallest_effect.H2.role") != h2_primary
+    ):
+        raise ValueError("smallest_effect.H2.role and comparisons.H2.primary disagree on H2's role")
     h4_mode, rate, amendment_date = "test", None, None
-    if version == "0.5":
-        if h2_primary:
-            raise ValueError("pre-registration 0.5 requires secondary H2")
-        h4_mode = "descriptive"
+    if version not in LEGACY:
+        h4_mode = _role(
+            _field(specification, "smallest_effect.H4.role"), H4_ROLES, "smallest_effect.H4.role"
+        )
     if version == "0.3":
         h4_mode = "pending_amendment"
         for amendment in specification.get("amendments", []):
@@ -86,7 +120,7 @@ def policy(specification):
         "unset_counts": sorted(path for path, count in counts.items() if count is None),
         "note": (
             "D56: H4 is descriptive; Holm covers H1 and H3 only; no D44 count amendment required"
-            if version == "0.5"
+            if version not in LEGACY and h4_mode == "descriptive"
             else "D44: H4 waits for a dated development-rate amendment; never infer its mode "
             "from held-out outcomes"
             if h4_mode == "pending_amendment"

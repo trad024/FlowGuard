@@ -29,12 +29,68 @@ from report_metrics import (
 from report_policy import policy
 
 
+def spec(version, h4_role="descriptive (D56)", primary="none", h2_role="secondary (D42)"):
+    """A pre-registration reduced to the fields the inference reads (as in the 0.5 file)."""
+    smallest = {"H4": {"role": h4_role}} if h4_role is not None else {}
+    if h2_role is not None:
+        smallest["H2"] = {"role": h2_role}
+    return {
+        "version": version,
+        "smallest_effect": smallest,
+        "comparisons": {"H2": {"primary": primary}},
+        "amendments": [],
+    }
+
+
 def test_preregistration_05_h4_is_descriptive_and_holm_excludes_it():
-    specification = {"version": 0.5, "comparisons": {"H2": {"primary": "none"}}, "amendments": []}
-    inference = policy(specification)
-    assert inference["h4_mode"] == "descriptive"
+    inference = policy(spec(0.5))
+    assert inference["h4_mode"] == "descriptive" and not inference["h2_primary"]
     assert inference["holm_family"] == ["H1_L1_vs_L0", "H3_L3_vs_L2"]
     assert "families.release.count" in inference["unset_counts"]
+    assert inference["note"].startswith("D56")
+
+
+@pytest.mark.parametrize("version", ["0.6", "1.0", 1.0])
+def test_later_versions_are_read_from_their_fields_with_the_same_rules(version):
+    assert {k: v for k, v in policy(spec(version)).items() if k != "preregistration_version"} == {
+        k: v for k, v in policy(spec(0.5)).items() if k != "preregistration_version"
+    }
+
+
+def test_the_real_preregistration_gives_h4_descriptive_and_holm_on_h1_h3():
+    specification = yaml.safe_load((report.ROOT / "docs/preregistration.yaml").read_text())
+    inference = policy(specification)
+    assert inference["h4_mode"] == "descriptive" and not inference["h2_primary"]
+    assert inference["holm_family"] == ["H1_L1_vs_L0", "H3_L3_vs_L2"]
+
+
+def test_a_missing_h4_role_is_refused_not_defaulted():
+    with pytest.raises(ValueError, match="smallest_effect.H4.role"):
+        policy(spec("0.6", h4_role=None))
+
+
+@pytest.mark.parametrize("role", ["exploratory", "", "maybe (D99)"])
+def test_an_unknown_h4_role_is_refused(role):
+    with pytest.raises(ValueError, match="unknown value for smallest_effect.H4.role"):
+        policy(spec("1.0", h4_role=role))
+
+
+def test_h2_role_and_primary_must_agree():
+    with pytest.raises(ValueError, match="disagree"):
+        policy(spec("0.6", primary=["L3 vs regex"]))  # role still says secondary
+    with pytest.raises(ValueError, match="unknown value for smallest_effect.H2.role"):
+        policy(spec("0.6", h2_role="tertiary"))
+    with pytest.raises(ValueError, match="comparisons.H2.primary"):
+        policy({"version": "0.6", "smallest_effect": {"H4": {"role": "descriptive"}},
+                "comparisons": {"H2": {}}})  # fmt: skip
+
+
+def test_a_count_the_file_holds_is_taken_as_it_is():
+    specification = spec("1.0")
+    specification["families"] = {"release": {"count": 72}}
+    inference = policy(specification)
+    assert inference["preregistered_counts"]["families.release.count"] == 72
+    assert "families.release.count" not in inference["unset_counts"]
 
 
 @pytest.mark.parametrize(
