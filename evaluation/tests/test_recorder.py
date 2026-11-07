@@ -3,6 +3,7 @@ logs marked unavailable when the token may not read them, and the manifest."""
 
 import json
 import threading
+import urllib.error
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -251,3 +252,87 @@ def test_recordings_hold_every_series_the_monitor_reads():
     assert {"memory_limits", "node_cpu", "node_memory", "node_allocatable"} <= set(
         recorder.SELECTORS
     )
+
+
+# ---------------------------------------------------------------- J2: validity, output folder
+
+
+def summary(**over):
+    s = {name: {"series": 1, "samples": 40} for name in recorder.SELECTORS}
+    s["alerts"] = {"series": 0, "samples": 0}  # no alert fired: still valid
+    return {**s, **over}
+
+
+def test_full_data_has_no_problem_and_empty_alerts_are_fine():
+    assert recorder.source_problems(summary()) == []
+
+
+def test_a_source_with_no_data_or_an_error_is_a_problem():
+    problems = recorder.source_problems(
+        summary(podinfo_requests={"series": 0, "samples": 0}, node_cpu={"error": "HTTP 503"})
+    )
+    assert problems == [
+        "prometheus podinfo_requests: no data in the window",
+        "prometheus node_cpu: HTTP 503",
+    ]
+    assert recorder.source_problems({}) == [
+        f"prometheus {n}: not recorded" for n in recorder.SELECTORS
+    ]
+
+
+def test_an_unreachable_prometheus_is_tried_once_then_skipped(monkeypatch, tmp_path):
+    calls = []
+
+    def down(url, timeout=30):
+        calls.append(url)
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(recorder, "http_json", down)
+    s = recorder.record_prometheus(tmp_path, START, END, "http://127.0.0.1:9")
+    assert len(calls) == 1  # the cluster is gone: one failed query, not one per source
+    assert all("error" in v for v in s.values())
+    assert s["node_cpu"]["error"].startswith("not queried: Prometheus unreachable")
+
+
+def record_with(monkeypatch, tmp_path, prom, family="release", out_root=None):
+    runs = tmp_path / "runs"
+    runs.mkdir(exist_ok=True)
+    monkeypatch.setattr(recorder, "RUNS_DIR", runs)
+    monkeypatch.setattr(recorder, "audit_events", lambda s, e: [])
+    monkeypatch.setattr(recorder, "record_prometheus", lambda out, s, e, base: prom)
+    truth_db = groundtruth.GroundTruthDB(tmp_path / "groundtruth.db")
+    out = recorder.record(
+        "dev-002",
+        START,
+        END,
+        ground_truth={"expected_l0": "abort"},
+        evaluation={"spec": {"id": "x-2", "family": family}, "observed": {"l0": "aborted"}},
+        truth_db=truth_db,
+        out_root=out_root,
+    )
+    return out, truth_db
+
+
+def test_a_run_missing_prometheus_data_is_invalid_with_its_reason(monkeypatch, tmp_path):
+    prom = summary(container_memory={"series": 0, "samples": 0})
+    out, truth_db = record_with(monkeypatch, tmp_path, prom, out_root=tmp_path / "rec")
+    manifest = json.loads((out / "manifest.json").read_text())
+    reason = "prometheus container_memory: no data in the window"
+    assert manifest["valid"] is False and manifest["invalid_reasons"] == [reason]
+    truth = json.loads((out / "ground_truth.json").read_text())
+    assert truth["valid"] is False and truth["observed"]["invalid_data"] == [reason]
+    assert truth["observed"]["l0"] == "aborted"  # what L0 did is kept
+    row = truth_db.run(out.name)
+    assert row["valid"] is False and row["observed"]["invalid_data"] == [reason]
+
+
+def test_branch_only_families_are_not_judged_on_prometheus(monkeypatch, tmp_path):
+    out, _ = record_with(monkeypatch, tmp_path, {}, family="ci", out_root=tmp_path / "rec")
+    assert json.loads((out / "manifest.json").read_text())["valid"] is True
+
+
+def test_the_output_folder_is_read_when_recording_not_at_import(monkeypatch, tmp_path):
+    monkeypatch.setattr(recorder, "RECORDINGS", tmp_path / "elsewhere")
+    out, _ = record_with(monkeypatch, tmp_path, summary())
+    assert out.parent == tmp_path / "elsewhere"
+    assert json.loads((out / "manifest.json").read_text())["valid"] is True

@@ -3,6 +3,7 @@
 import io
 import json
 import random
+import subprocess
 import tarfile
 import typing
 import urllib.parse
@@ -771,3 +772,54 @@ def test_pilot_counts_agents_mode_runs_apart(tmp_path, monkeypatch):
         db.record_run(run_id, spec=spec, ground_truth={}, observed=observed, l0_correct=None)
     assert pilot.done(db) == {"s1"}
     assert pilot.done(db, "agents") == {"s2"}
+
+
+# ---------------------------------------------------------------- J2: cluster lost, output folder
+
+
+def cfg_stub(monkeypatch):
+    monkeypatch.setattr(
+        runner.deployer, "load_config", lambda p: type("C", (), {"repo": "", "token": ""})
+    )
+
+
+def test_a_cluster_lost_mid_scenario_is_recorded_invalid_without_raising(monkeypatch, stores):
+    r = runner.Runner(spec(), run_id="r-0000abcd", recordings=stores / "rec")
+    monkeypatch.setattr(r, "wait_quiet", lambda: [])
+
+    def lost():
+        raise subprocess.CalledProcessError(1, ["kubectl", "get", "rollout"], stderr="refused")
+
+    monkeypatch.setattr(r, "run_config", lost)
+    monkeypatch.setattr(runner, "cluster_reachable", lambda: False)
+    recorded = {}
+    monkeypatch.setattr(runner.recorder, "record", lambda *a, **kw: recorded.update(kw) or "out")
+    cfg_stub(monkeypatch)
+    assert r.run() == "out"  # no exception, no hang: the run ends and is recorded
+    assert recorded["evaluation"]["valid"] is False
+    assert recorded["evaluation"]["l0_correct"] is None
+    assert "CalledProcessError" in recorded["evaluation"]["observed"]["cluster_lost"]
+    assert recorded["out_root"] == stores / "rec"
+    assert "cluster_lost" in [e["kind"] for e in r.truth_db.events("r-0000abcd")]
+
+
+def test_an_error_with_the_cluster_still_up_is_raised_as_before(monkeypatch, stores):
+    r = runner.Runner(spec(), run_id="r-0000abcd")
+    monkeypatch.setattr(r, "wait_quiet", lambda: [])
+    monkeypatch.setattr(r, "run_config", lambda: (_ for _ in ()).throw(KeyError("bug")))
+    monkeypatch.setattr(runner, "cluster_reachable", lambda: True)
+    monkeypatch.setattr(runner.recorder, "record", lambda *a, **kw: pytest.fail("recorded"))
+    with pytest.raises(KeyError):
+        r.run()
+
+
+def test_cluster_reachable_is_bounded_and_false_on_failure(monkeypatch):
+    seen = {}
+
+    def run(cmd, **kw):
+        seen.update(cmd=cmd, timeout=kw.get("timeout"))
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    assert runner.cluster_reachable(timeout_s=10) is False
+    assert "--request-timeout=10s" in seen["cmd"] and seen["timeout"] == 15

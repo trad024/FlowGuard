@@ -7,7 +7,8 @@ evaluated offline on the identical data.
 
 writes evaluation/recordings/<recording-id>/ (gitignored):
     manifest.json            window, sources with counts, Prometheus selectors, git commit,
-                             whether the run is valid; nothing about what was injected
+                             whether the run is valid and why not; nothing about what was
+                             injected
     ground_truth.json        what really happened: ground truth, spec, what L0 did (D25: the
                              only file of a recording that holds it; also in the ground-truth DB)
     prometheus/<name>.json   raw samples of each selector over the window (not resampled)
@@ -21,6 +22,12 @@ writes evaluation/recordings/<recording-id>/ (gitignored):
     audit-events.jsonl       audit-log events inside the window
     ci/<run>/                run, jobs (with step results), annotations; job logs when the
                              GitHub token may read them (otherwise marked unavailable)
+
+A cluster recording (every family but ci and pipeline) is invalid when a Prometheus source
+failed or returned no data in its window (`source_problems`; only the L0 alerts may be empty,
+as no alert may fire); the reasons go to the manifest, ground_truth.json and the ground-truth DB.
+Once Prometheus cannot be reached, the remaining sources are not queried, so a cluster that
+disappeared costs one timeout, not one per source.
 
 Standard library only.
 """
@@ -76,6 +83,8 @@ SELECTORS = {
 
 
 ROLLOUT_EVENTS = "rollout-events.jsonl"
+NO_CLUSTER = {"ci", "pipeline"}  # branch-only families: Prometheus says nothing about them
+MAY_BE_EMPTY = {"alerts"}  # no L0 alert may fire in a window; every other source has data
 
 
 def rollout_view(rollout: dict) -> dict:
@@ -205,8 +214,11 @@ def http_json(url: str, headers: dict | None = None, timeout: int = 30):
 def record_prometheus(out: Path, start: datetime, end: datetime, base: str = PROMETHEUS) -> dict:
     """Raw samples: an instant query of `selector[window]` at the window's end."""
     seconds = max(1, int((end - start).total_seconds()))
-    summary = {}
+    summary, unreachable = {}, None
     for name, selector in SELECTORS.items():
+        if unreachable:
+            summary[name] = {"error": f"not queried: Prometheus unreachable ({unreachable})"}
+            continue
         query = f"{selector}[{seconds}s]"
         url = f"{base}/api/v1/query?" + urllib.parse.urlencode(
             {"query": query, "time": end.timestamp()}
@@ -220,9 +232,27 @@ def record_prometheus(out: Path, start: datetime, end: datetime, base: str = PRO
                 json.dumps({"query": query, "time": iso(end), "result": result}), encoding="utf-8"
             )
             summary[name] = {"series": len(result), "samples": samples}
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+        except urllib.error.HTTPError as exc:  # Prometheus answered: only this query failed
+            summary[name] = {"error": str(exc)[:200]}
+        except (urllib.error.URLError, OSError) as exc:  # down, refused or timed out
+            summary[name] = {"error": str(exc)[:200]}
+            unreachable = str(exc)[:100]
+        except ValueError as exc:
             summary[name] = {"error": str(exc)[:200]}
     return summary
+
+
+def source_problems(summary: dict) -> list[str]:
+    """Why a cluster recording's Prometheus data cannot be scored: a failed source, or one with
+    no samples in the window (the L0 alerts excepted)."""
+    problems = []
+    for name in SELECTORS:
+        got = summary.get(name) or {"error": "not recorded"}
+        if "error" in got:
+            problems.append(f"prometheus {name}: {got['error']}")
+        elif not got.get("samples") and name not in MAY_BE_EMPTY:
+            problems.append(f"prometheus {name}: no data in the window")
+    return problems
 
 
 class _TokenStaysOnHost(urllib.request.HTTPRedirectHandler):
@@ -344,14 +374,15 @@ def record(
     truth_db=None,
     github: GitHubReader | None = None,
     prometheus: str = PROMETHEUS,
-    out_root: Path = RECORDINGS,
+    out_root: Path | None = None,
     recording_id: str | None = None,
 ) -> Path:
     """Write one recording and return its folder. `evaluation` holds the spec, what L0 did
     (`observed`, `l0_correct`) and `valid`: they go to ground_truth.json and, with
-    `truth_db` (a GroundTruthDB), to the ground-truth DB, never to the manifest."""
+    `truth_db` (a GroundTruthDB), to the ground-truth DB, never to the manifest. `out_root`
+    is read when called (default RECORDINGS), so a caller can send a run elsewhere."""
     rid = recording_id or f"{scenario_id}-{start.strftime('%Y%m%dT%H%M%SZ')}"
-    out = out_root / rid
+    out = (out_root or RECORDINGS) / rid
     out.mkdir(parents=True, exist_ok=True)
     sources = {
         "prometheus": record_prometheus(out, start, end, prometheus),
@@ -377,8 +408,13 @@ def record(
         },
         "ci": record_ci(out, list(ci_runs), github) if ci_runs and github else [],
     }
-    evaluation = evaluation or {}
+    evaluation = dict(evaluation or {})
     valid = bool(evaluation.get("valid", True))
+    family = (evaluation.get("spec") or {}).get("family")
+    problems = [] if family in NO_CLUSTER else source_problems(sources["prometheus"])
+    if problems:  # J2: unscorable data makes the run invalid, with its reasons
+        valid = False
+        evaluation["observed"] = {**(evaluation.get("observed") or {}), "invalid_data": problems}
     truth = {"ground_truth": ground_truth or {}, **evaluation, "valid": valid}
     (out / "ground_truth.json").write_text(
         json.dumps(truth, indent=2, sort_keys=True, default=str), encoding="utf-8"
@@ -402,6 +438,7 @@ def record(
         "prometheus_selectors": SELECTORS,
         "sources": sources,
         "valid": valid,
+        "invalid_reasons": problems,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return out

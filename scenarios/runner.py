@@ -742,6 +742,20 @@ def stable_pods(namespace: str, stable_hash: str) -> list[dict]:
     ]
 
 
+def cluster_reachable(timeout_s: int = 10) -> bool:
+    """J2: whether the cluster's API server answers, within a bounded time."""
+    try:
+        done = subprocess.run(
+            ["kubectl", "get", "--raw=/readyz", f"--request-timeout={timeout_s}s"],
+            capture_output=True,
+            text=True,
+            timeout=timeout_s + 5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
+
+
 def utc() -> datetime:
     return datetime.now(UTC)
 
@@ -779,6 +793,7 @@ class Runner:
         ci_agents: str = "off",
         approval_port: int = 8765,
         approval_timeout_s: float = 3600,
+        recordings: Path | None = None,
     ):
         if ci_agents not in ci_live.MODES:
             raise ValueError(f"ci_agents must be one of {ci_live.MODES}")
@@ -789,6 +804,7 @@ class Runner:
         # D64: the agents decide once at L5 on a failed ci run, with a dry-run or live executor
         self.ci_agents = ci_agents
         self.approval = (approval_port, approval_timeout_s)
+        self.recordings = recordings  # None: the recorder's default (evaluation/recordings)
         self.ci_diagnose = None  # L5's Diagnose, built before anything is pushed
         self.run_id = run_id or new_run_id()
         self.rng = random.Random(self.run_id)
@@ -856,6 +872,13 @@ class Runner:
                 loadgen_files.append(self.run_runtime())
             else:
                 ci_runs, loadgen_files = self.run_commit()
+        except Exception as exc:
+            # J2: a cluster that disappeared mid-scenario ends the run, recorded as invalid;
+            # any other error is raised as before
+            if self.spec["family"] in NO_CLUSTER or cluster_reachable():
+                raise
+            self.observed["cluster_lost"] = f"{type(exc).__name__}: {str(exc)[:200]}"
+            self.event("cluster_lost", error=self.observed["cluster_lost"])
         finally:
             end = utc()
             correct = l0_correct(self.truth["expected_l0"], self.observed.get("l0", "unknown"))
@@ -867,7 +890,7 @@ class Runner:
             if self.mode == "agents" and self.observed.get("canary") != "promoted":
                 # D54: the canary did not reach 100%, so the recording lacks part of its path
                 self.observed["canary_incomplete"] = True
-            if "alerts_not_quiet" in self.observed:
+            if {"alerts_not_quiet", "cluster_lost"} & set(self.observed):
                 correct = None
             self.event(
                 "scenario_finished",
@@ -887,11 +910,17 @@ class Runner:
                 "spec": self.spec,
                 "observed": self.observed,
                 "l0_correct": correct,
-                "valid": not {"host_suspended", "alerts_not_quiet", "canary_incomplete"}
+                "valid": not {
+                    "host_suspended",
+                    "alerts_not_quiet",
+                    "canary_incomplete",
+                    "cluster_lost",
+                }
                 & set(self.observed),
             },
             truth_db=self.truth_db,
             github=recorder.GitHubReader(cfg.repo, cfg.token),
+            out_root=self.recordings,
             recording_id=self.run_id,
         )
 
