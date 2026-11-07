@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+from conftest import fitted_calibrator  # D67: fitted, never-confident
 
 import release_replay as rr
 from flowguard import release
@@ -270,7 +271,17 @@ def scored(tmp_path_factory):
     write_recording(root, "r-invisible", bad=True, band="below", l0="aborted", abort_at=70)
     write_recording(root, "r-good", bad=False)
     write_recording(root, "r-slow", bad=True, band="near", slow=0.05)  # L0 promoted it
-    return rr.score(rr.release_runs([root]))
+    # Module scope runs before the function-scoped calibrator fixtures: give the loader fitted,
+    # never-confident calibrators here, and never this machine's state/ (CI has none, D67)
+    from flowguard import calibrators
+
+    def for_level(level, root=None):
+        return {} if level == "L0" else {a: fitted_calibrator() for a in calibrators.CALIBRATED}
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(calibrators, "ROOT", tmp_path_factory.mktemp("no-state"))
+        mp.setattr(calibrators, "for_level", for_level)
+        return rr.score(rr.release_runs([root]))
 
 
 def test_every_level_is_scored_per_band_on_the_same_recording(scored):
