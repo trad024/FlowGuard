@@ -31,6 +31,16 @@ def require_step_11(confirmed: bool, what: str) -> None:
     heldout.diagnose_frozen()
 
 
+def require_stage_b(confirmed: bool, what: str) -> None:
+    """D69 stage B (held-out recordings, DSO5, DSO6): --confirm-step-11 first, then eval-freeze
+    with agents/ unchanged, the Diagnose freeze and the committed seed."""
+    if not confirmed:
+        raise SystemExit(f"{what} scores held-out material: Step 11 only, with {FLAG}")
+    heldout.frozen_agents()
+    heldout.diagnose_frozen()
+    heldout.checked_seed()
+
+
 def test_templates(split_path: Path = SPLIT) -> set[str]:
     split = json.loads(split_path.read_text(encoding="utf-8"))
     return {t for t, s in split["templates"].items() if s == "test"}

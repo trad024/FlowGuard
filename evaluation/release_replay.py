@@ -39,6 +39,13 @@ Rates with n and a Wilson interval; L0 vs L3 and L3 vs L4 paired by exact McNema
 wrong; every result per band; L3's wrong-decision rate on the node-stress cases (H4's count,
 D44). All of it is labelled "dev, in-sample".
 
+Held-out mode (Step 11, `score --heldout --confirm-step-11 [--records FILE]`): only with
+eval-freeze, the Diagnose freeze and the committed seed (heldout_guard.require_stage_b); never
+`calibrate` (the calibration is frozen). Results are labelled "held-out" and `--records` writes
+one replay record per recording and level in the format report_data.load reads (`records`):
+`release_outcome` (aborted, escalated or promoted), `caught_before_full`, and
+`time_to_rollback_s` when rolled back. A truncated recording or one without a canary gets none.
+
 calibrate: the label scores of every promote and rollback proposal at L3, labelled by the
 recording (rollback if bad), fit the conformal calibrator Release's proposals are gated with
 (D9); coverage is reported leave-one-recording-out.
@@ -57,6 +64,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "evaluation")]
 
+import heldout_guard  # noqa: E402
 import l0_baseline  # noqa: E402
 import l0_canary  # noqa: E402
 import monitor_replay  # noqa: E402
@@ -71,6 +79,8 @@ from flowguard.orchestrator import Orchestrator, level  # noqa: E402
 from flowguard.stubs import Diagnose  # noqa: E402
 
 LABEL = "dev, in-sample"
+HELDOUT_LABEL = "held-out"
+RECORDED_OUTCOME = {"rollback": "aborted", "escalate": "escalated", "promoted": "promoted"}
 UP_LOOKBACK_S = 20.0  # pods up: a sample older than this no longer counts
 READY_LAG_S = 7.5  # half of Prometheus' 15 s scrape interval (infra/monitoring/prometheus)
 STEP_PODS = {20: 2, 50: 5}  # canary pods up when a step's weight is reached (10 replicas)
@@ -86,12 +96,14 @@ EPSILON = 0.1  # conformal coverage target 90%
 # ---------------------------------------------------------------- recordings
 
 
-def release_runs(paths: list[Path]) -> list[dict]:
+def release_runs(paths: list[Path], heldout: bool = False) -> list[dict]:
     runs = []
     for path in paths:
         runs += [
             r
-            for r in monitor_replay.load_runs(monitor_replay.open_recordings(path))
+            for r in monitor_replay.load_runs(
+                monitor_replay.open_recordings(path, heldout), heldout
+            )
             if r["family"] == "release"
         ]
     ids = [r["id"] for r in runs]
@@ -419,6 +431,25 @@ def rate(k: int, n: int) -> dict:
     return monitor_replay.rate(k, n)
 
 
+def records(result: dict) -> list[dict]:
+    """Replay records (report_data.load) from a score's per-recording results: one per
+    recording and level; a truncated outcome gives none."""
+    out = []
+    for rid, per in sorted(result["per_recording"].items()):
+        for name in ("L0", "L3", "L4"):
+            outcome = (per.get(name) or {}).get("outcome")
+            if outcome not in RECORDED_OUTCOME:
+                continue
+            observed = {
+                "release_outcome": RECORDED_OUTCOME[outcome],
+                "caught_before_full": stopped(outcome),
+            }
+            if outcome == "rollback" and per[name].get("t") is not None:
+                observed["time_to_rollback_s"] = float(per[name]["t"])
+            out.append({"scenario_id": rid, "level": name, "observed": observed})
+    return out
+
+
 def summary(runs: list[dict], res: dict[str, dict]) -> dict:
     bad = [r for r in runs if r["ground_truth"].get("bad_release")]
     good = [r for r in runs if not r["ground_truth"].get("bad_release")]
@@ -495,7 +526,7 @@ def node_stress(runs: list[dict], res: dict[str, dict]) -> dict:
     }
 
 
-def score(runs: list[dict]) -> dict:
+def score(runs: list[dict], heldout: bool = False) -> dict:
     results: dict[str, dict[str, dict]] = {"L0": {}, "L3": {}, "L4": {}}
     live, idx_of, sources, step_sources = {}, {}, {}, {}
     metrics = l0_canary.load_template()
@@ -513,7 +544,7 @@ def score(runs: list[dict]) -> dict:
                 results[name][r["id"]] = replay(r, name, folder, idx)
     usable = [r for r in runs if results["L3"][r["id"]]["outcome"] != "no_canary"]
     return {
-        "label": LABEL,
+        "label": HELDOUT_LABEL if heldout else LABEL,
         "recordings": len(runs),
         "agents_mode": sum(r["observed"].get("mode") == "agents" for r in runs),
         "scored": len(usable),
@@ -597,9 +628,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=("score", "calibrate"))
     parser.add_argument("recordings", type=Path, nargs="+")
     parser.add_argument("--out", type=Path, default=OUT)
+    parser.add_argument("--heldout", action="store_true", help="Step 11: held-out recordings")
+    parser.add_argument("--confirm-step-11", action="store_true")
+    parser.add_argument("--records", type=Path, help="held-out mode: replay records (JSONL)")
     args = parser.parse_args(argv)
-    runs = release_runs(args.recordings)
-    result = score(runs)
+    if args.heldout:
+        if args.command != "score":
+            raise SystemExit("held-out recordings are only scored, never calibrated on")
+        heldout_guard.require_stage_b(args.confirm_step_11, "release_replay --heldout")
+    runs = release_runs(args.recordings, args.heldout)
+    result = score(runs, heldout=args.heldout)
+    if args.heldout and args.records:
+        args.records.parent.mkdir(parents=True, exist_ok=True)
+        lines = [json.dumps(r) for r in records(result)]
+        args.records.write_text("".join(x + chr(10) for x in lines), encoding="utf-8")
     if args.command == "calibrate":
         result = {"calibration": calibrate(result["per_recording"]), **result}
     args.out.parent.mkdir(parents=True, exist_ok=True)

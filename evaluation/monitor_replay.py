@@ -3,6 +3,8 @@
     python evaluation/monitor_replay.py fit   <folder or zip> [...]   # writes the model file
     python evaluation/monitor_replay.py score <folder or zip> [...] [--out FILE]
     python evaluation/monitor_replay.py p1    <folder or zip> [...]   # P1 stress thresholds
+    python evaluation/monitor_replay.py score <held-out folder> --heldout --confirm-step-11 \
+        --records FILE                                    # Step 11 (D69 stage B)
 
 Several folders are read as one set (the dev recordings and the normal-traffic window arrive
 separately); nothing is copied.
@@ -40,6 +42,13 @@ the rule frozen 2026-10-28 (CI_L0): a job longer than 3x its dev median, or 3 fa
 row on a branch. L1 adds the duration detector (median + k x robust spread, k by leave-one-out).
 Failed runs are incidents at every level (D49) and are only counted. Held-out recordings are
 refused.
+
+Held-out mode (Step 11, `--heldout`): only with --confirm-step-11, eval-freeze, the Diagnose
+freeze and the committed seed (heldout_guard.require_stage_b). The model is the frozen one,
+never refitted; results are labelled "held-out", false alerts are counted over each whole
+normal-traffic window (the model never saw it), and `--records` writes one replay record per
+recording and level in the format report_data.load reads (`records`): runtime and pipeline
+`detected` (and `mttd_s` when detected), normal traffic `false_alerts`.
 """
 
 from __future__ import annotations
@@ -55,9 +64,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "evaluation")]
 
+import heldout_guard  # noqa: E402
 import l0_baseline  # noqa: E402
 import replay  # noqa: E402
 import stats  # noqa: E402
+
+DEV_LABEL = "dev, in-sample"
+HELDOUT_LABEL = "held-out"
 from flowguard import series  # noqa: E402
 from flowguard.agent_io import AgentInput  # noqa: E402
 from flowguard.contracts import Event  # noqa: E402
@@ -83,9 +96,10 @@ def _json(path: Path):
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
-def open_recordings(path: Path) -> Path:
-    """A folder as is; a zip extracted (zip-slip safe) into a temporary folder."""
-    if "heldout" in str(path).lower():
+def open_recordings(path: Path, heldout: bool = False) -> Path:
+    """A folder as is; a zip extracted (zip-slip safe) into a temporary folder. Held-out
+    material only in held-out mode."""
+    if not heldout and "heldout" in str(path).lower():
         raise ValueError("held-out material is never replayed before Step 11")
     if path.suffix.lower() != ".zip":
         return path
@@ -96,12 +110,12 @@ def open_recordings(path: Path) -> Path:
     return dest
 
 
-def load_runs(root: Path) -> list[dict]:
+def load_runs(root: Path, heldout: bool = False) -> list[dict]:
     """Valid recordings under root, with what scoring needs (and only scoring reads)."""
     runs = []
     for manifest_path in sorted(root.rglob("manifest.json")):
         rec = manifest_path.parent
-        if "heldout" in str(rec.relative_to(root)).lower():
+        if not heldout and "heldout" in str(rec.relative_to(root)).lower():
             raise ValueError(f"held-out recording refused: {rec}")
         truth, manifest = _json(rec / "ground_truth.json"), _json(manifest_path)
         if truth is None or not truth.get("valid", True) or not manifest.get("valid", True):
@@ -268,7 +282,27 @@ def runtime_set(runs: list[dict]) -> tuple[list[dict], list[str]]:
     ]
 
 
-def score_runtime(runs: list[dict], model: RuntimeModel, cache: dict | None = None) -> dict:
+def whole_windows(runs: list[dict]) -> dict[str, tuple[float, float]]:
+    """Held-out normal traffic: the model was never fitted on it, so every second counts."""
+    return {r["id"]: r["window"] for r in runs if r["family"] == "normal"}
+
+
+def runtime_times(runs: list[dict], model: RuntimeModel, cache: dict) -> dict[str, dict]:
+    """Alert times per level for the runtime and normal recordings L0 can be scored on."""
+    scored, _ = runtime_set(runs)
+    l0 = {r["id"]: l0_times(r) for r in scored}
+    det = {}
+    for r in scored:
+        if r["id"] not in cache:
+            cache[r["id"]] = snapshots(r)
+        det[r["id"]] = detector_times(model, cache[r["id"]])
+    l1 = {i: sorted(set(l0[i]) | set(det[i])) for i in l0}
+    return {"L0": l0, "L1": l1, "detector": det}
+
+
+def score_runtime(
+    runs: list[dict], model: RuntimeModel, cache: dict | None = None, heldout: bool = False
+) -> dict:
     cache = cache if cache is not None else {}
     scored, unmeasured = runtime_set(runs)
     l0 = {r["id"]: l0_times(r) for r in scored}
@@ -278,10 +312,10 @@ def score_runtime(runs: list[dict], model: RuntimeModel, cache: dict | None = No
             cache[r["id"]] = snapshots(r)
         det[r["id"]] = detector_times(model, cache[r["id"]])
     l1 = {i: sorted(set(l0[i]) | set(det[i])) for i in l0}
-    spans = held_back(scored, model)
+    spans = whole_windows(scored) if heldout else held_back(scored, model)
     levels = {"L0": l0, "L1": l1, "detector": det}
     cases = {name: outcomes(scored, times) for name, times in levels.items()}
-    out = {"label": "dev, in-sample"}
+    out = {"label": HELDOUT_LABEL if heldout else DEV_LABEL}
     out.update(
         {name: summary(cases[name], false_alerts(scored, levels[name], spans)) for name in levels}
     )
@@ -295,8 +329,10 @@ def score_runtime(runs: list[dict], model: RuntimeModel, cache: dict | None = No
     }
     out["not_scored"] = {"no ALERTS series recorded (L0 unmeasurable)": unmeasured}
     out["notes"] = [
-        "dev, in-sample: the grid was tuned on these incidents; H1 is tested on the held-out "
-        "set at Step 11",
+        "held-out: the frozen model on recordings it never saw"
+        if heldout
+        else "dev, in-sample: the grid was tuned on these incidents; H1 is tested on the "
+        "held-out set at Step 11",
         "false alerts are scored only on normal-traffic time the model was not fitted on",
         "without_carry_over: sensitivity, leaves out incidents with an L0 alert already firing "
         "before the fault (left over from the previous run); the primary result keeps them",
@@ -401,11 +437,9 @@ def streak_runs(ci: list[tuple[dict, list[dict]]], by_job: bool, streak: int) ->
     return flagged
 
 
-def score_ci(runs: list[dict], model: CIModel | None) -> dict:
-    """Pipeline-family runs are the anomalies (a slow step, the run succeeds); other successful
-    runs are normal, each judged against the history without itself. Every run is judged once,
-    when its ci_run_completed event arrives (D49), so MTTD is the run's length. Failed runs are
-    incidents at every level (D49) and are counted apart. L1 = L0 plus the detector."""
+def ci_cases(runs: list[dict], model: CIModel | None) -> dict:
+    """Every successful CI run judged once at L0, L1 and by the detector alone: the run's MTTD
+    when flagged, else None; failed runs are only counted (D49)."""
     every = [(r, rj) for r in runs for rj in ci_runs(r)]
     events = {
         e.payload["params"].get("run_id"): e
@@ -416,8 +450,7 @@ def score_ci(runs: list[dict], model: CIModel | None) -> dict:
     history = job_durations([rj for r, rj in every if r["family"] != "pipeline"])
     l0_streak = streak_runs([rj for _, rj in every], False, CI_L0["failure_streak"])
     l1_streak = streak_runs([rj for _, rj in every], True, model.streak) if model else set()
-    times: dict[str, list] = {"L0": [], "L1": [], "detector": []}
-    labels, failed = [], 0
+    cases, failed = [], 0
     for r, (meta, jobs) in every:
         when = span(jobs)
         if meta.get("conclusion") == "failure" or when is None or meta.get("id") not in events:
@@ -429,10 +462,23 @@ def score_ci(runs: list[dict], model: CIModel | None) -> dict:
         hit1 = bool(model) and (
             detector_flags(model, hist, events[meta["id"]]) or meta.get("id") in l1_streak
         )
-        labels.append(r["family"] == "pipeline")
-        times["L0"].append(mttd if hit0 else None)
-        times["detector"].append(mttd if hit1 else None)
-        times["L1"].append(mttd if hit0 or hit1 else None)
+        cases.append({"id": r["id"], "family": r["family"], "anomaly": r["family"] == "pipeline",
+                      "L0": mttd if hit0 else None, "detector": mttd if hit1 else None,
+                      "L1": mttd if hit0 or hit1 else None})  # fmt: skip
+    return {"cases": cases, "history": history, "failed": failed,
+            "streaks": {"L0": l0_streak, "detector": l1_streak}}  # fmt: skip
+
+
+def score_ci(runs: list[dict], model: CIModel | None) -> dict:
+    """Pipeline-family runs are the anomalies (a slow step, the run succeeds); other successful
+    runs are normal, each judged against the history without itself. Every run is judged once,
+    when its ci_run_completed event arrives (D49), so MTTD is the run's length. Failed runs are
+    incidents at every level (D49) and are counted apart. L1 = L0 plus the detector."""
+    judged = ci_cases(runs, model)
+    labels = [c["anomaly"] for c in judged["cases"]]
+    times = {name: [c[name] for c in judged["cases"]] for name in ("L0", "L1", "detector")}
+    history, failed = judged["history"], judged["failed"]
+    l0_streak, l1_streak = judged["streaks"]["L0"], judged["streaks"]["detector"]
 
     def block(found: list) -> dict:
         hits = [m for m, bad in zip(found, labels, strict=True) if bad and m is not None]
@@ -573,10 +619,38 @@ def fit(runs: list[dict], grid: dict = GRID, budget: float = FA_BUDGET) -> Monit
     return MonitorModel(runtime=runtime, ci=ci)
 
 
-def score(runs: list[dict], model: MonitorModel) -> dict:
-    out = {"recordings": len(runs)}
-    out["runtime"] = score_runtime(runs, model.runtime) if model.runtime else "no runtime model"
+def score(runs: list[dict], model: MonitorModel, heldout: bool = False) -> dict:
+    out = {"label": HELDOUT_LABEL if heldout else DEV_LABEL, "recordings": len(runs)}
+    out["runtime"] = (
+        score_runtime(runs, model.runtime, heldout=heldout) if model.runtime else "no runtime model"
+    )
     out["ci"] = score_ci(runs, model.ci)
+    return out
+
+
+def records(runs: list[dict], model: MonitorModel) -> list[dict]:
+    """Replay records (report_data.load): one per recording and level, L0 and L1. Runtime
+    incidents and pipeline anomalies: `detected`, and `mttd_s` when detected; normal traffic:
+    `false_alerts`, alerting episodes over the whole window (held-out mode)."""
+    out = []
+    if model.runtime:
+        scored, _ = runtime_set(runs)
+        times = runtime_times(runs, model.runtime, {})
+        spans = whole_windows(scored)
+        for level in ("L0", "L1"):
+            for rid, (_, hit, mttd) in sorted(outcomes(scored, times[level]).items()):
+                observed = {"detected": hit, **({"mttd_s": float(mttd)} if hit else {})}
+                out.append({"scenario_id": rid, "level": level, "observed": observed})
+            for rid, (lo, hi) in sorted(spans.items()):
+                alerts = episodes([t for t in times[level].get(rid, []) if lo <= t <= hi])
+                out.append({"scenario_id": rid, "level": level,
+                            "observed": {"false_alerts": alerts}})  # fmt: skip
+    pipeline = [c for c in ci_cases(runs, model.ci)["cases"] if c["anomaly"]]
+    for level in ("L0", "L1"):
+        for c in pipeline:
+            hit = c[level] is not None
+            observed = {"detected": hit, **({"mttd_s": float(c[level])} if hit else {})}
+            out.append({"scenario_id": c["id"], "level": level, "observed": observed})
     return out
 
 
@@ -586,8 +660,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("recordings", type=Path, nargs="+", help="folders or zips")
     parser.add_argument("--model", type=Path, default=MODEL_FILE)
     parser.add_argument("--out", type=Path, default=OUT)
+    parser.add_argument("--heldout", action="store_true", help="Step 11: held-out recordings")
+    parser.add_argument("--confirm-step-11", action="store_true")
+    parser.add_argument("--records", type=Path, help="held-out mode: replay records (JSONL)")
     args = parser.parse_args(argv)
-    runs = [r for path in args.recordings for r in load_runs(open_recordings(path))]
+    if args.heldout:
+        if args.command != "score":
+            raise SystemExit("held-out recordings are only scored, never fitted on")
+        heldout_guard.require_stage_b(args.confirm_step_11, "monitor_replay --heldout")
+    runs = [
+        r
+        for path in args.recordings
+        for r in load_runs(open_recordings(path, args.heldout), args.heldout)
+    ]
     if len({r["id"] for r in runs}) != len(runs):
         raise ValueError("the same recording id appears twice")
     if args.command == "fit":
@@ -596,7 +681,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "p1":
         print(json.dumps(p1_thresholds(runs), indent=1))
         return 0
-    result = score(runs, MonitorModel.load(args.model))
+    model = MonitorModel.load(args.model)
+    result = score(runs, model, heldout=args.heldout)
+    if args.heldout and args.records:
+        args.records.parent.mkdir(parents=True, exist_ok=True)
+        rows = records(runs, model)
+        args.records.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps(result, indent=1))
