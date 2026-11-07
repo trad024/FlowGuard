@@ -6,6 +6,23 @@ of normal traffic, resumably.
     python scenarios/pilot.py mode agents         # staging's canary steps: agents or l0 (D53)
     python scenarios/pilot.py scenarios --agents --dir scenarios/dev/node-stress
                                                   # release specs under agents-mode (D54)
+    python scenarios/pilot.py heldout --confirm-step-11
+                                                  # Step 11: the held-out set, in run order
+
+Held-out driver (Step 11, D65): the specs of scenarios/heldout/ run in the order of its
+run-order.txt, each family in its own mode:
+    release   recorded under the agents-mode canary (D54); L0 is replayed offline
+    ci        live at L5 with the live executor (D64); no cluster
+    pipeline  on a branch; a run whose CI succeeds is deployed by the deployer, so staging's
+              Rollout is put in L0 mode (its own analysis) first
+    security  the same: commit delivery, deployed under the L0 Rollout
+    runtime   no switch: a runtime fault deploys nothing, so the canary mode is irrelevant and
+              switching it would only patch the Rollout between scenarios
+It refuses without --confirm-step-11, the frozen state (pre-registration frozen, eval-freeze
+and diagnose-freeze unchanged) and the committed seed. It is resumable: a spec with a valid
+recorded run (in the family's mode, with its recording folder present) is skipped; a run
+that failed, was interrupted or was recorded invalid is run again (never dropped), up to
+QUIET_ATTEMPTS when alerts are not quiet.
 
 A spec is skipped when the ground-truth DB already holds a valid run of it, so an interrupted
 pilot continues where it stopped. The normal-traffic window is recorded like a scenario
@@ -91,6 +108,95 @@ def run_scenarios(specs: list[Path], mode: str = "l0") -> None:
             print(json.dumps({"failed": spec["id"], "error": str(exc)[:300]}), flush=True)
 
 
+# ---------------------------------------------------------------- held-out driver (J1)
+
+
+HELDOUT = ROOT / "scenarios" / "heldout"
+# Staging's canary mode per family; None: leave it as it is (see the module docstring)
+CANARY_MODE = {"release": "agents", "pipeline": "l0", "security": "l0", "runtime": None, "ci": None}
+RUNNER_MODE = {"release": "agents"}  # every other family records with the default runner mode
+
+
+def require_heldout(confirmed: bool) -> None:
+    """Step 11 only: --confirm-step-11, the frozen state and the committed seed."""
+    if not confirmed:
+        raise SystemExit("held-out scenarios run only at Step 11 (--confirm-step-11)")
+    import heldout
+
+    heldout.frozen_agents()  # eval-freeze, agents/ unchanged since
+    heldout.diagnose_frozen()  # pre-registration frozen, Diagnose and artifacts unchanged
+    heldout.checked_seed()
+
+
+def run_order(folder: Path = HELDOUT) -> list[Path]:
+    """The specs in run-order.txt's order; every listed id must have its spec."""
+    ids = [line.strip() for line in (folder / "run-order.txt").read_text().splitlines()]
+    paths = [folder / f"{i}.yaml" for i in ids if i]
+    if missing := [p.name for p in paths if not p.is_file()]:
+        raise SystemExit(f"run-order.txt names specs that are missing: {missing[:5]}")
+    return paths
+
+
+def recorded(truth: groundtruth.GroundTruthDB, spec_id: str, family: str) -> bool:
+    """A valid run of the spec in its family's mode, with its recording folder present."""
+    with truth._connect() as db:
+        rows = db.execute(
+            "SELECT observed, recording FROM runs WHERE spec_id = ? AND valid = 1", (spec_id,)
+        ).fetchall()
+    for observed, folder in rows:
+        mode = (json.loads(observed or "{}") or {}).get("mode")
+        if (mode == "agents") != (RUNNER_MODE.get(family) == "agents"):
+            continue
+        if folder and Path(folder).is_dir():
+            return True
+    return False
+
+
+def runner_for(spec: dict, recordings: Path | None, ci_agents: str = "live"):
+    family = spec["family"]
+    if family == "ci":
+        return runner.Runner(spec, ci_agents=ci_agents, recordings=recordings)
+    return runner.Runner(spec, mode=RUNNER_MODE.get(family, "l0"), recordings=recordings)
+
+
+def run_heldout(
+    paths: list[Path],
+    recordings: Path | None = None,
+    ci_agents: str = "live",
+    truth: groundtruth.GroundTruthDB | None = None,
+    set_mode=None,
+    say=print,
+) -> list[dict]:
+    """Each spec in order: skipped if validly recorded, else run (alerts not quiet: retried)."""
+    truth = truth or groundtruth.GroundTruthDB.open()
+    set_mode = set_mode or (lambda mode: runner.set_canary_mode("staging", mode))
+    out, current = [], None
+    for path in paths:
+        spec = runner.load_spec(path)
+        family = spec["family"]
+        if recorded(truth, spec["id"], family):
+            out.append({"spec": spec["id"], "skipped": "valid run recorded"})
+            continue
+        if (mode := CANARY_MODE[family]) and mode != current:
+            set_mode(mode)
+            current = mode
+        started = time.time()
+        line = {"spec": spec["id"], "family": family, "canary_mode": current}
+        try:
+            for attempt in range(1, QUIET_ATTEMPTS + 1):
+                run = runner_for(spec, recordings, ci_agents)
+                folder = run.run()
+                line.update(recording=Path(folder).name, attempt=attempt)
+                if "alerts_not_quiet" not in run.observed:
+                    break
+        except Exception as exc:  # recorded as failed; run again on the next pass
+            line["failed"] = str(exc)[:300]
+        line["seconds"] = round(time.time() - started)
+        say(json.dumps(line))
+        out.append(line)
+    return out
+
+
 def run_normal(hours: float, env: str = "staging") -> Path:
     """Load with no fault for `hours`, then record the window."""
     run_id = runner.new_run_id()
@@ -130,10 +236,16 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--agents", action="store_true", help="record under agents-mode (D54)")
     n = sub.add_parser("normal")
     n.add_argument("--hours", type=float, default=4)
+    h = sub.add_parser("heldout", help="Step 11: the held-out specs in run order")
+    h.add_argument("--confirm-step-11", action="store_true")
     m = sub.add_parser("mode")
     m.add_argument("mode", choices=("agents", "l0"))
     m.add_argument("--env", default="staging")
     args = parser.parse_args(argv)
+    if args.cmd == "heldout":
+        require_heldout(args.confirm_step_11)
+        run_heldout(run_order())
+        return 0
     if args.cmd == "mode":
         runner.set_canary_mode(args.env, args.mode)
         print(json.dumps({"mode": runner.canary_mode(deployer.Cluster(args.env).rollout())}))
