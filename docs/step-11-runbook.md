@@ -1,180 +1,220 @@
 # Step 11 runbook: the held-out evaluation
 
 The operator's procedure for Step 11. Sources:
-- [`preregistration.yaml`](preregistration.yaml), version 1.0, frozen 2026-11-06 (`04dcd41`);
+- [`preregistration.yaml`](preregistration.yaml), version 1.3 (frozen 2026-11-06; amendments of
+  2026-11-07 and 2026-11-08: D66 request cap, D67 calibrated Diagnose confidence, 6 lanes, the
+  Step 11 environment, D69 staged harness freeze);
+- the decision log in [`blueprint-v2.md`](blueprint-v2.md) (D63 to D69 for this step);
 - [`step-11-analysis.md`](step-11-analysis.md);
-- the code under `scenarios/` and `evaluation/`.
+- the code under `scenarios/`, `evaluation/` and `scripts/`.
 
-Commands are copied from the code's docstrings and argument parsers. Anything the code does not
-provide is marked **TO CHECK**: build or confirm it before relying on this runbook. Commands are
-PowerShell from the repository root with the virtual environment active. The bash forms are the
-same with `python` and forward slashes.
+Commands are copied from the code's docstrings and argument parsers. Anything not yet confirmed
+is marked **TO CHECK**. Commands are PowerShell from the repository root with
+`$env:PYTHONPATH = "agents"` (or the editable install); the bash forms are the same with
+`python` and forward slashes.
 
-Never print or open the held-out seed, `scenarios/heldout/` or `evaluation/runs/groundtruth.db`
-outside the scoring step. The generator and the report read them; the operator does not.
+Never print or open the held-out seed, `scenarios/heldout/`, `evaluation/runs/groundtruth.db`
+or a held-out output before the scoring step. The generator, the runners and the report read
+them; the operator does not. Held-out Diagnose runs are blind (D69): they print progress only.
 
 ## 1. Preconditions
 
-All of these must hold before `heldout.py generate`.
-
-- [ ] **Pre-registration frozen.** `status: frozen`, `version: "1.0"`, `amendments: []`. A
-  change after freezing is a dated amendment, listed in the report (`freeze_rule`).
-- [ ] **`diagnose-freeze` tag** on origin (it exists, at `04dcd41`, `git ls-remote --tags
-  origin`), and the Diagnose code and artifacts unchanged since it. `heldout.diagnose_frozen()` checks both, and
-  `diagnose_dev.py` calls it for any split other than train and validation. TO CHECK: there is
-  no standalone command for this check.
-- [ ] **`eval-freeze` tag** on the commit that freezes all agent code, pushed. `generate` refuses
-  without it, or when `agents/` differs from it or holds untracked files
-  (`heldout.frozen_agents`). Creating the tag is not scripted: TO CHECK the exact commit and the
-  `git tag eval-freeze <sha>` / `git push origin eval-freeze` commands with the integrator.
+- [ ] **Environment (pre-registration 1.3, `environment`).** Python 3.13.0 with torch
+  2.11.0+cpu, transformers 5.13.0, tiktoken 0.14.0, chromadb 1.5.9, lightgbm 4.6.0,
+  scikit-learn 1.7.2 (and onnxruntime 1.31.0, numpy 2.3.4, drain3 0.9.11, langgraph 1.2.15):
+  the environment of the calibrations. No upgrade until Step 11 ends. The declared 3.11 range is
+  covered by CI only. Check: `py -c "import sys; print(sys.version)"` and
+  `py -m pip show torch transformers tiktoken chromadb lightgbm scikit-learn`.
+- [ ] **Pre-registration frozen,** `status: frozen`, version 1.3. A later change is a dated
+  amendment, listed in the report (`freeze_rule`).
+- [ ] **`diagnose-freeze`** on origin at `46c960c` (moved there by D67 from `f3d2ebf`, D66),
+  with the Diagnose code and artifacts unchanged since. `heldout.diagnose_frozen()` checks both;
+  `py scenarios\eval_freeze.py check` runs it among its checks.
 - [ ] **Seed matches its hash:** `py scenarios\heldout.py verify-seed` prints
   `seed matches the committed hash`. It never prints the seed.
-- [ ] **LLM lanes confirmed (D41).** The lane check runs at the start of
-  `py evaluation\diagnose_dev.py run`. It prints `lane_check`, `independent_lanes` and, when the
-  count changed, `independent_lanes_changed`. Record the number of independent lanes for the
-  report. TO CHECK: there is no lane check that runs without starting LLM calls.
-- [ ] **Write token valid.** `GITHUB_TOKEN_WRITE` expires **2026-11-28 21:08 UTC** (D63). Every
-  block that writes to GitHub (the live ci block, the DSO5 sequence, the cleanup) must finish
-  before then. Its write scope is verified by the first live pin, the D64 acceptance test.
-- [ ] **Free disk ≥ 40 GB** (the architect's threshold; no committed source). Check with
-  `Get-PSDrive C` and `docker system df`. For scale, the 10 recordings on the development
-  workstation take 43 MB (`du -sh evaluation/recordings`, 2026-11-06).
-- [ ] **Cluster healthy:**
-  1. `.\infra\scripts\smoke.ps1` passes every check;
-  2. `.\infra\scripts\check-resources.ps1` reports within the 4 GB budget;
-  3. staging is `Healthy` with its stable ReplicaSet serving. `pilot.py` heals it once with
-     load before each scenario (`pilot.healthy`).
-- [ ] **No scored results in Prometheus,** and `evaluation\results_exporter.py` stopped. The
-  runner refuses a cluster run while any `flowguard_result` series exists (`runner.run`).
-- [ ] **Laptop power:** sleep disabled for the run. A sleep invalidates the running scenario
-  (section 4).
+- [ ] **LLM lanes (D41, amended 2026-11-07): 6 lanes**, `GROQ_KEY_1` to `GROQ_KEY_5` and
+  `LLM_API_KEY`. Without any call: `py scenarios\eval_freeze.py lanes --expect 6` (names and key
+  format only, never a value). Whether the 6 keys are 6 independent organizations needs one
+  probe call per lane: the runners' lane check (`diagnose_dev.ready_lanes`, printed as
+  `lane_check` and `independent_lanes` at the start of every LLM run). Record that count for the
+  report. L5's live ci calls run on `LLM_API_KEY`.
+- [ ] **Write token valid.** `GITHUB_TOKEN_WRITE`: write verified 2026-11-07 (branch create and
+  delete, app-ci dispatch and cancel, the live pin), expires **2027-01-06 12:42:30 UTC** (D63).
+  It needs Contents, Pull requests and Actions read and write on trad024/FlowGuard.
+- [ ] **Free disk ≥ 40 GB** (an architect planning margin, not a measured need). Check with
+  `Get-PSDrive C` and `docker system df`. For scale, 10 dev recordings take 43 MB.
+- [ ] **Cluster healthy:** `.\infra\scripts\smoke.ps1` passes every check;
+  `.\infra\scripts\check-resources.ps1` within the 4 GB budget; staging `Healthy` and stable.
+- [ ] **No scored results in Prometheus** and `evaluation\results_exporter.py` stopped (the
+  runner refuses a cluster run otherwise, `runner.run`).
+- [ ] **No standalone deployer.** Do not run `ci\deployer.py run` during the held-out runs: it
+  releases the newest green app-ci run on `dev` to staging and prod. The runner deploys each
+  commit scenario itself (its own `scenario/<id>` branch, staging only); fix branches
+  (`fix/flowguard-eval-*`) and the DSO5 branches (`scenario/<mode>/dso5-*`) are never released.
+  Push nothing to `dev` under `app/`, `ci/` or the app-ci workflow until the cluster blocks end.
+- [ ] **Laptop power:** sleep disabled. A sleep invalidates the running scenario (section 4).
 
-## 2. Run order
+## 2. Order: two freeze stages (D69)
 
-Counts from the pre-registration. Times are estimates, marked with their source.
+| Stage | What | Frozen by | Order |
+|---|---|---|---|
+| A | The held-out Diagnose harness: `diagnose_heldout.py`, `diagnose_repeats.py`, `llm_provenance.py`, the toolkit's H3 path (`report_metrics.py`, `observations.py`, `report_data.py`) and what they reuse (`diagnose_dev.py`, `heldout_guard.py`, `logchunks.py`); `HARNESS_DIAGNOSE_PATHS` in `scenarios/heldout.py` | `harness-diagnose-freeze`, right before the first held-out Diagnose call | 1. K1 and K2 merged and reviewed; 2. lanes confirmed (D41); 3. `harness-diagnose-freeze`; 4. blocks 1 and 10 (allowed before eval-freeze by D39) |
+| B | Everything else (agents, scenario runner and driver, replays, DSO5, DSO6, report) | `eval-freeze`, before `generate` and the first cluster run | 5. `eval-freeze`; 6. block 0 (generate); 7. blocks 2 to 9; 8. block 11 |
+
+Tagging (each refuses unless `dev` is clean and in step with `origin/dev`, its tag is absent,
+the Diagnose freeze holds and the full test suite passes; it tags locally and prints the push
+command, it never pushes):
+
+```powershell
+.\scripts\harness-diagnose-freeze.ps1     # stage A
+git push origin refs/tags/harness-diagnose-freeze
+.\scripts\eval-freeze.ps1                 # stage B
+git push origin refs/tags/eval-freeze
+```
+
+Harness code may change until the first held-out result is seen, never after (D65).
+
+### Blocks and estimates
 
 | # | Block | Count | Needs | Estimated time |
 |---|---|---|---|---|
+| 1 | Diagnose: corpus test variants and LogChunks, L0 to L3 | 12 test variants; 230 LogChunks logs (D47) | stage A, lanes | part of the LLM total |
+| 10 | L3 repeats (D61) | 30 items x repeats 2 and 3 | stage A, lanes, seed | part of the LLM total |
 | 0 | Generate the held-out set | all families, DSO5, DSO6 | eval-freeze | minutes |
-| 1 | Diagnose: corpus test templates and LogChunks (D39) | 12 test variants (`families.ci.templates`); 230 LogChunks logs (D47) | LLM lanes, diagnose-freeze | part of the LLM total below |
-| 2 | Release (agents-mode canary, D54) | 72 (36 bad, 36 good, a quarter under node stress) | cluster | about 13 h (pre-registration `families.release.count_rule`: 7.5 to 10 min per recording) |
-| 3 | Runtime | 147 | cluster | about 22 h, my estimate: 420 s of spec timing (`families.runtime.timing`) plus the 120 s quiet wait (`runner.QUIET_S`) plus healing and recording, about 9 min each. TO CHECK on the first runs |
-| 4 | Normal traffic (DSO1 false alerts) | at least 4 h (`normal_traffic.hours`) | cluster, overnight | 4 h |
-| 5 | Security | 14 | cluster, CI | about 2.5 h, my estimate: app-ci about 5 min and a canary about 6 min (blueprint, Step 3) |
-| 6 | Pipeline (slow CI step) | 74 | CI, no cluster | about 10 h one at a time; 2 to 2.5 h at the pre-registered 4 to 5 in parallel |
-| 7 | ci, live at L5 (D64) | 12 | CI, LLM, write token, **a person at the approval page** | about 4 h attended, my estimate: CI, one L5 decision and one fix-branch CI run each (the CI wait is capped at 2,400 s, `runner.CI_TIMEOUT_S`) |
-| 8 | DSO5 commit sequence, baseline and optimizer plan modes | 30 commits x 2 modes (`dso5_commit_sequence.count`) | CI, write token | about 5 h of CI at about 5 min per run. TO CHECK |
-| 9 | DSO6 gate set | 300 items (`dso6_adversarial_set.count`) | offline | minutes. TO CHECK |
-| 10 | L3 repeats (D61) | 30 seeded items x 3 runs at L3 | LLM lanes | the whole LLM plan: 568 calls, about 3.05M tokens, about 2.4 days on 7 lanes (D61) |
+| 2 to 7 | Live scenarios in run order (driver) | release 72, runtime 147, security 14, pipeline 74, ci 12 | cluster, CI, write token | about 41 h of cluster plus about 10 h of pipeline CI (estimates below) |
+| 4 | Normal traffic (DSO1 false alerts) | at least 4 h | cluster, overnight | 4 h |
+| 8 | DSO5 commit sequence | 30 commits x 2 plan modes | CI, write token | about 5 h of CI at about 5 min per run |
+| 9 | DSO6 gate set | 300 items | offline | minutes |
 | 11 | Offline levels, scoring, report | every recording | none | hours |
 
-Cluster time, blocks 2 to 5: about 41 h of estimate, inside 35 to 55 h. The LLM blocks (1 and 10)
-run in parallel with the cluster: they need only the lanes.
+**LLM time (blocks 1, 10 and the live ci calls), 6 lanes:** 568 calls, about 3.05M tokens
+(D61). Each lane may use 180,000 tokens per UTC day (the client stops at 90% of its 200,000
+daily ledger, `flowguard/llm.py`), so 3.05M / (6 x 180,000) = 2.82 days: **about 3 UTC days, a
+4th possible** for the busiest lane (items are spread evenly, tokens per item are not). Tokens per
+minute do not bind: each request is at most 8,000 tokens (D66), about one large call per lane
+per minute.
 
-### Block 0: generate
+Cluster estimates, from the dev runs: release 7.5 to 10 min per recording (about 13 h); runtime
+about 9 min each (about 22 h; 420 s of spec timing, the 120 s quiet wait, healing and
+recording); security about 11 min each (about 2.5 h); ci live about 2 min plus the fix-branch CI
+(J4: 89 s for a dry-run ci spec). The J4 dev dry run measured 471 s for a release spec and 309 s
+for a runtime spec.
+
+### Block 1: Diagnose on test templates and LogChunks (stage A)
+
+```powershell
+py evaluation\diagnose_heldout.py run --confirm-step-11
+py evaluation\diagnose_heldout.py run --confirm-step-11 --set logchunks --levels L2 L3   # a part
+```
+
+- Refuses unless `--confirm-step-11`, the Diagnose freeze and `harness-diagnose-freeze` hold.
+- Corpus: every verified variant of a test-split template, L0 to L3. LogChunks: the `used` rows
+  of `evaluation/datasets/logchunks-h3-sample.csv`, each log checked against its SHA-256, at L2
+  and L3 (L0 and L1 quote no line and LogChunks has no class). L4 and L5 reuse L3 (D39, D64,
+  D67).
+- Resumable: rerun the same command; written items are skipped, finished calls come from the
+  cache. Progress only (calls, cached, failures, tokens per lane).
+- Outputs in `evaluation\runs\diagnose-heldout\`: `<L>.jsonl` replay records, `<L>-raw.jsonl`
+  raw quotes and per-call records (lane, cache key, the D66 cut, retrieved example ids),
+  `groundtruth.db` (labels only).
+- Then `py evaluation\llm_provenance.py`.
+- **TO CHECK (decision pending):** H3 under D66. The H3 sample was chosen by visibility under the
+  drain3 reduction; D66's token cut may remove every target line of a sampled log. Whether such
+  an item is a miss or excluded must be decided before any result.
+
+### Block 10: L3 repeats (D61, stage A)
+
+```powershell
+py evaluation\diagnose_repeats.py run --confirm-step-11
+```
+
+The subset: 30 items sampled from the sorted ids of every held-out Diagnose item, with the
+held-out seed's HMAC stream labelled `llm-repeat-subset` (seed from `.env`, no `generate`).
+Repeat 1 is the item's main L3 call (block 1); this makes repeats 2 and 3 with the repeat index
+in the cache key (D28): 60 calls. **TO CHECK (decision pending):** the draw rule above is a
+proposal; no document fixed it before.
+
+### Block 0: generate (stage B)
 
 ```powershell
 py scenarios\heldout.py generate --confirm-step-11
 ```
 
-It refuses unless:
-- the pre-registration is frozen;
-- `eval-freeze` exists and `agents/` is unchanged since it;
-- the seed matches its hash;
-- `scenarios/heldout/` holds no specs yet. **The held-out set is generated once.**
+Refuses unless the pre-registration is frozen, `eval-freeze` exists with `agents/` unchanged,
+the seed matches and `scenarios/heldout/` is empty. **Generated once.** Writes the specs,
+`run-order.txt`, `dso5-sequence.yaml` and `dso6-items.yaml`, and prints only the count.
 
-It writes the specs, `run-order.txt`, `dso5-sequence.yaml` and `dso6-items.yaml` to
-`scenarios/heldout/` (gitignored), and prints only their count.
-
-### Block 1: Diagnose on test templates and LogChunks (D39)
-
-- **TO CHECK: no runner exists for either.**
-  - `diagnose_dev.py run --splits test` passes the freeze check (`items()`), but then skips
-    every test template, so it would run nothing.
-  - `logchunks.py` only prepares targets and the H3 sample: "nothing is sent to a model on
-    LogChunks before Step 11".
-- A runner must call the frozen Diagnose at L2 and L3 with the pinned settings. It must record
-  the raw quotes through `observations.hallucination`, and write its calls to the audit log so
-  `llm_provenance.py` can attribute them (D64).
-- Once it exists, check provenance with `py evaluation\llm_provenance.py`.
-
-### Blocks 2 to 7: live scenarios
-
-The pre-registration requires the seeded order in `scenarios/heldout/run-order.txt`
-(`run_order`).
-
-**TO CHECK: no driver takes held-out specs in that order.**
-- `py scenarios\pilot.py scenarios --dir <folder>` runs a folder's specs in sorted file-name
-  order. It skips specs that already have a valid run, and retries a run started under firing
-  alerts up to 3 times (`pilot.QUIET_ATTEMPTS`).
-- In its default (`l0`) mode it would also record release specs under the inline L0 analysis.
-  That is against D54.
-- It never passes `--ci-agents`.
-
-A driver needs to follow `run-order.txt`, set the canary mode per family and pass `--ci-agents`.
-Until it exists, the commands below are the building blocks it would call.
-
-**Release, agents mode:**
+### Blocks 2 to 7: live scenarios (driver)
 
 ```powershell
-py scenarios\pilot.py mode agents
-py scenarios\pilot.py scenarios --agents --dir <folder of release specs>
+py scenarios\pilot.py heldout --confirm-step-11
+py scenarios\pilot.py normal --hours 4          # block 4, overnight
 ```
 
-**Runtime and security,** with staging back on the inline L0 analysis:
+The driver follows `scenarios\heldout\run-order.txt` and sets staging's Rollout before each
+family, only when it changes:
+
+| Family | Runner | Staging Rollout | Why |
+|---|---|---|---|
+| release | agents-mode recording; L0 replayed offline (D54) | agents | D54 |
+| runtime | L0 mode | L0 | a runtime fault deploys nothing, but the runner records runtime in L0 mode and `healthy_stable()` refuses a mode mismatch (found by the J4 dev dry run, fixed in `4c012bf`) |
+| pipeline, security | L0 mode, commit delivery | L0 | a green CI run is deployed by the deployer; under agents mode nobody resumes its pauses (1,200 s timeout) |
+| ci | live at L5 with the live executor (D64) | unchanged | no cluster |
+
+- Resumable: a spec with a valid recorded run (in its family's mode, recording folder present)
+  is skipped; failed, interrupted and invalid runs run again. Up to 3 attempts when alerts are not
+  quiet (D50).
+- ci at L5: at the default gate setting a confident pin executes without a human (D67, rule 7);
+  a proposal the gate sends to a human waits on the printed approval page (127.0.0.1) for up to
+  60 minutes. Keep a person available during the ci specs.
+- The commit families need a clean `dev` checkout; each run switches branches in it.
+- **TO CHECK:** the pre-registered "4 to 5 at a time" for ci and pipeline. The driver runs one
+  spec at a time (pipeline about 10 h sequentially); parallel runs need separate checkouts.
+
+### Blocks 8 and 9: DSO5 and DSO6 (stage B)
 
 ```powershell
-py scenarios\pilot.py mode l0
+py evaluation\dso6_run.py run --confirm-step-11
+py evaluation\dso5_run.py plan --confirm-step-11     # dry run: prints, pushes nothing
+py evaluation\dso5_run.py run --confirm-step-11
 ```
 
-TO CHECK: runtime does not use the canary, so its mode may not matter. Security releases do go
-through the canary.
-
-**Normal traffic:**
-
-```powershell
-py scenarios\pilot.py normal --hours 4
-```
-
-**ci, live at L5 (D64).** One spec at a time. Approve on the printed page:
-
-```powershell
-py scenarios\runner.py --ci-agents dry-run <spec>   # first spec only: writes nothing to GitHub
-py scenarios\runner.py --ci-agents live <spec>
-```
-
-- The commit families (`ci`, `pipeline`, `security`) need a clean `dev` checkout. Each run
-  switches branches in it (`run_commit`).
-- TO CHECK: the pre-registered "4 to 5 at a time" for ci and pipeline needs separate checkouts;
-  one checkout runs one commit scenario at a time.
-
-### Blocks 8 and 9: DSO5 and DSO6
-
-**TO CHECK: no code reads `dso5-sequence.yaml` or `dso6-items.yaml`.**
-- The dev DSO6 set is scored by `evaluation/l0_baseline.py` (L0 only).
-- The DSO5 development results come from `ci/collect_optimizer.py` on existing runs
-  (`docs/step-10-optimizer.md`).
-- Neither replays a held-out sequence or item set.
-
-### Block 10: L3 repeats (D61)
-
-**TO CHECK: no runner for the held-out repeat subset.** `diagnose_dev.py --repeat 2|3` repeats
-only dev items.
+- DSO6: every item through the real gate, approver and executor, offline, worst cases (highest
+  calibrated confidence, a human who never approves, an LLM that obeys the injected text: no
+  model call). Outputs in `evaluation\runs\dso6-heldout\`: the audit rows report.py counts,
+  replay records, truth rows, and per item the gate outcomes, executions, refusals (D58) and
+  unapproved risky executions (expected 0).
+- DSO5: both plan modes on `scenario/baseline/dso5-heldout` and `scenario/optimizer/dso5-heldout`
+  (plan.py takes the mode from the branch), from `origin/dev`, in a separate worktree; each commit
+  pushed and its app-ci run recorded (conclusion, duration, time to first failure, jobs) in
+  `evaluation\runs\dso5-heldout\runs.jsonl`. Resumable.
+- **TO CHECK (decision pending):** `dependency_bump` commits. The generator records the module
+  but no target version; the live run refuses them until a rule is decided ("a version with no
+  HIGH or CRITICAL finding", `dso5_commit_sequence.change_types`).
+- D68: the Optimizer's skip list is applied by app-ci's plan step, not through the gate; DSO5
+  measures it under P2 and the mandatory jobs.
 
 ### Block 11: offline levels, scoring and the report
 
-- **DSO1:** `py evaluation\monitor_replay.py score <recordings>`.
-- **DSO3:** `py evaluation\release_replay.py score <recordings>`.
-- **ci family, L0 to L4 on the recording of the L5 run (D64):**
-  `py evaluation\ci_levels.py <recording>`.
-- **Diagnose observations:** `py evaluation\observations.py state\audit.db <out.jsonl>`.
-- **The report:** `py evaluation\report.py --confirmatory --out results\final` (section 3).
+```powershell
+py evaluation\monitor_replay.py score <held-out recordings> --heldout --confirm-step-11 --records evaluation\runs\dso1-records.jsonl
+py evaluation\release_replay.py score <held-out recordings> --heldout --confirm-step-11 --records evaluation\runs\dso3-records.jsonl
+py evaluation\ci_levels.py <ci recording> --confirm-step-11     # L0 to L4 on the L5 run's recording
+py evaluation\observations.py state\audit.db <out.jsonl>
+py evaluation\report.py --confirmatory --out results\final
+```
 
-TO CHECK:
-- Both replay scorers label their output "dev, in-sample".
-- `monitor_replay.py` refuses any path containing "heldout".
-- No code turns their JSON into the `replay_result` records `report.py` reads
-  (`step-11-analysis.md`, "Replay observations and joins").
+The held-out replay modes are gated like generate, labelled "held-out", never fit or calibrate
+on held-out recordings, and write the replay records `report_data.load` reads. Dev mode still
+refuses held-out paths.
+
+**TO CHECK (decisions pending):**
+- `report_scope` calls a report confirmatory only if every scored id is in `run-order.txt`; the
+  held-out Diagnose items (corpus test variants, LogChunks) never are, so H3 cannot be reported
+  confirmatory as it stands. A held-out Diagnose scope is proposed, not built.
+- One report over several sources: the Diagnose records and truth rows, the DSO6 audit rows and
+  the scenario recordings live in separate files and databases; the merge into the report's one
+  audit log, truth database and replay file is not scripted yet.
 
 ## 3. Checkpoints
 
@@ -182,65 +222,54 @@ Run after every block. Stop at the first failure.
 
 | Check | How | Pass |
 |---|---|---|
-| Recording count | `py -c "import json,pathlib; m=[json.loads(p.read_text()) for p in pathlib.Path('evaluation/recordings').glob('*/manifest.json')]; print(len(m), sum(x.get('valid', True) for x in m))"` (reads manifests only, never ground truth) | valid recordings went up by the block's count; every invalid one is re-run (section 4) |
-| Sources present | the same manifests' `sources`: the recorder writes `{"error": ...}` for a source that failed and still marks the run valid (`recorder.record`) | no source with an `error`. TO CHECK: whether such a run should be re-run |
-| No leaked ground truth (D25) | `py -m pytest evaluation\tests\test_agent_inputs.py`; it replays every local recording through the orchestrator and scans every agent input | all pass, none skipped for "no local recordings" |
+| Recording count | `py -c "import json,pathlib; m=[json.loads(p.read_text()) for p in pathlib.Path('evaluation/recordings').glob('*/manifest.json')]; print(len(m), sum(x.get('valid', True) for x in m))"` (manifests only, never ground truth) | valid recordings went up by the block's count |
+| Recording validity (J2) | the same manifests' `invalid_reasons`: a cluster recording with a failed or empty Prometheus source is invalid with its reason; a lost cluster is recorded invalid (`cluster_lost`) | every invalid run re-run (section 4) |
+| No leaked ground truth (D25) | `py -m pytest evaluation\tests\test_agent_inputs.py` | all pass, none skipped for "no local recordings" |
 | Disk | `Get-PSDrive C`; `docker system df` | still ≥ 40 GB free |
-| LLM budget per lane | `state\llm-usage-<lane>.json`: tokens per UTC day per lane, never the key. The client stops a lane at 90% of its daily limit (`flowguard/llm.py`) | each lane below its limit, or stopped and resuming the next UTC day |
-| LLM provenance (D64) | `py evaluation\llm_provenance.py` | no error: every cached answer has exactly one `llm_call` level |
+| LLM budget per lane | `state\llm-usage-<lane>.json` (tokens per UTC day, never the key) | each lane below its limit, or stopped and resuming the next UTC day |
+| LLM provenance (D64) | `py evaluation\llm_provenance.py` | every cached answer has exactly one `llm_call` level |
 | Fix-branch leftovers | `py scenarios\cleanup_fixes.py` (dry run) | only this block's fix branches; `--apply` after scoring |
-| **Final report** | `py evaluation\report.py --confirmatory --out results\final` | the printed summary and `results.json` metadata say `"confirmatory": true` |
+| Freeze state | `py scenarios\eval_freeze.py check` refuses only because the tag exists; `heldout.diagnose_frozen()` and `heldout.harness_diagnose_frozen()` pass | unchanged since the tags |
+| **Final report** | `py evaluation\report.py --confirmatory --out results\final` | `"confirmatory": true` |
 
-**The final checkpoint.** If `confirmatory` is false, read `reason` (the first check that
-failed) and stop. Do not re-label, re-run selectively or edit inputs. `report_scope.py` checks
-these four, in this order:
-1. the pre-registration is frozen;
-2. the `eval-freeze` tag exists and `agents/` is unchanged since it;
-3. `run-order.txt` exists and the seed in `.env` matches `scenarios/heldout-seed.sha256`;
-4. every scenario id scored in the truth database is in the run order: no dev, synthetic or
-   unknown id.
-
-`report.py` also blocks on:
-- an H4 amendment that is pending;
-- any pre-registered count left unset.
-
-With `--confirmatory`, a failed check refuses the report outright (`confirmatory output
-refused: …`). No flag can make a report confirmatory.
+If `confirmatory` is false, read `reason` (the first check that failed) and stop. Do not
+re-label, re-run selectively or edit inputs. `report_scope.py` checks, in order: the
+pre-registration is frozen; `eval-freeze` exists and `agents/` is unchanged since it;
+`run-order.txt` exists and the seed matches its hash; every scored id is in the run order.
+`report.py` also blocks on a pending H4 amendment and on any unset pre-registered count.
 
 ## 4. Failure recovery
 
-The rule, from the pre-registration (`exclusions`): a run recorded with `valid: false` is
-re-run with the same spec and seed, never dropped silently. The report gives the number of
-re-runs.
+The rule (`exclusions`): a run recorded with `valid: false` is re-run with the same spec and
+seed, never dropped silently; the report gives the number of re-runs. Never re-run a valid run
+because its result looks wrong.
 
-| Failure | What the code does | Safe to resume? | Action |
-|---|---|---|---|
-| Laptop sleep | The load log shows a gap over 60 s, so the runner sets `host_suspended` and records the run with `valid: false` (`runner.suspend_gaps`) | Yes | Rerun `pilot.py`: it skips only specs with a valid run (`pilot.done`), so the invalid one runs again |
-| Alerts not quiet before a fault | No fault is injected; the run is recorded with `valid: false`; `pilot.py` retries up to 3 times (D50) | Yes | None; after 3 failures, check what keeps firing |
-| Canary not at 100% within 15 min (agents mode) | `canary_incomplete`, recorded with `valid: false` (D54) | Yes | Check staging, then rerun |
-| Cluster crash mid-scenario | An exception leaves `Runner._run` before `recorder.record`, so no recording and no truth row are written for the spec; `pilot.py` logs `failed` and continues. Cleanup runs in `finally` blocks (restore, stress pods, load, the scenario branch) | Yes, after the cluster is back | `setup.ps1`, `smoke.ps1`, then rerun `pilot.py`. TO CHECK: cleanup when the cluster itself is gone (`kubectl` fails inside `finally`) |
-| Docker disk full | Not handled. Prometheus or the cluster stops; the recorder writes an `error` for each source it cannot read and may still mark the run valid | **No** | Discard every recording since the last checkpoint whose sources show errors, free disk, and re-run those specs. TO CHECK: the recorder does not invalidate such runs itself |
-| Groq rate limit or quota | The client retries 429 after `retry-after` and stops a lane at 90% of its daily limit; finished calls are cached and never re-sent, so a rerun continues (D27, `flowguard/llm.py`) | Yes | Rerun the same command after the UTC reset |
-| A lane goes down | A key Groq rejects (401) is dropped at the next start (`lanes.candidates` and `independent`); `diagnose_dev.py` prints the changed lane count | Yes, with care | Note the lane change for the report (D41). TO CHECK: items are assigned by a seeded hash over the current lane list (`lanes.assign`), so a smaller list may move an unstarted item to another lane |
-| Write token expired | Live pins and dispatches fail and are recorded as failed executions | **No** for blocks 7 and 8 | Renew before 2026-11-28 21:08 UTC (D63); a pin that failed this way is a failed execution, reported as is |
-| An agent or LLM failure in the live ci block | Recorded in the runner's `observed.agents`; the L0 recording is still made (`runner.run_commit`) | Yes | Report it; do not re-run to get a different answer |
-
-Never re-run a valid run because its result looks wrong. That would break the freeze rule.
+| Failure | What the code does | Action |
+|---|---|---|
+| Laptop sleep | load-log gap over 60 s: `host_suspended`, `valid: false` | rerun the driver; it skips only validly recorded specs |
+| Alerts not quiet before a fault | no fault injected, `valid: false`, up to 3 attempts (D50) | none; after 3, check what keeps firing |
+| Canary not at 100% within 15 min (agents mode) | `canary_incomplete`, `valid: false` (D54) | check staging, rerun |
+| Cluster lost mid-scenario (J2) | the run is recorded `valid: false` with `cluster_lost`; the recorder tries Prometheus once and marks every source unreachable; no hang. It is noticed at the next `kubectl` call, so up to the rest of the scenario's timed phases (192 s in the J4 test) | `k3d cluster start flowguard`; wait until every pod is Running; `.\infra\scripts\smoke.ps1`; rerun the driver |
+| Docker disk full | Prometheus sources fail or come back empty: the recorder marks the run invalid with the reasons (J2) | free disk (`docker system prune` only on what is safe), rerun the invalid specs |
+| Groq rate limit or quota | 429 retried after `retry-after`; a lane stops at 90% of its daily ledger; finished calls are cached | rerun the same command after the UTC reset |
+| Request too large (413) | the D66 cut prevents it; one that still happens is an `llm_call_failed` audit row and an escalation, never retried | report it as is |
+| A lane goes down | a rejected key (401) is dropped at the next start; the lane count is printed | note the change (D41); items are assigned by a seeded hash over the current lanes, so a smaller list moves unstarted items, not cached answers |
+| Write token expired or missing a scope | the executor records a failed execution with GitHub's message (403) | fix the token; a failed pin stays a failed execution in the record |
+| Executor failure partway through a fix action | the execution is recorded `success = 0` with GitHub's message; no retry. A pin can leave its fix branch (with or without the commit, or with its app-ci run); a draft PR can be left without its label | `py scenarios\cleanup_fixes.py --apply` removes every marked branch, issue and PR (an unlabelled PR is found by its marked head branch). It does **not** remove GitHub Actions runs on fix branches (they finish and stay in the history) or **GHCR images** a green fix-branch run pushed (`flowguard-podinfo:<fix commit SHA>`, as on the 2026-11-07 live pin); deleting those needs a packages-write token |
+| An agent or LLM failure in the live ci block | recorded in the runner's `observed.agents`; the L0 recording is still made | report it; do not re-run for a different answer |
 
 ## 5. Day-by-day plan
 
-The plan assumes eval-freeze can be tagged early. The cluster runs unattended overnight on the
-blocks that need no person. The write token's expiry (2026-11-28) leaves about three weeks; the
-plan needs about six days plus margin. The TO CHECK runners above must exist before their day.
+Stage A runs first, on the lanes only; the cluster blocks wait for eval-freeze.
 
-| Day | Daytime (attended) | Overnight (unattended) |
+| Day | Daytime (attended) | Overnight / background |
 |---|---|---|
-| 1 | Preconditions (section 1); tag eval-freeze; block 0 (generate); start the LLM blocks 1 and 10 on the lanes; block 7 (ci live at L5, 12 specs, approvals at the page; first spec in dry run) | Block 2: release, agents mode (about 13 h) |
-| 2 | Checkpoints for days 1 and 2; switch to `l0` mode; block 5 (security, 14) | Block 3: runtime, first part |
-| 3 | Block 3 continues (runtime totals about 22 h); block 6 (pipeline, 74) on CI while the cluster runs runtime | Block 3: runtime, rest |
-| 4 | Block 8 (DSO5, 30 x 2 on CI); block 9 (DSO6, offline) | Block 4: normal traffic, 4 h; LLM blocks finishing (about 2.4 days from day 1) |
-| 5 | Re-runs of every invalid run (section 4); full checkpoint pass; `cleanup_fixes.py --apply` | Spare |
-| 6 | Block 11: offline levels, observations, report. Final checkpoint: `confirmatory: true` | |
+| 1 | Preconditions; K1 and K2 merged and reviewed; lanes confirmed; `harness-diagnose-freeze`; start blocks 1 and 10 | LLM blocks (about 3 UTC days) |
+| 2 | `eval-freeze`; block 0 (generate); start the driver: release first in run order, ci specs attended | Driver: release and runtime specs in run order |
+| 3 | Driver continues; pipeline specs on CI; checkpoints | Driver continues |
+| 4 | Blocks 8 (DSO5) and 9 (DSO6); checkpoints | Block 4: normal traffic, 4 h; LLM blocks finishing |
+| 5 | Re-runs of every invalid run; full checkpoint pass; `cleanup_fixes.py --apply` | Spare |
+| 6 | Block 11: replays, observations, report; final checkpoint | |
 
-Spare days before 2026-11-28 cover re-runs and a lost lane day. If the cluster falls behind,
-move runtime overnights forward; never shorten a pre-registered timing or count.
+If the cluster falls behind, move overnights forward; never shorten a pre-registered timing or
+count. The write token is valid until 2027-01-06.
