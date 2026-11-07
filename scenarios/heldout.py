@@ -73,6 +73,20 @@ DIAGNOSE_PATHS = (
 # conformal calibrations, the retrieval index's manifest (it pins the embedding model) and the
 # encoder weights. `freeze-diagnose` writes their SHA-256 to DIAGNOSE_HASHES, committed with the
 # diagnose-freeze tag; diagnose_frozen() refuses if any is missing or different.
+# D69 stage A: the held-out Diagnose harness, tagged harness-diagnose-freeze right before the
+# first held-out Diagnose call; no change to these paths afterwards. Stage B is eval-freeze.
+HARNESS_DIAGNOSE_TAG = "harness-diagnose-freeze"
+HARNESS_DIAGNOSE_PATHS = (
+    "evaluation/diagnose_heldout.py",  # K1: test templates and LogChunks at L1 to L3
+    "evaluation/diagnose_repeats.py",  # K2: the D61 repeats
+    "evaluation/llm_provenance.py",  # which level made each call
+    "evaluation/report_metrics.py",  # the toolkit's H3 scoring (localization, hallucination)
+    "evaluation/observations.py",
+    "evaluation/report_data.py",
+    "evaluation/diagnose_dev.py",  # functions the held-out runner reuses
+    "evaluation/heldout_guard.py",
+    "evaluation/logchunks.py",  # the H3 targets and sample
+)
 DIAGNOSE_HASHES = ROOT / "scenarios" / "diagnose-freeze.sha256"
 DIAGNOSE_ARTIFACTS = (
     "state/models/diagnose-l1.pkl",
@@ -358,6 +372,11 @@ def calibration_hash_copy(root: Path = ROOT) -> dict[str, str]:
         return {}
     lines = path.read_text(encoding="utf-8").splitlines()
     return dict(reversed(line.split("  ", 1)) for line in lines if line)
+
+
+def harness_diagnose_frozen(root: Path = ROOT) -> None:
+    """D69 stage A: the held-out Diagnose harness is tagged and unchanged since the tag."""
+    frozen_agents(root, HARNESS_DIAGNOSE_TAG, HARNESS_DIAGNOSE_PATHS)
 
 
 def diagnose_frozen(root: Path = ROOT) -> None:

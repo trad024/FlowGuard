@@ -31,12 +31,10 @@ def prereg():
 
 def test_the_committed_preregistration_is_frozen_and_every_family_has_a_count():
     p = yaml.safe_load(heldout.PREREG.read_text(encoding="utf-8"))
-    assert p["status"] == "frozen" and str(p["version"]) == "1.2"
-    assert [a["date"] for a in p["amendments"]] == ["2026-11-07"] and {
-        "D66",
-        "D67",
-        "lanes",
-    } <= set(p["amendments"][0])
+    assert p["status"] == "frozen" and str(p["version"]) == "1.3"
+    assert [a["date"] for a in p["amendments"]] == ["2026-11-07", "2026-11-08"]
+    assert {"D66", "D67", "lanes"} <= set(p["amendments"][0])
+    assert {"environment", "D69"} <= set(p["amendments"][1])
     assert str(p["frozen"]) == "2026-11-06"
     counts = {name: f["count"] for name, f in p["families"].items()}
     assert all(isinstance(c, int) and c > 0 for c in counts.values())
@@ -382,3 +380,12 @@ def test_the_freeze_check_refuses_a_calibration_copy_that_drifted(tmp_path, monk
     assert heldout.calibration_hash_copy(tmp_path) == {
         "state/models/diagnose-calibration-L3.json": "0" * 64
     }
+
+
+def test_the_held_out_diagnose_harness_is_frozen_by_its_own_tag(tmp_path):
+    """D69 stage A: without harness-diagnose-freeze every held-out Diagnose runner refuses."""
+    assert "evaluation/diagnose_heldout.py" in heldout.HARNESS_DIAGNOSE_PATHS
+    assert "evaluation/diagnose_repeats.py" in heldout.HARNESS_DIAGNOSE_PATHS
+    assert "evaluation/llm_provenance.py" in heldout.HARNESS_DIAGNOSE_PATHS
+    with pytest.raises(SystemExit, match="harness-diagnose-freeze"):
+        heldout.harness_diagnose_frozen(tmp_path)  # no repository, no tag

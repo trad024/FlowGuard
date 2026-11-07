@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: frozen
-version: "1.2"
+version: "1.3"
 drafted: 2026-10-27
 frozen: 2026-11-06
 amendments:
@@ -24,6 +24,13 @@ amendments:
       Retrieved L3 example ids and distances are recorded per call, never sent to the model.
     lanes: >-
       From 2026-11-07, 6 lanes on 6 accounts: GROQ_KEY_1 to GROQ_KEY_5 and LLM_API_KEY (the former GROQ_KEY_6 account; the earlier LLM_API_KEY account is no longer used).
+  - date: "2026-11-08"
+    environment: >-
+      Step 11 runs on the integration laptop's Python 3.13.0 with torch 2.11.0+cpu, transformers 5.13.0, tiktoken 0.14.0, chromadb 1.5.9, lightgbm 4.6.0 and scikit-learn 1.7.2 (also onnxruntime 1.31.0, numpy 2.3.4, drain3 0.9.11, langgraph 1.2.15), the environment of the calibrations; the declared Python 3.11 range is covered by CI only.
+      None of these is upgraded until Step 11 ends.
+    D69: >-
+      Staged harness freeze: stage A (the held-out Diagnose harness) is tagged harness-diagnose-freeze right before the first held-out Diagnose call and never changed after; stage B (everything else) is frozen by eval-freeze before generate and the first cluster run.
+      Held-out Diagnose runs are blind: progress only (calls, failures, tokens per lane), no accuracy, coverage or hallucination figure until all of Step 11 has run.
 
 seed:
   hash_file: scenarios/heldout-seed.sha256   # SHA-256 of the secret seed; the seed is in .env
