@@ -88,6 +88,21 @@ def retrieved(todo: list[dict], retriever) -> dict[str, list]:
     return out
 
 
+def ask(client, log: str, shown: list, level: str, repeat: int | None = None):
+    """One Diagnose call as the dev and held-out runners make it: the request cut to the lane's
+    tokens per minute (D66), the answer parsed with grounding from L3 on. Returns (the client's
+    response, the parsed diagnosis, the request record, the messages sent). A 413 gives an
+    empty answer marked failed; BudgetExhausted is the caller's to handle."""
+    msgs, req = diagnose.request(log, shown, client.fits, client.count)
+    try:
+        res = client.complete(msgs, repeat=repeat, request=req)
+    except llm.RequestTooLarge:  # D66: on the record, no class, as the agent does
+        res = {"content": "", "lane": client.lane, "provider": client.provider,
+               "cached": False, "failed": diagnose.FAILED}  # fmt: skip
+    d = diagnose.parse(res["content"], log, apply_grounding=(level != "L2"))
+    return res, d, req, msgs
+
+
 def run(
     level: str,
     repeat: int | None = None,
@@ -122,12 +137,8 @@ def run(
         for item in queues[lane.name]:
             log = item["log"].read_text(encoding="utf-8", errors="replace")
             shown = examples.get(item["variant"], [])
-            msgs, req = diagnose.request(log, shown, client.fits, client.count)  # D66
             try:
-                res = client.complete(msgs, repeat=repeat, request=req)
-            except llm.RequestTooLarge:  # D66: on the record, no class, as the agent does
-                res = {"content": "", "lane": lane.name, "provider": lane.provider,
-                       "cached": False, "failed": diagnose.FAILED}  # fmt: skip
+                res, d, req, _ = ask(client, log, shown, level, repeat)
             except llm.BudgetExhausted as exc:
                 with lock:
                     print(json.dumps({"lane": lane.name, "stopped": str(exc)}), flush=True)
@@ -136,7 +147,6 @@ def run(
                 with lock:
                     print(json.dumps({"variant": item["variant"], "error": str(exc)[:200]}))
                 continue
-            d = diagnose.parse(res["content"], log, apply_grounding=(level != "L2"))
             row = {
                 "variant": item["variant"],
                 "template": item["template"],

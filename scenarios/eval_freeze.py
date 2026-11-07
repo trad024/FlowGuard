@@ -1,6 +1,7 @@
 """The checks before the eval-freeze tag (D39, D65), run by scripts/eval-freeze.ps1 and .sh.
 
     python scenarios/eval_freeze.py check     # refuses, with every reason, unless ready
+    python scenarios/eval_freeze.py check --tag harness-diagnose-freeze     # D69 stage A
     python scenarios/eval_freeze.py lanes     # the LLM lanes in .env, with no LLM call
 
 `check` refuses unless: the checkout is on dev with a clean working tree and in step with
@@ -34,8 +35,10 @@ def git(*args: str, root: Path = ROOT) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
 
 
-def problems(root: Path = ROOT, run=git, diagnose_frozen=heldout.diagnose_frozen) -> list[str]:
-    """Every reason not to tag now (empty: ready for the test suite and the tag)."""
+def problems(
+    root: Path = ROOT, run=git, diagnose_frozen=heldout.diagnose_frozen, tag: str = TAG
+) -> list[str]:
+    """Every reason not to tag `tag` now (empty: ready for the test suite and the tag)."""
     out = []
     branch = run("rev-parse", "--abbrev-ref", "HEAD", root=root).stdout.strip()
     if branch != "dev":
@@ -46,8 +49,8 @@ def problems(root: Path = ROOT, run=git, diagnose_frozen=heldout.diagnose_frozen
     remote = run("rev-parse", "origin/dev", root=root).stdout.strip()
     if head != remote:
         out.append("dev is not in step with origin/dev (push or pull first)")
-    if run("rev-parse", "-q", "--verify", f"refs/tags/{TAG}", root=root).returncode == 0:
-        out.append(f"{TAG} already exists: it is created once")
+    if run("rev-parse", "-q", "--verify", f"refs/tags/{tag}", root=root).returncode == 0:
+        out.append(f"{tag} already exists: it is created once")
     try:
         diagnose_frozen(root)
     except SystemExit as exc:
@@ -66,16 +69,17 @@ def lane_report(env: dict[str, str]) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("check")
+    check = sub.add_parser("check")
+    check.add_argument("--tag", choices=(TAG, heldout.HARNESS_DIAGNOSE_TAG), default=TAG)
     lane = sub.add_parser("lanes")
     lane.add_argument("--expect", type=int, help="fail unless this many lanes are found")
     args = parser.parse_args(argv)
     if args.cmd == "check":
-        if found := problems():
+        if found := problems(tag=args.tag):
             for p in found:
                 print(f"refused: {p}")
             return 1
-        print(f"ready: dev is clean, in step with origin, {TAG} absent, Diagnose freeze holds")
+        print(f"ready: dev is clean, in step with origin, {args.tag} absent, Diagnose freeze holds")
         return 0
     report = lane_report(lanes.read_env())
     print(f"lanes ({report['count']}): {', '.join(report['lanes'])}")

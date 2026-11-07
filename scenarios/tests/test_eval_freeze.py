@@ -55,7 +55,7 @@ def test_every_reason_is_reported():
 
 
 def test_the_cli_refuses_with_a_nonzero_exit(monkeypatch, capsys):
-    monkeypatch.setattr(eval_freeze, "problems", lambda: ["the working tree is not clean"])
+    monkeypatch.setattr(eval_freeze, "problems", lambda **k: ["the working tree is not clean"])
     assert eval_freeze.main(["check"]) == 1
     assert "refused: the working tree is not clean" in capsys.readouterr().out
 
@@ -85,9 +85,22 @@ def test_a_wrong_count_a_duplicate_or_a_malformed_key_fails(monkeypatch, capsys)
 
 
 def test_the_scripts_check_test_then_tag_and_never_push():
-    for name in ("eval-freeze.sh", "eval-freeze.ps1"):
+    for name in ("eval-freeze.sh", "eval-freeze.ps1", "harness-diagnose-freeze.sh",
+                 "harness-diagnose-freeze.ps1"):  # fmt: skip
         text = (ROOT / "scripts" / name).read_text(encoding="utf-8")
         check, tests, tag = (text.index(s) for s in ("eval_freeze.py check", "pytest", "git tag"))
         assert check < tests < tag
-        assert "git push origin refs/tags/eval-freeze" in text  # printed, not run
+        tag = "harness-diagnose-freeze" if name.startswith("harness") else "eval-freeze"
+        assert f"git tag -a {tag} " in text
+        assert f"git push origin refs/tags/{tag}" in text  # printed, not run
+        if tag != "eval-freeze":
+            assert "eval_freeze.py check --tag harness-diagnose-freeze" in text
         assert not any(line.strip().startswith("git push") for line in text.splitlines()), name
+
+
+def test_the_harness_tag_is_checked_like_eval_freeze():
+    found = eval_freeze.problems(
+        run=fake_git(tagged=True), diagnose_frozen=frozen, tag="harness-diagnose-freeze"
+    )
+    assert found == ["harness-diagnose-freeze already exists: it is created once"]
+    assert eval_freeze.problems(run=fake_git(), diagnose_frozen=frozen, tag="x") == []
