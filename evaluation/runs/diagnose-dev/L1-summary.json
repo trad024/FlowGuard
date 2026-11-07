@@ -1,0 +1,206 @@
+{
+ "level": "L1",
+ "source": "TF-IDF + logistic regression (state/models/diagnose-l1.pkl), fitted on the training templates",
+ "validation": {
+  "k": 10,
+  "n": 14,
+  "ci95": [
+   0.4535091567010683,
+   0.8827862135542308
+  ]
+ },
+ "train_note": "fitted on the training templates: training accuracy not reported; per-template accuracy is not recorded for L1",
+ "calibration": {
+  "epsilon": 0.1,
+  "coverage": {
+   "k": 67,
+   "n": 74,
+   "ci95": [
+    0.8173774141493173,
+    0.9534200620157751
+   ],
+   "target": 0.9
+  },
+  "mean_set_size": 2.5405405405405403,
+  "examples": 74,
+  "templates": 25
+ },
+ "per_template": {
+  "code-01": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 2.0
+   }
+  },
+  "code-02": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 2.0
+   }
+  },
+  "code-03": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 2.0
+   }
+  },
+  "code-04": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 2.0
+   }
+  },
+  "code-05": {
+   "calibration_fold": {
+    "n": 4,
+    "covered": 0,
+    "mean_set_size": 2.0
+   }
+  },
+  "dependency-01": {
+   "calibration_fold": {
+    "n": 4,
+    "covered": 4,
+    "mean_set_size": 3.0
+   }
+  },
+  "dependency-02": {
+   "calibration_fold": {
+    "n": 4,
+    "covered": 4,
+    "mean_set_size": 3.0
+   }
+  },
+  "dependency-03": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 2.0
+   }
+  },
+  "dependency-05": {
+   "calibration_fold": {
+    "n": 4,
+    "covered": 4,
+    "mean_set_size": 3.0
+   }
+  },
+  "dependency-06": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 4.0
+   }
+  },
+  "dependency-07": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 2.0
+   }
+  },
+  "environment-01": {
+   "calibration_fold": {
+    "n": 4,
+    "covered": 1,
+    "mean_set_size": 2.25
+   }
+  },
+  "environment-02": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 3.0
+   }
+  },
+  "environment-03": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 3.0
+   }
+  },
+  "environment-05": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 5.0
+   }
+  },
+  "environment-06": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 3.0
+   }
+  },
+  "flaky_test-01": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 2.0
+   }
+  },
+  "flaky_test-03": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 2.0
+   }
+  },
+  "flaky_test-04": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 2.0
+   }
+  },
+  "flaky_test-05": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 2.0
+   }
+  },
+  "flaky_test-06": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 2.0
+   }
+  },
+  "infrastructure-01": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 1.6666666666666667
+   }
+  },
+  "infrastructure-02": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 3.0
+   }
+  },
+  "infrastructure-03": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 3.0
+   }
+  },
+  "infrastructure-06": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 2.0
+   }
+  }
+ },
+ "note": "aggregates per template only; no raw answers, quotes or logs"
+}

@@ -1,0 +1,396 @@
+{
+ "level": "L2",
+ "source": "evaluation/runs/diagnose-dev/L2.jsonl (rerun under D51, 2026-10-29)",
+ "model": [
+  "openai/gpt-oss-120b"
+ ],
+ "n": 74,
+ "train": {
+  "k": 50,
+  "n": 60,
+  "ci95": [
+   0.7196838683638547,
+   0.9068682302080855
+  ]
+ },
+ "validation": {
+  "k": 14,
+  "n": 14,
+  "ci95": [
+   0.7846891972623643,
+   1.0
+  ]
+ },
+ "hallucination_rate": {
+  "ungrounded": 4,
+  "quotes": 216
+ },
+ "calibration": {
+  "epsilon": 0.1,
+  "coverage": {
+   "k": 67,
+   "n": 74,
+   "ci95": [
+    0.8173774141493173,
+    0.9534200620157751
+   ],
+   "target": 0.9
+  },
+  "mean_set_size": 3.3513513513513513,
+  "examples": 74,
+  "templates": 25
+ },
+ "per_template": {
+  "code-01": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 2.0
+   },
+   "n": 2,
+   "correct": 2,
+   "rejected": 0,
+   "quotes": 10,
+   "ungrounded": 0,
+   "split": "validation",
+   "root_cause": "code"
+  },
+  "code-02": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 3.0
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 9,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "code"
+  },
+  "code-03": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 2.5
+   },
+   "n": 2,
+   "correct": 2,
+   "rejected": 0,
+   "quotes": 10,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "code"
+  },
+  "code-04": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 2.5
+   },
+   "n": 2,
+   "correct": 2,
+   "rejected": 0,
+   "quotes": 10,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "code"
+  },
+  "code-05": {
+   "calibration_fold": {
+    "n": 4,
+    "covered": 4,
+    "mean_set_size": 1.0
+   },
+   "n": 4,
+   "correct": 4,
+   "rejected": 0,
+   "quotes": 12,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "code"
+  },
+  "dependency-01": {
+   "calibration_fold": {
+    "n": 4,
+    "covered": 4,
+    "mean_set_size": 2.5
+   },
+   "n": 4,
+   "correct": 4,
+   "rejected": 0,
+   "quotes": 9,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "dependency"
+  },
+  "dependency-02": {
+   "calibration_fold": {
+    "n": 4,
+    "covered": 4,
+    "mean_set_size": 3.0
+   },
+   "n": 4,
+   "correct": 4,
+   "rejected": 0,
+   "quotes": 17,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "dependency"
+  },
+  "dependency-03": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 3.0
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 9,
+   "ungrounded": 0,
+   "split": "validation",
+   "root_cause": "dependency"
+  },
+  "dependency-05": {
+   "calibration_fold": {
+    "n": 4,
+    "covered": 4,
+    "mean_set_size": 2.0
+   },
+   "n": 4,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 9,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "dependency"
+  },
+  "dependency-06": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 3.6666666666666665
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 6,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "dependency"
+  },
+  "dependency-07": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 3.6666666666666665
+   },
+   "n": 3,
+   "correct": 2,
+   "rejected": 0,
+   "quotes": 9,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "dependency"
+  },
+  "environment-01": {
+   "calibration_fold": {
+    "n": 4,
+    "covered": 4,
+    "mean_set_size": 4.5
+   },
+   "n": 4,
+   "correct": 4,
+   "rejected": 0,
+   "quotes": 9,
+   "ungrounded": 0,
+   "split": "validation",
+   "root_cause": "environment"
+  },
+  "environment-02": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 4.0
+   },
+   "n": 2,
+   "correct": 2,
+   "rejected": 0,
+   "quotes": 4,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "environment"
+  },
+  "environment-03": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 0,
+    "mean_set_size": 1.0
+   },
+   "n": 2,
+   "correct": 0,
+   "rejected": 0,
+   "quotes": 10,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "environment"
+  },
+  "environment-05": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 3.6666666666666665
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 6,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "environment"
+  },
+  "environment-06": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 0,
+    "mean_set_size": 1.0
+   },
+   "n": 3,
+   "correct": 0,
+   "rejected": 0,
+   "quotes": 8,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "environment"
+  },
+  "flaky_test-01": {
+   "calibration_fold": {
+    "n": 2,
+    "covered": 2,
+    "mean_set_size": 5.0
+   },
+   "n": 2,
+   "correct": 2,
+   "rejected": 0,
+   "quotes": 6,
+   "ungrounded": 0,
+   "split": "validation",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-03": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 5.0
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 6,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-04": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 5.0
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 6,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-05": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 5.0
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 6,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "flaky_test"
+  },
+  "flaky_test-06": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 5.0
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 8,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "flaky_test"
+  },
+  "infrastructure-01": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 4.333333333333333
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 3,
+   "ungrounded": 0,
+   "split": "validation",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-02": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 4.333333333333333
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 15,
+   "ungrounded": 4,
+   "split": "train",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-03": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 1,
+    "mean_set_size": 2.3333333333333335
+   },
+   "n": 3,
+   "correct": 0,
+   "rejected": 0,
+   "quotes": 9,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "infrastructure"
+  },
+  "infrastructure-06": {
+   "calibration_fold": {
+    "n": 3,
+    "covered": 3,
+    "mean_set_size": 5.0
+   },
+   "n": 3,
+   "correct": 3,
+   "rejected": 0,
+   "quotes": 10,
+   "ungrounded": 0,
+   "split": "train",
+   "root_cause": "infrastructure"
+  }
+ },
+ "note": "aggregates per template only; no raw answers, quotes or logs"
+}

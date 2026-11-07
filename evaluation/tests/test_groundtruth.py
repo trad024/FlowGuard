@@ -1,5 +1,7 @@
 """Ground-truth store (D25): events and one row per run, kept apart from the audit log."""
 
+import subprocess
+
 import groundtruth
 
 
@@ -39,7 +41,10 @@ def test_default_path_is_gitignored_and_env_overrides(tmp_path, monkeypatch):
     assert groundtruth.DEFAULT_PATH.relative_to(groundtruth.ROOT).as_posix() == (
         "evaluation/runs/groundtruth.db"
     )
-    ignored = (groundtruth.ROOT / ".gitignore").read_text().splitlines()
-    assert "evaluation/runs/" in ignored
+    # git itself says the DB is ignored (the dev summaries are the only exception under runs/)
+    check = subprocess.run(
+        ["git", "-C", str(groundtruth.ROOT), "check-ignore", "-q", "evaluation/runs/groundtruth.db"]
+    )
+    assert check.returncode == 0
     monkeypatch.setenv("FLOWGUARD_GROUNDTRUTH_DB", str(tmp_path / "x.db"))
     assert groundtruth.GroundTruthDB.open().path == tmp_path / "x.db"

@@ -15,7 +15,11 @@ encoder-weights.zip
 chroma/
 
 # Load-generator logs and other evaluation outputs
-evaluation/runs/
+evaluation/runs/*
+# Except the dev Diagnose summaries: per-template aggregates, no raw answers
+!evaluation/runs/diagnose-dev/
+evaluation/runs/diagnose-dev/*
+!evaluation/runs/diagnose-dev/*-summary.json
 
 # The system's own state (audit log, D25: outside the evaluation tree)
 state/
