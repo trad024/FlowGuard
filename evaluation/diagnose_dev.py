@@ -121,9 +121,13 @@ def run(
         )
         for item in queues[lane.name]:
             log = item["log"].read_text(encoding="utf-8", errors="replace")
+            shown = examples.get(item["variant"], [])
+            msgs, req = diagnose.request(log, shown, client.fits, client.count)  # D66
             try:
-                shown = examples.get(item["variant"], [])
-                res = client.complete(diagnose.messages(log, shown), repeat=repeat)
+                res = client.complete(msgs, repeat=repeat, request=req)
+            except llm.RequestTooLarge:  # D66: on the record, no class, as the agent does
+                res = {"content": "", "lane": lane.name, "provider": lane.provider,
+                       "cached": False, "failed": diagnose.FAILED}  # fmt: skip
             except llm.BudgetExhausted as exc:
                 with lock:
                     print(json.dumps({"lane": lane.name, "stopped": str(exc)}), flush=True)
@@ -154,7 +158,10 @@ def run(
                 "rejected": d.rejected,
                 "flags": d.flags,
                 "examples": [ex.root_cause for ex in shown],  # L3: the retrieved classes
+                "request": req,  # D66: log tokens before and after the cut
             }
+            if res.get("failed"):
+                row["failed"] = res["failed"]
             with lock, out_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
 

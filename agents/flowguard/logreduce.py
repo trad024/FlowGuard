@@ -10,6 +10,10 @@
 5. If the rendered lines exceed 14,000 characters (about 3,500 tokens), lines are dropped
    from the front until they fit: one request must stay under the free tier's 8,000
    tokens per minute with the instructions, L3's examples and the answer.
+6. D66: if the whole request still does not fit the lane's tokens per minute (counted in
+   tokens, flowguard.llm.LLMClient.fits), more lines are dropped from the front, by the same
+   rule, until it fits (`fit`). Characters per token vary (2.3 on a Go dependency log, 3.5
+   on others), so the 14,000 characters alone do not bound the request.
 
 Every kept line keeps its number in the original log ("L<n>: text"), so evidence can be checked
 against the real log (D8).
@@ -63,6 +67,14 @@ def reduce(log: str) -> list[tuple[int, str]]:
             kept.append((n, text))
     kept = kept[-MAX_LINES:]
     while len(kept) > 1 and len(render(kept)) > MAX_CHARS:
+        kept = kept[1:]
+    return kept
+
+
+def fit(kept: list[tuple[int, str]], fits) -> list[tuple[int, str]]:
+    """D66: drop whole lines from the front (step 5's rule) until `fits(lines)` holds; the last
+    line is always kept. Deterministic: the same lines and test give the same cut."""
+    while len(kept) > 1 and not fits(kept):
         kept = kept[1:]
     return kept
 

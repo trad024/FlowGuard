@@ -17,7 +17,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from flowguard import logreduce
+from flowguard import llm, logreduce
 from flowguard.catalog import AGENT_ACTIONS
 from flowguard.contracts import AgentName
 
@@ -72,15 +72,39 @@ class Example:
 
 
 def messages(log: str, examples: list[Example] = ()) -> list[dict]:
-    """The chat messages for one log; `examples` only at L3 (at most 3)."""
+    """The chat messages for one log; `examples` only at L3 (at most 3). No token cut: see
+    `request`."""
+    return _messages(logreduce.reduce(log), examples)
+
+
+def _messages(lines: list[tuple[int, str]], examples: list[Example] = ()) -> list[dict]:
     parts = []
     for i, ex in enumerate(list(examples)[:MAX_EXAMPLES], start=1):
         answer = json.dumps({"root_cause": ex.root_cause, "action": ex.action})
         text = ex.log[-EXAMPLE_CHARS:]
         parts.append(f"Similar past failure {i}:\n{text}\nIts diagnosis: {answer}\n")
-    reduced = logreduce.render(logreduce.reduce(log))
-    parts.append(f"Failed job log:\n{reduced}")
+    parts.append(f"Failed job log:\n{logreduce.render(lines)}")
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": "\n".join(parts)}]
+
+
+def request(log: str, examples: list[Example] = (), fits=None, count=None) -> tuple[list, dict]:
+    """D66: the messages for one log, its reduced log cut from the front (whole lines, the D51
+    rule) until `fits(messages)` holds; the instructions and the examples never change. With
+    the record of the cut: the log's tokens before and after, and whether lines were dropped.
+    Without `fits`, the messages are those of `messages` and nothing is counted."""
+    kept = logreduce.reduce(log)
+    if fits is None:
+        return _messages(kept, examples), {}
+    count = count or llm.count_tokens
+    cut = logreduce.fit(kept, lambda lines: fits(_messages(lines, examples)))
+    before = count(logreduce.render(kept))
+    after = before if len(cut) == len(kept) else count(logreduce.render(cut))
+    record = {
+        "log_tokens_before": before,
+        "log_tokens_after": after,
+        "log_cut": len(cut) < len(kept),
+    }
+    return _messages(cut, examples), record
 
 
 @dataclass
@@ -130,14 +154,38 @@ def ground(quotes: list[str], log: str) -> tuple[list[int], int]:
 PREFIX = re.compile(r"^L\d+:\s?")
 
 
-def answerer(complete) -> Callable[..., dict]:
+FAILED = "llm call failed: request too large"
+
+
+def answerer(complete, fits=None) -> Callable[..., dict]:
     """The Diagnose agent's LLM callable from an LLM client's `complete` (the same prompt and
     parser as the dev runs): (log) at L2, (log, examples) at L3. The answer is the model's own:
     its quoted lines as written and how many are not in the log; the agent applies grounding by
-    level (D8), so the raw quotes stay comparable between L2 and L3."""
+    level (D8), so the raw quotes stay comparable between L2 and L3.
+
+    D66: the request is cut to fit the client's tokens per minute (`fits`, by default that of
+    the client `complete` belongs to) and the cut goes to the audit log with the call. A 413
+    that still happens gives no class and hands the incident to a human; it never raises."""
+    client = getattr(complete, "__self__", None)
+    fits = fits or getattr(client, "fits", None)
+    count = getattr(client, "count", None)
 
     def answer(log: str, examples: list[Example] | None = None) -> dict:
-        content = complete(messages(log, examples or []))["content"]
+        msgs, req = request(log, examples or [], fits, count)
+        try:
+            content = (complete(msgs, request=req) if req else complete(msgs))["content"]
+        except llm.RequestTooLarge:
+            return {
+                "root_cause": "unclear",
+                "scores": None,
+                "action": "escalate_to_human",
+                "quotes": [],
+                "evidence_lines": [],
+                "ungrounded": 0,
+                "fix": "",
+                "failed": FAILED,
+                "request": req,
+            }
         d = parse(content, log, apply_grounding=False)
         return {
             "root_cause": d.root_cause,
@@ -147,6 +195,7 @@ def answerer(complete) -> Callable[..., dict]:
             "evidence_lines": d.grounded,
             "ungrounded": d.ungrounded,
             "fix": d.fix,
+            "request": req,
         }
 
     return answer

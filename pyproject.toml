@@ -16,6 +16,7 @@ dependencies = [
     "scikit-learn==1.7.2",
     "chromadb==1.5.9",  # L3 retrieval (Step 7)
     "onnxruntime==1.31.0",  # CPU only: the sentence model for chromadb
+    "tiktoken==0.14.0",  # D66: request size counted in o200k_base before a Groq call
 ]
 
 [project.optional-dependencies]

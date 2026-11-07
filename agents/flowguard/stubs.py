@@ -148,7 +148,11 @@ class Diagnose:
             "diagnose_grounding": bool(cfg.grounding),
             "diagnose_rejected": bool(rejected),
             "diagnose_fix": fix,  # the model's one-sentence fix, for the fix planner (D57)
+            # D66: the log's tokens before and after the request cut, and a refused call
+            "diagnose_request": answer.get("request") or {},
         }
+        if answer.get("failed"):
+            record["diagnose_llm_failed"] = answer["failed"]
         return cls, scores, lines, action, record
 
     def run(self, inp: AgentInput, cfg) -> AgentOutput:
