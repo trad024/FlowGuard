@@ -31,7 +31,8 @@ def prereg():
 
 def test_the_committed_preregistration_is_frozen_and_every_family_has_a_count():
     p = yaml.safe_load(heldout.PREREG.read_text(encoding="utf-8"))
-    assert p["status"] == "frozen" and str(p["version"]) == "1.0"
+    assert p["status"] == "frozen" and str(p["version"]) == "1.1"
+    assert [a["date"] for a in p["amendments"]] == ["2026-11-07"] and "D66" in p["amendments"][0]
     assert str(p["frozen"]) == "2026-11-06"
     counts = {name: f["count"] for name, f in p["families"].items()}
     assert all(isinstance(c, int) and c > 0 for c in counts.values())

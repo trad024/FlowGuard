@@ -11,10 +11,14 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: frozen
-version: "1.0"
+version: "1.1"
 drafted: 2026-10-27
 frozen: 2026-11-06
-amendments: []
+amendments:
+  - date: "2026-11-07"
+    D66: >-
+      Diagnose requests are capped in tokens (o200k_base count + 110 + 5%, plus 600 max_tokens, at most 8,000 per lane), replacing request_budget's 2.87 characters per token; a log over the cap is cut from the front by whole lines, instructions and examples unchanged.
+      A 413 is recorded as a failed call and escalated to a human. No dev request changed (0 of 74 at L2 and L3); made before any held-out result was seen (D65).
 
 seed:
   hash_file: scenarios/heldout-seed.sha256   # SHA-256 of the secret seed; the seed is in .env
