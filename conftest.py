@@ -105,3 +105,49 @@ def no_cluster_or_network(request, monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", connect)
     monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
     monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+
+
+# ---------------------------------------------------------------- D67: calibrators in tests
+
+
+def fitted_calibrator():
+    """A fitted conformal calibrator (30 examples) that is never confident: its nonconformity
+    scores are all -1 (label scores of 2.0), so any real score in [0, 1] has a p-value of 1/31,
+    under the credibility floor, and a confidence of 0. It satisfies the D67 guard and keeps a
+    test's gate outcomes as they were before D67 (confidence 0)."""
+    from flowguard.calibration import ConformalCalibrator
+
+    return ConformalCalibrator().fit([{"a": 2.0}] * 30, ["a"] * 30)
+
+
+def fitted_all():
+    """`fitted_calibrator` for every calibrated agent (D67), for an Orchestrator in a test."""
+    from flowguard.calibrators import CALIBRATED
+
+    return {agent: fitted_calibrator() for agent in CALIBRATED}
+
+
+@pytest.fixture(autouse=True)
+def no_real_calibrations(monkeypatch, tmp_path_factory):
+    """No test reads this machine's state/ calibrations (CI has none): the loader looks in an
+    empty folder unless a test gives it files, or uses the `fitted` fixtures below."""
+    try:
+        from flowguard import calibrators
+    except ImportError:  # a test run without agents/ on the path
+        return
+    monkeypatch.setattr(calibrators, "ROOT", tmp_path_factory.mktemp("no-state"))
+
+
+@pytest.fixture
+def fitted_levels(monkeypatch):
+    """Entry points get fitted calibrators from the loader; `calls` records the levels asked."""
+    from flowguard import calibrators
+
+    calls = []
+
+    def for_level(level, root=None):
+        calls.append(level)
+        return {} if level == "L0" else {a: fitted_calibrator() for a in calibrators.CALIBRATED}
+
+    monkeypatch.setattr(calibrators, "for_level", for_level)
+    return calls

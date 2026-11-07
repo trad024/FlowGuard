@@ -62,7 +62,7 @@ import l0_canary  # noqa: E402
 import monitor_replay  # noqa: E402
 import recorder  # noqa: E402
 import stats  # noqa: E402
-from flowguard import release, series  # noqa: E402
+from flowguard import calibrators, release, series  # noqa: E402
 from flowguard.audit import AuditLog  # noqa: E402
 from flowguard.calibration import ConformalCalibrator, coverage_by_group  # noqa: E402
 from flowguard.executor import Executor  # noqa: E402
@@ -265,6 +265,7 @@ def orchestrator(name: str, folder: Path) -> Orchestrator:
         record=IncidentRecord(db),
         executor=Executor(audit=audit, dry_run=True),
         audit=audit,
+        calibrators=calibrators.for_level(name),  # D67
         diagnose=Diagnose.without_logs(),  # rollout looks carry no log (P1 asks without one)
     )
 

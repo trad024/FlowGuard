@@ -158,6 +158,8 @@ def run(
                 "rejected": d.rejected,
                 "flags": d.flags,
                 "examples": [ex.root_cause for ex in shown],  # L3: the retrieved classes
+                "example_ids": [ex.id for ex in shown],  # D67: and which cases, how near
+                "example_distances": [ex.distance for ex in shown],
                 "request": req,  # D66: log tokens before and after the cut
             }
             if res.get("failed"):

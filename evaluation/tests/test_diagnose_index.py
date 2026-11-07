@@ -44,7 +44,7 @@ class FakeCollection:
 
     def query(self, query_texts, n_results, where=None):
         self.queries += query_texts
-        return {"documents": [[]], "metadatas": [[]]}
+        return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
 
 
 def fake_retriever():

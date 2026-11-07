@@ -1,6 +1,7 @@
 """Orchestrator: workflows A to D end to end with stub agents, per ablation level (dry run)."""
 
 import pytest
+from conftest import fitted_all  # D67: fitted, never-confident calibrators
 
 from flowguard import audit_metrics, baselines
 from flowguard.approval import SimulatedApprover
@@ -30,6 +31,7 @@ class NoExamples:
 
 def make(tmp_path, name="L3", approve=True, live=False, **kw):
     kw.setdefault("diagnose", Diagnose(RegexLLM(), retriever=NoExamples()))
+    kw.setdefault("calibrators", fitted_all())
     db = tmp_path / "state.db"
     audit = AuditLog(db)
     taps = []

@@ -26,6 +26,7 @@ sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "ci"), str(ROOT / "evaluation")
 
 import heldout_guard  # noqa: E402
 import replay  # noqa: E402
+from flowguard import calibrators  # noqa: E402
 from flowguard.audit import AuditLog  # noqa: E402
 from flowguard.executor import Executor  # noqa: E402
 from flowguard.incidents import IncidentRecord  # noqa: E402
@@ -45,6 +46,7 @@ def decide(rec: Path, audit_path: Path, diagnose, levels=LEVELS) -> dict[str, li
             record=IncidentRecord(audit_path),
             executor=Executor(audit=audit, dry_run=True),
             audit=audit,
+            calibrators=calibrators.for_level(name),  # D67
             diagnose=diagnose,
         )
         actions[name] = []

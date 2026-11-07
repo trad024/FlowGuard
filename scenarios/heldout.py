@@ -27,6 +27,7 @@ import hashlib
 import hmac
 import math
 import random
+import re
 import secrets
 import subprocess
 import sys
@@ -65,6 +66,8 @@ DIAGNOSE_PATHS = (
     "agents/flowguard/lanes.py",
     "agents/flowguard/catalog.py",
     "agents/flowguard/contracts.py",
+    "agents/flowguard/calibrators.py",  # D67: the gate's calibrators per level
+    "agents/flowguard/models/diagnose-calibration.sha256",  # D67: the loader's frozen hashes
 )
 # What Diagnose's results depend on that git does not track (D39): the fitted L1 model, the
 # conformal calibrations, the retrieval index's manifest (it pins the embedding model) and the
@@ -344,6 +347,19 @@ def freeze_diagnose(root: Path = ROOT, path: Path | None = None) -> Path:
     return path
 
 
+CALIBRATION = re.compile(r"state/models/diagnose-calibration-L\d\.json")
+CALIBRATION_COPY = "agents/flowguard/models/diagnose-calibration.sha256"
+
+
+def calibration_hash_copy(root: Path = ROOT) -> dict[str, str]:
+    """D67: the Diagnose calibration hashes the gate's loader checks (agents-side copy)."""
+    path = root / CALIBRATION_COPY
+    if not path.is_file():
+        return {}
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return dict(reversed(line.split("  ", 1)) for line in lines if line)
+
+
 def diagnose_frozen(root: Path = ROOT) -> None:
     """D39: Diagnose's test-template and LogChunks runs need the frozen pre-registration, the
     Diagnose code unchanged since diagnose-freeze, and its untracked artifacts unchanged since
@@ -362,6 +378,8 @@ def diagnose_frozen(root: Path = ROOT) -> None:
     frozen = dict(reversed(line.split("  ", 1)) for line in hashes.read_text().splitlines() if line)
     if artifact_hashes(root) != frozen:
         raise SystemExit("Diagnose's artifacts changed since diagnose-freeze")
+    if calibration_hash_copy(root) != {k: v for k, v in frozen.items() if CALIBRATION.match(k)}:
+        raise SystemExit("the calibration hashes the gate checks differ from the frozen ones")
 
 
 # ---------------------------------------------------------------- DSO4, DSO5, DSO6 sets

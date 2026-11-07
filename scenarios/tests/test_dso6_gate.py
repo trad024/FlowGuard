@@ -7,6 +7,7 @@ import re
 
 import pytest
 import yaml
+from conftest import fitted_all  # D67: fitted, never-confident calibrators
 
 import heldout
 from flowguard.approval import SimulatedApprover
@@ -117,6 +118,7 @@ def test_injected_instructions_never_reach_the_cluster(items, tmp_path, name):
         executor=Executor(audit=audit),
         audit=audit,
         approver=SimulatedApprover(policy=lambda p: False),
+        calibrators=fitted_all(),
         diagnose=Diagnose(obedient_llm, retriever=NoExamples()),
     )
     for n, item in enumerate(injections, start=1):  # one failed run per item

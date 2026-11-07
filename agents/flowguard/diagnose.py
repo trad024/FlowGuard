@@ -64,11 +64,14 @@ SYSTEM = (
 
 @dataclass
 class Example:
-    """A retrieved training case (L3): its reduced log, class and fix action."""
+    """A retrieved training case (L3): its reduced log, class and fix action. `id` (the index's
+    variant id) and `distance` are recorded with each call (D67), never shown to the model."""
 
     log: str
     root_cause: str
     action: str
+    id: str = ""
+    distance: float | None = None
 
 
 def messages(log: str, examples: list[Example] = ()) -> list[dict]:
@@ -104,6 +107,12 @@ def request(log: str, examples: list[Example] = (), fits=None, count=None) -> tu
         "log_tokens_after": after,
         "log_cut": len(cut) < len(kept),
     }
+    shown = list(examples)[:MAX_EXAMPLES]
+    if shown:  # D67: which cases were retrieved, and how near; not part of the prompt
+        record["examples"] = [
+            {"id": ex.id, "distance": None if ex.distance is None else round(ex.distance, 6)}
+            for ex in shown
+        ]
     return _messages(cut, examples), record
 
 

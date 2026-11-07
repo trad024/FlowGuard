@@ -14,6 +14,13 @@ from flowguard.agent_io import AgentOutput
 from flowguard.monitor import ci_event
 from flowguard.stubs import proposal
 
+
+@pytest.fixture(autouse=True)
+def calibrated(fitted_levels):
+    """D67: the entry points get fitted, never-confident calibrators from the loader."""
+    return fitted_levels
+
+
 REPO = "acme/app"
 HEAD = "a" * 40
 GREEN = "b" * 40

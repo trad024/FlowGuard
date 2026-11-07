@@ -31,8 +31,12 @@ def prereg():
 
 def test_the_committed_preregistration_is_frozen_and_every_family_has_a_count():
     p = yaml.safe_load(heldout.PREREG.read_text(encoding="utf-8"))
-    assert p["status"] == "frozen" and str(p["version"]) == "1.1"
-    assert [a["date"] for a in p["amendments"]] == ["2026-11-07"] and "D66" in p["amendments"][0]
+    assert p["status"] == "frozen" and str(p["version"]) == "1.2"
+    assert [a["date"] for a in p["amendments"]] == ["2026-11-07"] and {
+        "D66",
+        "D67",
+        "lanes",
+    } <= set(p["amendments"][0])
     assert str(p["frozen"]) == "2026-11-06"
     counts = {name: f["count"] for name, f in p["families"].items()}
     assert all(isinstance(c, int) and c > 0 for c in counts.values())
@@ -357,3 +361,24 @@ def test_dev_pilot_is_stratified_public_and_valid(prereg):
                 assert cells[(family, kind, band)] >= 2, (family, kind, band)
     stressed = [s for s in specs if "node_stress" in s]
     assert {s["ground_truth"]["bad_release"] for s in stressed} == {True, False}
+
+
+def test_the_gates_calibration_hashes_equal_the_frozen_ones_line_by_line():
+    """D67: the loader in agents/ checks calibrations against its own copy of the hashes (agent
+    code never reads scenarios/); that copy is exactly the 3 calibration lines frozen here."""
+    copy = (heldout.ROOT / heldout.CALIBRATION_COPY).read_text(encoding="utf-8").splitlines()
+    frozen = (heldout.ROOT / "scenarios" / "diagnose-freeze.sha256").read_text(encoding="utf-8")
+    lines = [line for line in frozen.splitlines() if heldout.CALIBRATION.search(line)]
+    assert len(lines) == 3 and copy == lines
+    assert heldout.CALIBRATION_COPY in heldout.DIAGNOSE_PATHS
+    assert "agents/flowguard/calibrators.py" in heldout.DIAGNOSE_PATHS
+
+
+def test_the_freeze_check_refuses_a_calibration_copy_that_drifted(tmp_path, monkeypatch):
+    (tmp_path / "agents/flowguard/models").mkdir(parents=True)
+    (tmp_path / heldout.CALIBRATION_COPY).write_text(
+        "0" * 64 + "  state/models/diagnose-calibration-L3.json\n", encoding="utf-8"
+    )
+    assert heldout.calibration_hash_copy(tmp_path) == {
+        "state/models/diagnose-calibration-L3.json": "0" * 64
+    }

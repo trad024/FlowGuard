@@ -6,6 +6,7 @@ fakes here."""
 import json
 
 import pytest
+from conftest import fitted_all  # D67: fitted, never-confident
 
 from flowguard import series
 from flowguard.approval import SimulatedApprover
@@ -95,6 +96,7 @@ def make(tmp_path, raw, states, name="L1", approve=True, rollouts=None, monitor=
         executor=Executor(audit=audit, dry_run=True, kubectl=lambda a: "ok"),
         audit=audit,
         approver=SimulatedApprover(policy=lambda p: approve),
+        calibrators=fitted_all(),
         diagnose=Diagnose.without_logs(),
     )
     if monitor != "default":
@@ -229,7 +231,12 @@ def test_a_worse_canary_the_monitor_misses_is_rolled_back_at_its_first_look(tmp_
     assert looks[2] == []  # decided for this step
 
 
-def test_the_service_gates_release_with_its_calibrator(tmp_path):
+def test_the_service_gates_release_with_its_calibrator(tmp_path, monkeypatch):
+    from flowguard import calibrators
+
+    monkeypatch.setattr(
+        calibrators, "diagnose", lambda level, root=None: fitted_all()[level and AgentName.DIAGNOSE]
+    )
     orch = make_orchestrator("L3", AuditLog(tmp_path / "a.db", level="L3"), approver=None)
     cal = orch.calibrators[AgentName.RELEASE]
     assert cal.calibrated  # agents/flowguard/models/release-calibration.json

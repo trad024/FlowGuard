@@ -30,10 +30,9 @@ sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "ci"), str(ROOT / "evaluation")
 import deployer  # noqa: E402
 import recorder  # noqa: E402
 import runner  # noqa: E402
-from flowguard import release, series  # noqa: E402
+from flowguard import calibrators, release, series  # noqa: E402
 from flowguard.approval import ApprovalPage  # noqa: E402
 from flowguard.audit import AuditLog  # noqa: E402
-from flowguard.contracts import AgentName  # noqa: E402
 from flowguard.executor import Executor, Refused  # noqa: E402
 from flowguard.incidents import IncidentRecord  # noqa: E402
 from flowguard.orchestrator import Orchestrator, level  # noqa: E402
@@ -114,7 +113,7 @@ def undo(port: int, timeout_min: float) -> int:
             executor=Executor(audit=audit, dry_run=False),
             audit=audit,
             approver=page,
-            calibrators={AgentName.RELEASE: release.calibrator()},
+            calibrators=calibrators.for_level("L3"),  # D67
             diagnose=Diagnose.without_logs(),  # a rollout look carries no log
         )
         say(step="waiting for a human", approval_page=page.url, timeout_min=timeout_min)

@@ -3,10 +3,19 @@ decided at each level with a dry-run executor and no approver. Synthetic recordi
 
 import json
 
+import pytest
+
 import ci_levels
 from flowguard.agent_io import AgentOutput
 from flowguard.audit import AuditLog
 from flowguard.stubs import proposal
+
+
+@pytest.fixture(autouse=True)
+def calibrated(fitted_levels):
+    """D67: the entry point gets fitted, never-confident calibrators from the loader."""
+    return fitted_levels
+
 
 LOG = "go: github.com/gorilla/websocket@v1.9.9: invalid version: unknown revision v1.9.9\n"
 

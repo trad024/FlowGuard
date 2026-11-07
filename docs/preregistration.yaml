@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: frozen
-version: "1.1"
+version: "1.2"
 drafted: 2026-10-27
 frozen: 2026-11-06
 amendments:
@@ -19,6 +19,11 @@ amendments:
     D66: >-
       Diagnose requests are capped in tokens (o200k_base count + 110 + 5%, plus 600 max_tokens, at most 8,000 per lane), replacing request_budget's 2.87 characters per token; a log over the cap is cut from the front by whole lines, instructions and examples unchanged.
       A 413 is recorded as a failed call and escalated to a human. No dev request changed (0 of 74 at L2 and L3); made before any held-out result was seen (D65).
+    D67: >-
+      The gate reads Diagnose's calibrated confidence (L1, L2, L3 their own calibration; L4 and L5 L3's, as their Diagnose requests are byte-identical to L3's), loaded fail-closed against the frozen hashes; the Optimizer is exempt (it acts in app-ci's plan step).
+      Retrieved L3 example ids and distances are recorded per call, never sent to the model.
+    lanes: >-
+      From 2026-11-07, 6 lanes on 6 accounts: GROQ_KEY_1 to GROQ_KEY_5 and LLM_API_KEY (the former GROQ_KEY_6 account; the earlier LLM_API_KEY account is no longer used).
 
 seed:
   hash_file: scenarios/heldout-seed.sha256   # SHA-256 of the secret seed; the seed is in .env

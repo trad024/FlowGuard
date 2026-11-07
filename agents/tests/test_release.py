@@ -5,6 +5,7 @@ Canaries are simulated on L0's schedule: 4 looks at 20% then 4 at 50% of 10 requ
 import random
 
 import pytest
+from conftest import fitted_all  # D67: fitted, never-confident calibrators
 
 from flowguard import release, series
 from flowguard.agent_io import AgentInput
@@ -134,6 +135,7 @@ def make(tmp_path, name):
         record=IncidentRecord(db),
         executor=Executor(audit=audit, dry_run=True),
         audit=audit,
+        calibrators=fitted_all(),
         diagnose=Diagnose.without_logs(),
     )
 

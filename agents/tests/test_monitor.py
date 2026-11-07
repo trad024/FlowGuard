@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from urllib.parse import quote_plus as quote
 
 import pytest
+from conftest import fitted_all  # D67: fitted, never-confident calibrators
 
 from flowguard import monitor, series
 from flowguard.agent_io import AgentInput
@@ -315,6 +316,7 @@ def test_orchestrator_slot_l0_vs_l1_on_the_same_ticks(model, tmp_path):
             record=IncidentRecord(db),
             executor=Executor(audit=audit),
             audit=audit,
+            calibrators=fitted_all(),
             diagnose=Diagnose.without_logs(),
         )
         assert type(orch.agents[AgentName.MONITOR]) is Monitor  # the real agent, via stubs

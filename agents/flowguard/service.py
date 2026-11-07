@@ -47,7 +47,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from flowguard import release, series
+from flowguard import calibrators, release, series
 from flowguard.approval import ApprovalPage
 from flowguard.audit import AuditLog
 from flowguard.contracts import AgentName
@@ -298,14 +298,14 @@ def report(out: dict) -> None:
 
 
 def make_orchestrator(name: str, audit: AuditLog, approver, live: bool = False) -> Orchestrator:
-    """The service's orchestrator: Release's proposals are gated with its calibrator (D9)."""
+    """The service's orchestrator, with the level's calibrators (D9, D67)."""
     return Orchestrator(
         cfg=level(name),
         record=IncidentRecord(audit.path),
         executor=Executor(audit=audit, dry_run=not live),
         audit=audit,
         approver=approver,
-        calibrators={AgentName.RELEASE: release.calibrator()},
+        calibrators=calibrators.for_level(name),
         # metrics ticks and canary looks carry no CI log: D60 answers every Diagnose call
         diagnose=Diagnose.without_logs(),
     )

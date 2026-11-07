@@ -10,6 +10,13 @@ import pytest
 import release_replay as rr
 from flowguard import release
 
+
+@pytest.fixture(autouse=True)
+def calibrated(fitted_levels):
+    """D67: the entry points get fitted, never-confident calibrators from the loader."""
+    return fitted_levels
+
+
 T0 = 1_800_000_000.0
 WINDOW = 600
 STEP_20, STEP_50, FULL = 60, 210, 360  # seconds into the recording

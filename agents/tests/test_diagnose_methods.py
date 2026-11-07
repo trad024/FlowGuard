@@ -6,6 +6,7 @@ import re
 from types import SimpleNamespace
 
 import pytest
+from conftest import fitted_all  # D67: fitted, never-confident calibrators
 
 from flowguard import diagnose
 from flowguard.agent_io import AgentInput
@@ -96,6 +97,7 @@ def test_the_encoder_and_the_no_log_path_record_their_method():
 
 def make(tmp_path, name, **kw):
     audit = AuditLog(tmp_path / "a.db")
+    kw.setdefault("calibrators", fitted_all())
     return Orchestrator(
         cfg=level(name),
         record=IncidentRecord(tmp_path / "a.db"),

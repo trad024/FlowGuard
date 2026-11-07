@@ -89,6 +89,18 @@ class Retriever:
         where = {"template": {"$ne": template}} if template else None
         res = self.collection.query(query_texts=[document(log)], n_results=k, where=where)
         return [
-            Example(log=doc, root_cause=meta["root_cause"], action=meta["action"])
-            for doc, meta in zip(res["documents"][0], res["metadatas"][0], strict=True)
+            Example(
+                log=doc,
+                root_cause=meta["root_cause"],
+                action=meta["action"],
+                id=vid,  # the variant id the index stores (D67)
+                distance=float(dist),
+            )
+            for vid, doc, meta, dist in zip(
+                res["ids"][0],
+                res["documents"][0],
+                res["metadatas"][0],
+                res["distances"][0],
+                strict=True,
+            )
         ]

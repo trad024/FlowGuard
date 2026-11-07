@@ -5,6 +5,7 @@ on which channel, after how long."""
 import sqlite3
 
 import pytest
+from conftest import fitted_all  # D67: fitted, never-confident calibrators
 
 from flowguard import audit_metrics
 from flowguard.approval import SimulatedApprover
@@ -130,6 +131,7 @@ def test_the_approvals_row_says_who_answered_on_which_channel_after_how_long(tmp
         executor=Executor(audit=audit),
         audit=audit,
         approver=approver,
+        calibrators=fitted_all(),
         diagnose=Diagnose(QuotingLLM(), retriever=NoExamples()),
     )
     run = {"id": 7, "status": "completed", "conclusion": "failure"}

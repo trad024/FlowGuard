@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import fitted_all  # D67: fitted, never-confident calibrators
 
 import leakage
 import replay
@@ -37,6 +38,7 @@ def agent_inputs(rec: Path, tmp_path: Path) -> list:
         executor=Executor(audit=audit),
         audit=audit,
         input_tap=lambda agent, inp: seen.append(inp),
+        calibrators=fitted_all(),
         diagnose=Diagnose(
             lambda log, examples=None: {"root_cause": "code"}, retriever=NoExamples()
         ),

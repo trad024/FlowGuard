@@ -28,7 +28,7 @@ sys.path[:0] = [str(ROOT / "agents"), str(ROOT / "ci"), str(ROOT / "evaluation")
 
 import recorder  # noqa: E402
 import replay  # noqa: E402
-from flowguard import diagnose, github_actions, llm  # noqa: E402
+from flowguard import calibrators, diagnose, github_actions, llm  # noqa: E402
 from flowguard.audit import AuditLog  # noqa: E402
 from flowguard.contracts import Event  # noqa: E402
 from flowguard.executor import Executor  # noqa: E402
@@ -85,6 +85,7 @@ def decide(
         executor=executor,
         audit=audit,
         approver=approver,
+        calibrators=calibrators.for_level(LEVEL),  # D67
         diagnose=github_actions.PlannedDiagnose(diagnose, read_client, repo),
     )
     state = orch.handle(event)

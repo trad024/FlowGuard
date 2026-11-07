@@ -33,6 +33,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from flowguard import calibrators
 from flowguard.calibration import ConformalCalibrator
 from flowguard.catalog import CATALOG
 from flowguard.contracts import (
@@ -133,6 +134,8 @@ class Orchestrator:
         # Fail at construction, not mid-incident: the level's Diagnose method must be there
         if problem := self.agents[AgentName.DIAGNOSE].missing(self.cfg):
             raise ValueError(f"refusing to start: {problem}")
+        # D67: at L1+ the gate needs each medium-tier agent's fitted calibrator (fail closed)
+        calibrators.require(self.cfg, self.calibrators)
         graph = StateGraph(State)
         graph.add_node("monitor", self._monitor)
         graph.add_node("release", self._release)

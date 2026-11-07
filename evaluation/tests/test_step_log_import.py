@@ -6,10 +6,17 @@ the imported times."""
 import json
 from pathlib import Path
 
+import pytest
 from test_release_replay import STEP_20, T0, iso, write_recording
 
 import release_replay as rr
 import step_log_import as imp
+
+
+@pytest.fixture(autouse=True)
+def calibrated(fitted_levels):
+    """D67: release_replay's orchestrator gets fitted, never-confident calibrators."""
+    return fitted_levels
 
 
 def rows_at(*points, **common):
