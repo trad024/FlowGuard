@@ -16,8 +16,8 @@ run-order.txt, each family in its own mode:
     pipeline  on a branch; a run whose CI succeeds is deployed by the deployer, so staging's
               Rollout is put in L0 mode (its own analysis) first
     security  the same: commit delivery, deployed under the L0 Rollout
-    runtime   no switch: a runtime fault deploys nothing, so the canary mode is irrelevant and
-              switching it would only patch the Rollout between scenarios
+    runtime   under the L0 Rollout: a runtime fault deploys nothing, but the runner records it
+              in L0 mode and refuses to start unless the Rollout's mode matches (healthy_stable)
 It refuses without --confirm-step-11, the frozen state (pre-registration frozen, eval-freeze
 and diagnose-freeze unchanged) and the committed seed. It is resumable: a spec with a valid
 recorded run (in the family's mode, with its recording folder present) is skipped; a run
@@ -113,7 +113,7 @@ def run_scenarios(specs: list[Path], mode: str = "l0") -> None:
 
 HELDOUT = ROOT / "scenarios" / "heldout"
 # Staging's canary mode per family; None: leave it as it is (see the module docstring)
-CANARY_MODE = {"release": "agents", "pipeline": "l0", "security": "l0", "runtime": None, "ci": None}
+CANARY_MODE = {"release": "agents", "pipeline": "l0", "security": "l0", "runtime": "l0", "ci": None}
 RUNNER_MODE = {"release": "agents"}  # every other family records with the default runner mode
 
 

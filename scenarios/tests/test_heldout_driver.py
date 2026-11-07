@@ -73,14 +73,14 @@ def test_each_family_runs_in_its_mode(folder, fake):
     assert made["h-rel"] == ("agents", "off") and made["h-rel2"] == ("agents", "off")  # D54
     assert made["h-ci"] == ("l0", "live")  # D64: live at L5
     assert made["h-run"] == made["h-sec"] == made["h-pip"] == ("l0", "off")
-    # Staging's Rollout: agents for releases, L0 for the families the deployer deploys; set
-    # only when it changes; runtime leaves it as it is
-    assert fake["modes"] == ["agents", "l0", "agents"]
+    # Staging's Rollout: agents for releases, L0 for runtime (the runner checks the mode) and
+    # for the families the deployer deploys; set only when it changes; ci needs no cluster
+    assert fake["modes"] == ["l0", "agents", "l0", "agents"]
 
 
 def test_the_canary_mode_per_family_is_classified():
     assert pilot.CANARY_MODE == {"release": "agents", "pipeline": "l0", "security": "l0",
-                                 "runtime": None, "ci": None}  # fmt: skip
+                                 "runtime": "l0", "ci": None}  # fmt: skip
 
 
 def record(truth, run_id, spec_id, family, valid, folder, mode=None):
