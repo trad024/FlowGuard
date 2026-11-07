@@ -14,6 +14,7 @@ ENTRY_POINTS = {
     "evaluation/ci_levels.py",
     "evaluation/release_replay.py",
     "scenarios/live_release.py",
+    "evaluation/dso6_run.py",
 }
 
 
