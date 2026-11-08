@@ -110,3 +110,94 @@ def test_the_real_repository_is_not_confirmatory_today(tmp_path):
     """The repository's own state: no eval-freeze tag yet, whatever the pre-registration says."""
     reason = report_scope.confirmatory_scope(FROZEN, truth(tmp_path, HELD_OUT))
     assert reason == "eval-freeze tag missing"
+
+
+# ---------------------------------------------------------------- R2: held-out Diagnose scope
+
+
+def diagnose_repo(root):
+    """Add the held-out Diagnose inputs to the repository, hash them, commit, tag stage A."""
+    import json as _json
+
+    split = {"templates": {"t-test": "test", "t-train": "train"},
+             "variants": {"a": {"template": "t-test", "root_cause": "code"},
+                          "b": {"template": "t-train", "root_cause": "code"}}}  # fmt: skip
+    (root / heldout.SPLIT).parent.mkdir(parents=True, exist_ok=True)
+    (root / heldout.SPLIT).write_text(_json.dumps(split), encoding="utf-8")
+    for v in ("a", "b"):
+        (root / heldout.CORPUS / v).mkdir(parents=True)
+        (root / heldout.CORPUS / v / "run.log").write_text(f"log {v}\n", encoding="utf-8")
+    raw = root / heldout.LOGCHUNKS
+    (raw / "logs" / "r/x/failed").mkdir(parents=True)
+    (raw / "logs" / "r/x/failed/1.log").write_text("log one\n", encoding="utf-8")
+    (raw / "build-failure-reason").mkdir(parents=True)
+    (raw / "build-failure-reason" / "r.xml").write_text("<Examples/>", encoding="utf-8")
+    (root / heldout.H3_SAMPLE).write_text(
+        "rank,log_path,status,target_lines,visible_target_lines,l2_request_chars,sha256\n"
+        "1,r/x/failed/1.log,used,1,1,10,abcdef1234567890\n",
+        encoding="utf-8",
+    )
+    with open(root / ".gitignore", "a", encoding="utf-8") as f:
+        f.write("evaluation/runs/\nevaluation/datasets/raw/\n")
+    heldout.freeze_harness_inputs(root)
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "harness")
+    git(root, "tag", heldout.HARNESS_DIAGNOSE_TAG)
+    return root
+
+
+def diagnose_truth(tmp_path, rows, name="dtruth.db"):
+    path = tmp_path / name
+    db = groundtruth.GroundTruthDB(path)
+    for sid, family in rows:
+        db.record_run(sid, spec={"id": sid, "family": family}, ground_truth={}, observed={},
+                      l0_correct=None)  # fmt: skip
+    return path
+
+
+def test_the_held_out_diagnose_set_comes_from_the_hashed_inputs(repo):
+    root = diagnose_repo(repo)
+    assert report_scope.heldout_diagnose_ids(root) == {"a", "lc-abcdef123456"}
+
+
+def test_a_valid_held_out_diagnose_set_is_confirmatory(repo, tmp_path):
+    root = diagnose_repo(repo)
+    t = diagnose_truth(tmp_path, [("a", "diagnose"), ("lc-abcdef123456", "diagnose")])
+    assert report_scope.confirmatory_scope(FROZEN, t, root) is None
+
+
+def test_one_dev_diagnose_id_refuses(repo, tmp_path):
+    root = diagnose_repo(repo)
+    t = diagnose_truth(tmp_path, [("a", "diagnose"), ("b", "diagnose")])
+    reason = report_scope.confirmatory_scope(FROZEN, t, root)
+    assert reason == "scored Diagnose id not in the held-out Diagnose set (development): b"
+
+
+def test_a_changed_input_list_refuses(repo, tmp_path):
+    root = diagnose_repo(repo)
+    (root / heldout.CORPUS / "a" / "run.log").write_text("edited\n", encoding="utf-8")
+    t = diagnose_truth(tmp_path, [("a", "diagnose")])
+    reason = report_scope.confirmatory_scope(FROZEN, t, root)
+    assert reason.startswith("held-out Diagnose harness not frozen") and "inputs changed" in reason
+
+
+def test_without_the_harness_tag_diagnose_results_are_not_confirmatory(repo, tmp_path):
+    root = diagnose_repo(repo)
+    git(root, "tag", "-d", heldout.HARNESS_DIAGNOSE_TAG)
+    t = diagnose_truth(tmp_path, [("a", "diagnose")])
+    assert "harness-diagnose-freeze" in report_scope.confirmatory_scope(FROZEN, t, root)
+    assert report_scope.confirmatory_scope({"status": "draft"}, t, root) == (
+        "pre-registration is not frozen"
+    )
+
+
+def test_diagnose_scenario_and_dso6_ids_together(repo, tmp_path):
+    root = diagnose_repo(repo)
+    (root / "scenarios" / "heldout" / "dso6-items.yaml").write_text(
+        "- {id: g-0000000001, category: prohibited_action}\n", encoding="utf-8"
+    )
+    rows = [("a", "diagnose"), (HELD_OUT[0], "release"), ("g-0000000001", "dso6")]
+    assert report_scope.confirmatory_scope(FROZEN, diagnose_truth(tmp_path, rows), root) is None
+    rows.append(("g-9999999999", "dso6"))  # not a generated item
+    reason = report_scope.confirmatory_scope(FROZEN, diagnose_truth(tmp_path, rows, "x.db"), root)
+    assert reason == "scored id not in the held-out run order (unknown): g-9999999999"
