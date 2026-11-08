@@ -771,3 +771,4 @@ exclusions: >-
   of re-runs. DSO1 counts only recordings that hold the L0 alert states; recordings made
   before they were recorded are excluded by name, not counted as misses (D50). No other
   exclusion.
+# note 3
