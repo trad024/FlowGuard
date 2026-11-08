@@ -389,3 +389,82 @@ def test_the_held_out_diagnose_harness_is_frozen_by_its_own_tag(tmp_path):
     assert "evaluation/llm_provenance.py" in heldout.HARNESS_DIAGNOSE_PATHS
     with pytest.raises(SystemExit, match="harness-diagnose-freeze"):
         heldout.harness_diagnose_frozen(tmp_path)  # no repository, no tag
+
+
+# ---------------------------------------------------------------- R1: held-out Diagnose inputs
+
+
+def inputs_root(tmp_path):
+    """A synthetic root: a split with one test and one training template, their corpus logs,
+    a LogChunks sample with one used and one unused log, and a label file."""
+    import json as _json
+
+    split = {"templates": {"t-test": "test", "t-train": "train"},
+             "variants": {"a": {"template": "t-test", "root_cause": "code"},
+                          "b": {"template": "t-train", "root_cause": "code"}}}  # fmt: skip
+    (tmp_path / heldout.SPLIT).parent.mkdir(parents=True)
+    (tmp_path / heldout.SPLIT).write_text(_json.dumps(split), encoding="utf-8")
+    for v in ("a", "b"):
+        (tmp_path / heldout.CORPUS / v).mkdir(parents=True)
+        (tmp_path / heldout.CORPUS / v / "run.log").write_text(f"log {v}\n", encoding="utf-8")
+    raw = tmp_path / heldout.LOGCHUNKS
+    for rel in ("r/x/failed/1.log", "r/x/failed/2.log"):
+        (raw / "logs" / rel).parent.mkdir(parents=True, exist_ok=True)
+        (raw / "logs" / rel).write_text(f"log {rel}\n", encoding="utf-8")
+    (raw / "build-failure-reason").mkdir(parents=True)
+    (raw / "build-failure-reason" / "r.xml").write_text("<Examples/>", encoding="utf-8")
+    (tmp_path / heldout.H3_SAMPLE).write_text(
+        "rank,log_path,status,target_lines,visible_target_lines,l2_request_chars,sha256\n"
+        "1,r/x/failed/1.log,used,1,1,10,abc\n2,r/x/failed/2.log,not_visible,1,,10,def\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "scenarios").mkdir()
+    return tmp_path
+
+
+def test_the_inputs_are_test_logs_sampled_logchunks_logs_and_label_files(tmp_path):
+    root = inputs_root(tmp_path)
+    names = sorted(heldout.harness_input_hashes(root))
+    assert names == [
+        "evaluation/datasets/raw/LogChunks/build-failure-reason/r.xml",
+        "evaluation/datasets/raw/LogChunks/logs/r/x/failed/1.log",
+        "evaluation/runs/corpus/a/run.log",
+    ]  # the training variant and the unused LogChunks log are not held-out inputs
+
+
+def test_frozen_inputs_pass_and_a_changed_input_refuses(tmp_path):
+    root = inputs_root(tmp_path)
+    with pytest.raises(SystemExit, match="no frozen input hashes"):
+        heldout.harness_inputs_unchanged(root)
+    heldout.freeze_harness_inputs(root)
+    heldout.harness_inputs_unchanged(root)
+    (root / heldout.CORPUS / "a" / "run.log").write_text("edited\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="inputs changed"):
+        heldout.harness_inputs_unchanged(root)
+
+
+def test_an_added_or_lost_input_refuses(tmp_path):
+    root = inputs_root(tmp_path)
+    heldout.freeze_harness_inputs(root)
+    (root / heldout.CORPUS / "a" / "second.log").write_text("more\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="inputs changed"):
+        heldout.harness_inputs_unchanged(root)
+    (root / heldout.CORPUS / "a" / "second.log").unlink()
+    (root / heldout.LOGCHUNKS / "logs" / "r/x/failed/1.log").unlink()
+    with pytest.raises(SystemExit, match="missing"):
+        heldout.harness_inputs_unchanged(root)
+
+
+def test_the_stage_a_paths_cover_the_toolkit_and_the_input_hashes():
+    for path in ("evaluation/stats.py", "evaluation/report.py", "evaluation/report_policy.py",
+                 "evaluation/report_scope.py", "evaluation/datasets/corpus-split.json",
+                 "scenarios/harness-diagnose-inputs.sha256"):  # fmt: skip
+        assert path in heldout.HARNESS_DIAGNOSE_PATHS
+
+
+def test_the_harness_check_needs_the_tag_and_then_the_inputs(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(heldout, "frozen_agents", lambda *a: calls.append("tag"))
+    monkeypatch.setattr(heldout, "harness_inputs_unchanged", lambda *a: calls.append("inputs"))
+    heldout.harness_diagnose_frozen(tmp_path)
+    assert calls == ["tag", "inputs"]

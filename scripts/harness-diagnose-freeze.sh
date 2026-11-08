@@ -9,6 +9,10 @@ PY="${PYTHON:-python}"
 export PYTHONPATH=agents
 "$PY" scenarios/eval_freeze.py check --tag harness-diagnose-freeze
 "$PY" scenarios/eval_freeze.py lanes
+# R1: hash every held-out Diagnose input and commit the list with the tag
+"$PY" scenarios/heldout.py freeze-harness-inputs
+git add scenarios/harness-diagnose-inputs.sha256
+git commit -q -m "harness-diagnose-freeze: held-out Diagnose input hashes"
 echo "running the full test suite..."
 if ! "$PY" -m pytest -o addopts="" -q; then
   echo "refused: the test suite failed" >&2
@@ -16,4 +20,4 @@ if ! "$PY" -m pytest -o addopts="" -q; then
 fi
 git tag -a harness-diagnose-freeze -m "harness-diagnose-freeze: held-out Diagnose harness frozen (D69)" HEAD
 echo "tagged harness-diagnose-freeze at $(git rev-parse --short HEAD) (local only)"
-echo "push it with: git push origin refs/tags/harness-diagnose-freeze"
+echo "push them with: git push origin dev; git push origin refs/tags/harness-diagnose-freeze"

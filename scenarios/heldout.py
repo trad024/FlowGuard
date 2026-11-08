@@ -86,7 +86,22 @@ HARNESS_DIAGNOSE_PATHS = (
     "evaluation/diagnose_dev.py",  # functions the held-out runner reuses
     "evaluation/heldout_guard.py",
     "evaluation/logchunks.py",  # the H3 targets and sample
+    "evaluation/stats.py",  # R1: the toolkit's statistics, scope and report
+    "evaluation/report.py",
+    "evaluation/report_policy.py",
+    "evaluation/report_scope.py",
+    "evaluation/datasets/corpus-split.json",  # which templates are held out
+    "evaluation/datasets/logchunks-h3-sample.csv",  # the H3 items and their target lines
+    "scenarios/harness-diagnose-inputs.sha256",  # the inputs' hashes (below)
 )
+# R1: the held-out Diagnose inputs, untracked: every log of a test-template variant and every
+# LogChunks file the H3 items come from (each sampled log and the label files that locate its
+# target). Hashed when harness-diagnose-freeze is tagged; checked with the tag.
+HARNESS_INPUTS = ROOT / "scenarios" / "harness-diagnose-inputs.sha256"
+CORPUS = Path("evaluation") / "runs" / "corpus"
+SPLIT = Path("evaluation") / "datasets" / "corpus-split.json"
+H3_SAMPLE = Path("evaluation") / "datasets" / "logchunks-h3-sample.csv"
+LOGCHUNKS = Path("evaluation") / "datasets" / "raw" / "LogChunks"
 DIAGNOSE_HASHES = ROOT / "scenarios" / "diagnose-freeze.sha256"
 DIAGNOSE_ARTIFACTS = (
     "state/models/diagnose-l1.pkl",
@@ -374,9 +389,62 @@ def calibration_hash_copy(root: Path = ROOT) -> dict[str, str]:
     return dict(reversed(line.split("  ", 1)) for line in lines if line)
 
 
+def harness_input_files(root: Path = ROOT) -> list[Path]:
+    """The held-out Diagnose inputs: every log of a test-template variant, every sampled
+    LogChunks log (status used) and every LogChunks label file."""
+    import csv
+    import json
+
+    split = json.loads((root / SPLIT).read_text(encoding="utf-8"))
+    test = {t for t, s in split["templates"].items() if s == "test"}
+    files = []
+    for variant, meta in sorted(split["variants"].items()):
+        if meta["template"] in test:
+            files += sorted(f for f in (root / CORPUS / variant).glob("*") if f.is_file())
+    with (root / H3_SAMPLE).open(encoding="utf-8") as f:
+        used = [r["log_path"] for r in csv.DictReader(f) if r["status"] == "used"]
+    files += [root / LOGCHUNKS / "logs" / rel for rel in used]
+    files += sorted((root / LOGCHUNKS / "build-failure-reason").rglob("*.xml"))
+    return files
+
+
+def harness_input_hashes(root: Path = ROOT) -> dict[str, str]:
+    """Path -> SHA-256 of every held-out Diagnose input; a missing one refuses."""
+    out = {}
+    for f in harness_input_files(root):
+        if not f.is_file():
+            raise SystemExit(f"{f.relative_to(root).as_posix()}: missing, so it cannot be frozen")
+        out[f.relative_to(root).as_posix()] = hashlib.sha256(f.read_bytes()).hexdigest()
+    return out
+
+
+def freeze_harness_inputs(root: Path = ROOT) -> Path:
+    """Write the inputs' hashes (committed with the harness-diagnose-freeze tag)."""
+    path = root / HARNESS_INPUTS.relative_to(ROOT)
+    lines = [f"{h}  {name}" for name, h in sorted(harness_input_hashes(root).items())]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    return path
+
+
+def frozen_harness_inputs(root: Path = ROOT) -> dict[str, str]:
+    path = root / HARNESS_INPUTS.relative_to(ROOT)
+    if not path.is_file():
+        raise SystemExit("no frozen input hashes: the harness-diagnose-freeze script writes them")
+    text = path.read_text(encoding="utf-8")
+    return dict(reversed(line.split("  ", 1)) for line in text.splitlines() if line)
+
+
+def harness_inputs_unchanged(root: Path = ROOT) -> None:
+    """R1: every held-out Diagnose input is the one hashed at the freeze, none added or lost."""
+    if harness_input_hashes(root) != frozen_harness_inputs(root):
+        raise SystemExit("the held-out Diagnose inputs changed since harness-diagnose-freeze")
+
+
 def harness_diagnose_frozen(root: Path = ROOT) -> None:
-    """D69 stage A: the held-out Diagnose harness is tagged and unchanged since the tag."""
+    """D69 stage A: the held-out Diagnose harness is tagged and unchanged since the tag, and its
+    inputs are the ones hashed at the tag."""
     frozen_agents(root, HARNESS_DIAGNOSE_TAG, HARNESS_DIAGNOSE_PATHS)
+    harness_inputs_unchanged(root)
 
 
 def diagnose_frozen(root: Path = ROOT) -> None:
@@ -554,6 +622,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "freeze-diagnose", help="write the SHA-256 of Diagnose's untracked artifacts (D39)"
     )
+    sub.add_parser(
+        "freeze-harness-inputs", help="write the SHA-256 of the held-out Diagnose inputs (R1)"
+    )
     gen = sub.add_parser("generate", help="write the held-out specs (Step 11 only)")
     gen.add_argument("--confirm-step-11", action="store_true")
     pil = sub.add_parser("dev-pilot", help="write the stratified dev pilot to scenarios/dev/pilot/")
@@ -569,6 +640,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "verify-seed":
         checked_seed()
         print("seed matches the committed hash")
+        return 0
+    if args.cmd == "freeze-harness-inputs":
+        path = freeze_harness_inputs()
+        print(f"commit {path.relative_to(ROOT).as_posix()} with the {HARNESS_DIAGNOSE_TAG} tag")
         return 0
     if args.cmd == "freeze-diagnose":
         path = freeze_diagnose()
