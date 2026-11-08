@@ -211,3 +211,36 @@ def test_the_held_out_normal_window_is_accepted_beside_the_run_order(repo, tmp_p
         FROZEN, diagnose_truth(tmp_path, dev_window, "d.db"), repo
     )
     assert reason == "scored id not in the held-out run order (development): normal-traffic"
+
+
+# ------------------------------------------------------------ R6: Diagnose waits for eval-freeze
+
+R6_REASON = (
+    "eval-freeze missing: held-out Diagnose results stay blind until the whole harness is "
+    "frozen (D69)"
+)
+
+
+def test_diagnose_only_with_stage_a_but_without_eval_freeze_is_not_confirmatory(repo, tmp_path):
+    root = diagnose_repo(repo)
+    git(root, "tag", "-d", heldout.FREEZE_TAG)
+    t = diagnose_truth(tmp_path, [("a", "diagnose"), ("lc-abcdef123456", "diagnose")])
+    assert report_scope.confirmatory_scope(FROZEN, t, root) == R6_REASON
+
+
+def test_diagnose_only_with_both_tags_is_confirmatory(repo, tmp_path):
+    root = diagnose_repo(repo)  # the fixture holds eval-freeze; stage A is tagged here
+    t = diagnose_truth(tmp_path, [("a", "diagnose")])
+    assert report_scope.confirmatory_scope(FROZEN, t, root) is None
+
+
+def test_a_dev_diagnose_id_still_refuses_with_both_tags(repo, tmp_path):
+    root = diagnose_repo(repo)
+    t = diagnose_truth(tmp_path, [("a", "diagnose"), ("b", "diagnose")])
+    assert "(development): b" in report_scope.confirmatory_scope(FROZEN, t, root)
+
+
+def test_a_scenario_report_without_eval_freeze_keeps_its_reason(repo, tmp_path):
+    git(repo, "tag", "-d", heldout.FREEZE_TAG)
+    t = diagnose_truth(tmp_path, [(HELD_OUT[0], "release")])
+    assert report_scope.confirmatory_scope(FROZEN, t, repo) == "eval-freeze tag missing"

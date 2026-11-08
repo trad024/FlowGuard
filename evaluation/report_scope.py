@@ -13,10 +13,12 @@ fails is the reason it is not:
 Held-out Diagnose items (truth family "diagnose": corpus test-template variants and LogChunks
 logs, run before generate by D39 and D69) are never in the run order. They are confirmatory only
 if the pre-registration is frozen, harness-diagnose-freeze holds with its inputs unchanged
-(heldout.harness_diagnose_frozen), and every scored Diagnose id is in the held-out Diagnose set
-derived from those hashed inputs (`heldout_diagnose_ids`). DSO6 items (family "dso6") are
-accepted from the generated scenarios/heldout/dso6-items.yaml alongside the run order, and the
-held-out normal-traffic window under heldout.NORMAL_TRAFFIC_ID (family "normal").
+(heldout.harness_diagnose_frozen), every scored Diagnose id is in the held-out Diagnose set
+derived from those hashed inputs (`heldout_diagnose_ids`), and eval-freeze also holds (R6:
+held-out Diagnose results are not scored until the whole harness is frozen, D69). DSO6 items
+(family "dso6") are accepted from the generated scenarios/heldout/dso6-items.yaml alongside the
+run order, and the held-out normal-traffic window under heldout.NORMAL_TRAFFIC_ID (family
+"normal").
 
 The input labels come from the inputs, not from a flag: synthetic when the fixture marker
 (report_demo) sits next to the truth database, development when a development bundle is given
@@ -129,16 +131,21 @@ def confirmatory_scope(specification: dict, truth_path: Path, root: Path = ROOT)
     diagnose = {i for i, f in families.items() if f == "diagnose"}
     if diagnose and (reason := diagnose_scope(diagnose, root)) is not None:
         return reason
-    if diagnose and not set(families) - diagnose:
-        return None  # a Diagnose-only report: stage A alone decides (D69)
     try:
         heldout.frozen_agents(root)
     except SystemExit as exc:
+        if diagnose and "tag the agent code" in str(exc):  # R6: scored only once all is frozen
+            return (
+                "eval-freeze missing: held-out Diagnose results stay blind until the whole "
+                "harness is frozen (D69)"
+            )
         return (
             "eval-freeze tag missing"
             if "tag the agent code" in str(exc)
             else f"agents/ changed since {heldout.FREEZE_TAG}"
         )
+    if diagnose and not set(families) - diagnose:
+        return None  # Diagnose only: both freezes hold, no scenario needs the run order
     order_path = root / "scenarios" / "heldout" / "run-order.txt"
     if not order_path.is_file():
         return "held-out run order missing (heldout.py generate has not run)"
