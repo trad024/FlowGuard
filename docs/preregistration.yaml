@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: frozen
-version: "1.3"
+version: "1.4"
 drafted: 2026-10-27
 frozen: 2026-11-06
 amendments:
@@ -31,6 +31,16 @@ amendments:
     D69: >-
       Staged harness freeze: stage A (the held-out Diagnose harness) is tagged harness-diagnose-freeze right before the first held-out Diagnose call and never changed after; stage B (everything else) is frozen by eval-freeze before generate and the first cluster run.
       Held-out Diagnose runs are blind: progress only (calls, failures, tokens per lane), no accuracy, coverage or hallucination figure until all of Step 11 has run.
+  - date: "2026-11-08"
+    D70_stage_a: >-
+      Stage A (D69) also freezes evaluation/stats.py, report.py, report_policy.py, report_scope.py, datasets/corpus-split.json and datasets/logchunks-h3-sample.csv, and the SHA-256 of every held-out Diagnose input (each test-template corpus log, each sampled LogChunks log and every LogChunks label file) in scenarios/harness-diagnose-inputs.sha256, written by the harness-diagnose-freeze script and checked by the stage A guard.
+      Held-out Diagnose results are confirmatory only with this pre-registration frozen, harness-diagnose-freeze holding with its inputs unchanged, and every scored Diagnose id among the test-template variants and LogChunks sample items derived from those hashed inputs.
+    D70_h3_cut: >-
+      A LogChunks item whose target lines the D66 cut all removed from the request counts as a miss for H3 (the real system would have cut them too); the report gives the share of such items per level and, labelled sensitivity, H3 with them excluded.
+    D70_repeat_subset: >-
+      The D61 repeat subset: 30 items sampled from the sorted ids of every held-out Diagnose item (corpus test-template variants and LogChunks sample items) with the held-out seed's HMAC stream labelled "llm-repeat-subset"; repeat 1 is each item's main L3 call, repeats 2 and 3 carry their index in the cache key.
+    lanes: >-
+      6 lanes, one per team member, confirmed by the team lead (D41).
 
 seed:
   hash_file: scenarios/heldout-seed.sha256   # SHA-256 of the secret seed; the seed is in .env
