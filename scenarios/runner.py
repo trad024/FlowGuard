@@ -133,7 +133,7 @@ def validate_spec(spec) -> list[str]:
         if key in fault and int(fault[key]) < 0:
             errors.append(f"fault.{key} must be >= 0")
     if "template" in fault:
-        template = ci_failures.TEMPLATES.get(fault["template"])
+        template = ci_failures.ALL_VARIANTS.get(fault["template"])
         if family != "ci" or template is None or template.root_cause != fault.get("kind"):
             errors.append("fault.template must name a template of the ci family's fault.kind")
     through_ci = family == "release" and fault.get("delivery") == "commit"

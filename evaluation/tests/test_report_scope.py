@@ -106,10 +106,17 @@ def test_the_synthetic_label_comes_from_the_fixture_marker(tmp_path):
     assert report_scope.labels(t)["synthetic"] is True
 
 
-def test_the_real_repository_is_not_confirmatory_today(tmp_path):
-    """The repository's own state: no eval-freeze tag yet, whatever the pre-registration says."""
+def test_the_real_repository_is_not_confirmatory_before_unblinding(tmp_path):
+    """The repository's own state, whatever the pre-registration says: the scored ids here are
+    made up, so the scope is never confirmatory, and the reason is one of the pre-unblinding ones
+    (the eval-freeze tag is missing, the held-out run order does not exist yet, or the ids are
+    not in it). It holds before and after the tag and `generate`. After block 11 the real
+    repository is expected to become confirmatory: retire or update this test then."""
     reason = report_scope.confirmatory_scope(FROZEN, truth(tmp_path, HELD_OUT))
-    assert reason == "eval-freeze tag missing"
+    assert reason is not None
+    assert reason == "eval-freeze tag missing" or reason.startswith(
+        ("held-out run order missing", "scored id not in the held-out run order")
+    )
 
 
 # ---------------------------------------------------------------- R2: held-out Diagnose scope

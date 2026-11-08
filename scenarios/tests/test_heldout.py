@@ -1,8 +1,10 @@
 """Held-out generator (D26b): seed commitment, refusals, reproducible and valid draws.
 Temporary files only: no real seed is ever created here."""
 
+import collections
 import copy
 import hashlib
+import json
 
 import pytest
 import yaml
@@ -26,14 +28,16 @@ def prereg():
         "flaky_test-01",
         "infrastructure-04",
     ]
+    p["families"]["ci"]["count"] = 5  # D72: one spec per template
     return p
 
 
 def test_the_committed_preregistration_is_frozen_and_every_family_has_a_count():
     p = yaml.safe_load(heldout.PREREG.read_text(encoding="utf-8"))
-    assert p["status"] == "frozen" and str(p["version"]) == "1.5"
-    assert [a["date"] for a in p["amendments"]] == ["2026-11-07"] + ["2026-11-08"] * 3
+    assert p["status"] == "frozen" and str(p["version"]) == "1.6"
+    assert [a["date"] for a in p["amendments"]] == ["2026-11-07"] + ["2026-11-08"] * 4
     assert "R4_dependency_pool" in p["amendments"][3]
+    assert "D72" in p["amendments"][4]
     assert {"D70_stage_a", "D70_h3_cut", "D70_repeat_subset", "lanes"} <= set(p["amendments"][2])
     assert {"D66", "D67", "lanes"} <= set(p["amendments"][0])
     assert {"environment", "D69"} <= set(p["amendments"][1])
@@ -86,7 +90,7 @@ def test_generate_refuses_a_draft_and_needs_step_11(monkeypatch, tmp_path):
 
 def test_draws_are_valid_reproducible_and_independent_per_family(prereg):
     specs = heldout.generate(prereg, SEED)
-    assert len(specs) == 12 * len(prereg["families"])
+    assert len(specs) == 12 * (len(prereg["families"]) - 1) + 5  # ci: one per template (D72)
     assert specs == heldout.generate(prereg, SEED)
     assert len({s["id"] for s in specs}) == len(specs)
     assert all(s["id"].startswith("h-") and runner.validate_spec(s) == [] for s in specs)
@@ -470,3 +474,108 @@ def test_the_harness_check_needs_the_tag_and_then_the_inputs(tmp_path, monkeypat
     monkeypatch.setattr(heldout, "harness_inputs_unchanged", lambda *a: calls.append("inputs"))
     heldout.harness_diagnose_frozen(tmp_path)
     assert calls == ["tag", "inputs"]
+
+
+# ---------------------------------------------------------------- D72: the ci family
+
+# SHA-256 of the specs and sets the generator gave with the synthetic SEED above before D72; the
+# change touched only the ci family, so every other draw must stay byte-identical.
+BEFORE_D72 = {
+    "pipeline": "42c9fc98a21dbc667728d373a33291022cd40daffe51557ea43a4049d456b825",
+    "release": "3d9c8a1cd1e77ae0430e3d7c649fcf504c4d21c0cc3018bb0ad29062db0bb7b8",
+    "runtime": "1781deb8d3fbb26b6dcc8f3f513a54ce8715164a154ff896a58ea8bf361d6a6c",
+    "security": "2962e8df715cfe4e861474b973b467df59489c54f34450d3ffd162471aa100bf",
+    "dso5": "8a447ae4ad84aae4fd5831edb5f8c18e8c69e7c09ae527eb91939d62ebb8d1ff",
+    "dso6": "ba3887404dfa7dfe33e1a0e4761e07710771ac9447c32d1bcfa0b213404fa1b2",
+    "subset": "bc97060fab8423b8735dc37912362598a162ebcb3b8e42e55d32ee46afec833b",
+    "run_order": "fa4997825f2589a98b24215e5cfb13f08006075245497b9fa70e16a650160a62",
+    # from the unchanged id formula, on eval-freeze's code with the synthetic seed (the old
+    # generate cannot run): the 12 ci ids, and run_order over all 319 ids
+    "ci_ids": "8770c662ba88da5acbe45ca67d131b1e021a3d5940562e4957529c74c90b3b4c",
+    "full_run_order": "fd5098f6123cec6fe702756c56d57b5389f7f9226674314f323f604db719f102",
+}
+
+
+def digest(obj) -> str:
+    return hashlib.sha256(yaml.safe_dump(obj, sort_keys=False).encode()).hexdigest()
+
+
+@pytest.fixture
+def committed():
+    return yaml.safe_load(heldout.PREREG.read_text(encoding="utf-8"))
+
+
+def test_the_ci_family_is_one_spec_per_preregistered_variant(committed):
+    registered = committed["families"]["ci"]["templates"]
+    assert committed["families"]["ci"]["count"] == len(registered) == 12
+    specs = [s for s in heldout.generate(committed, SEED) if s["family"] == "ci"]
+    assert sorted(s["fault"]["template"] for s in specs) == sorted(registered)
+    assert len({s["id"] for s in specs}) == 12
+    for s in specs:
+        assert s["fault"]["kind"] == s["fault"]["template"].split("-", 1)[0]
+        assert s["ground_truth"]["root_cause"] == s["fault"]["kind"]
+        assert runner.validate_spec(s) == []
+    mix = collections.Counter(s["fault"]["kind"] for s in specs)
+    assert mix == {
+        "code": 2,
+        "dependency": 3,
+        "environment": 2,
+        "flaky_test": 3,
+        "infrastructure": 2,
+    }
+
+
+def test_the_ci_family_refuses_a_count_that_differs_from_its_templates(committed):
+    committed["families"]["ci"]["count"] = 11
+    with pytest.raises(SystemExit, match="must equal"):
+        heldout.generate(committed, SEED)
+    committed["families"]["ci"]["count"] = 12
+    committed["families"]["ci"]["templates"] = []
+    with pytest.raises(SystemExit, match="must equal"):
+        heldout.generate(committed, SEED)
+
+
+def test_a_wrong_class_or_unknown_template_fails_validation(committed):
+    spec = next(s for s in heldout.generate(committed, SEED) if s["family"] == "ci")
+    for bad in ({"template": "dependency-04.v2"}, {"template": "code-99.v7"}):
+        broken = copy.deepcopy(spec)
+        broken["fault"]["kind"] = "code"
+        broken["fault"].update(bad)
+        assert runner.validate_spec(broken) == [
+            "fault.template must name a template of the ci family's fault.kind"
+        ]
+
+
+def test_everything_but_the_ci_family_is_byte_identical_to_before_d72(committed):
+    for family in ("pipeline", "release", "runtime", "security"):
+        cfg = committed["families"][family]
+        specs = [heldout.scenario(SEED, family, i, cfg, committed) for i in range(cfg["count"])]
+        assert digest(specs) == BEFORE_D72[family]
+    files = [
+        "docs/a.md",
+        "README.md",
+        "app/podinfo/pkg/api/a.go",
+        "app/podinfo/pkg/api/a_test.go",
+        ".github/workflows/app-ci.yml",
+    ]
+    sequence = heldout.dso5_sequence(committed, SEED, files, ["github.com/x/y", "github.com/z/w"])
+    assert digest(sequence) == BEFORE_D72["dso5"]
+    assert digest(heldout.dso6_set(committed, SEED)) == BEFORE_D72["dso6"]
+
+
+def test_the_repeat_subset_and_the_run_order_are_unchanged_by_d72():
+    ids = [f"x-{i:03d}" for i in range(242)]
+    subset = sorted(heldout.stream(SEED, "llm-repeat-subset").sample(ids, 30))
+    assert hashlib.sha256(json.dumps(subset).encode()).hexdigest() == BEFORE_D72["subset"]
+    order = heldout.run_order(SEED, [{"id": i} for i in ids])
+    assert hashlib.sha256(json.dumps(order).encode()).hexdigest() == BEFORE_D72["run_order"]
+
+
+def test_ci_ids_and_the_whole_run_order_are_pinned_to_before_d72(committed):
+    """Both digests come from the unchanged id formula on the pre-D72 code, not from this code."""
+    specs = heldout.generate(committed, SEED)
+    ci = sorted(s["id"] for s in specs if s["family"] == "ci")
+    assert hashlib.sha256(json.dumps(ci).encode()).hexdigest() == BEFORE_D72["ci_ids"]
+    assert len({s["id"] for s in specs}) == len(specs) == 319
+    order = heldout.run_order(SEED, specs)
+    assert hashlib.sha256(json.dumps(order).encode()).hexdigest() == BEFORE_D72["full_run_order"]

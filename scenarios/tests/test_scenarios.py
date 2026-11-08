@@ -823,3 +823,41 @@ def test_cluster_reachable_is_bounded_and_false_on_failure(monkeypatch):
     monkeypatch.setattr(runner.subprocess, "run", run)
     assert runner.cluster_reachable(timeout_s=10) is False
     assert "--request-timeout=10s" in seen["cmd"] and seen["timeout"] == 15
+
+
+def test_pick_returns_every_variant_and_refuses_a_wrong_class():
+    for vid, variant in ci_failures.ALL_VARIANTS.items():
+        assert ci_failures.pick(variant.root_cause, random.Random(1), vid) is variant
+        other = next(c for c in ci_failures.CLASSES if c != variant.root_cause)
+        with pytest.raises(ValueError, match="no template"):
+            ci_failures.pick(other, random.Random(1), vid)
+    with pytest.raises(ValueError, match="no template"):
+        ci_failures.pick("code", random.Random(1), "code-06.v9")
+
+
+def test_a_dso5_failing_item_with_a_variant_id_builds_its_commit(head_archive, tmp_path):
+    import dso5_run
+
+    with tarfile.open(fileobj=io.BytesIO(head_archive)) as tar:
+        tar.extractall(tmp_path, filter="data")
+    item = {"index": 4, "change_type": "failing", "template": "flaky_test-02.v2"}
+    files, message = dso5_run.apply_change(tmp_path, item)
+    variant = ci_failures.ALL_VARIANTS["flaky_test-02.v2"]
+    assert files and message == variant.commit_message
+
+
+def _registered_ci_templates():
+    prereg = yaml.safe_load((ROOT / "docs" / "preregistration.yaml").read_text(encoding="utf-8"))
+    return prereg["families"]["ci"]["templates"]
+
+
+@pytest.mark.parametrize("template_id", _registered_ci_templates())
+def test_commit_change_builds_each_registered_ci_variant(head_archive, tmp_path, template_id):
+    with tarfile.open(fileobj=io.BytesIO(head_archive)) as tar:
+        tar.extractall(tmp_path, filter="data")
+    kind = template_id.split("-", 1)[0]
+    spec = {"family": "ci", "fault": {"kind": kind, "delivery": "commit", "template": template_id}}
+    built = runner.commit_change(tmp_path, spec, random.Random(0))
+    assert built["files"]
+    assert built["message"] == ci_failures.ALL_VARIANTS[template_id].commit_message
+    assert built["truth"]["template_id"] == template_id

@@ -239,7 +239,17 @@ def fault_params(cfg: dict, kind: str, rng: random.Random) -> tuple[dict, str | 
 
 def scenario(seed: str, family: str, index: int, cfg: dict, prereg: dict | None = None) -> dict:
     rng = stream(seed, f"{family}:{index}")
-    kind = weighted(cfg["kinds"], rng)
+    template = None
+    if family == "ci":  # D72: one live run per pre-registered test-split variant, no draw
+        templates = sorted(cfg.get("templates") or [])
+        if not templates or int(cfg["count"]) != len(templates):
+            raise SystemExit(
+                f"ci: count {cfg['count']} must equal the {len(templates)} test-split templates"
+            )
+        template = templates[index]
+        kind = template.split("-", 1)[0]
+    else:
+        kind = weighted(cfg["kinds"], rng)
     fault = {"kind": kind, "delivery": cfg["delivery"]}
     params, band = fault_params(cfg, kind, rng)
     fault.update(params)
@@ -249,11 +259,8 @@ def scenario(seed: str, family: str, index: int, cfg: dict, prereg: dict | None 
         and kind in ("vulnerable_dependency", "low_severity_finding")
     ):
         fault.update(dependency_pick(prereg, kind, rng))
-    if family == "ci":
-        templates = [t for t in cfg.get("templates") or [] if t.startswith(f"{kind}-")]
-        if not templates:
-            raise SystemExit(f"no test-split templates for {kind} in the pre-registration")
-        fault["template"] = rng.choice(sorted(templates))
+    if template:
+        fault["template"] = template
     spec = {
         "id": "h-"
         + hmac.new(seed.encode(), f"id:{family}:{index}".encode(), "sha256").hexdigest()[:10],

@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: frozen
-version: "1.5"
+version: "1.6"
 drafted: 2026-10-27
 frozen: 2026-11-06
 amendments:
@@ -44,6 +44,11 @@ amendments:
   - date: "2026-11-08"
     R4_dependency_pool: >-
       DSO5's dependency_bump commits draw a (module, version) from dso5_commit_sequence.dependency_pool with the held-out seed: the next released patch of 6 direct requirements of app/podinfo/go.mod, each scanned clean (no HIGH or CRITICAL) with the pinned Trivy 0.75.0, DB of 2026-11-07T18:32:58Z.
+  - date: "2026-11-08"
+    D72: >-
+      The ci family is one live run per entry of families.ci.templates (12), in sorted order; its kind is the template's class.
+      families.ci.kinds does not apply to ci (12 runs cannot be uniform over 5 kinds): the kind mix is the registered list's (code 2, dependency 3, environment 2, flaky_test 3, infrastructure 2).
+      Made at the first generate, which wrote nothing, before any ci or other stage B result existed (D65).
 
 seed:
   hash_file: scenarios/heldout-seed.sha256   # SHA-256 of the secret seed; the seed is in .env

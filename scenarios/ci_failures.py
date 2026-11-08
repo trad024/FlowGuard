@@ -978,11 +978,11 @@ def template_of(variant_id: str) -> str:
 
 
 def pick(root_cause: str, rng: random.Random, template_id: str | None = None) -> Template:
-    """The named template, or a random one of the class."""
+    """The named template or variant (D72), or a random template of the class."""
     if root_cause not in BY_CLASS:
         raise ValueError(f"root cause must be one of {CLASSES}, got {root_cause!r}")
     if template_id:
-        template = TEMPLATES.get(template_id)
+        template = ALL_VARIANTS.get(template_id)
         if template is None or template.root_cause != root_cause:
             raise ValueError(f"no template {template_id!r} for {root_cause}")
         return template
