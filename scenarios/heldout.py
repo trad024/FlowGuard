@@ -49,6 +49,9 @@ ENV_FILE = ROOT / ".env"
 OUT = ROOT / "scenarios" / "heldout"
 SEED_VAR = "FLOWGUARD_HELDOUT_SEED"
 FREEZE_TAG = "eval-freeze"
+# The held-out normal-traffic window (DSO1 false alerts): recorded by `pilot.py normal --heldout`
+# under this id, not the dev "normal-traffic"; it is not a generated spec, so not in run-order.txt
+NORMAL_TRAFFIC_ID = "h-normal-traffic"
 # D39 staged freeze: Diagnose's held-out (test templates) and LogChunks runs may start once the
 # pre-registration is frozen and this tag marks the Diagnose code, before eval-freeze.
 DIAGNOSE_TAG = "diagnose-freeze"

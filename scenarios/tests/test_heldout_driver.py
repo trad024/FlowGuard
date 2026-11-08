@@ -162,3 +162,9 @@ def test_the_cli_refuses_without_confirmation(monkeypatch):
     monkeypatch.setattr(pilot, "run_heldout", lambda *a, **k: pytest.fail("ran"))
     with pytest.raises(SystemExit, match="--confirm-step-11"):
         pilot.main(["heldout"])
+
+
+def test_the_held_out_normal_window_needs_confirmation(monkeypatch):
+    monkeypatch.setattr(pilot, "run_normal", lambda *a, **k: pytest.fail("ran"))
+    with pytest.raises(SystemExit, match="--confirm-step-11"):
+        pilot.main(["normal", "--heldout"])

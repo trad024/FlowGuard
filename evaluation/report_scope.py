@@ -15,7 +15,8 @@ logs, run before generate by D39 and D69) are never in the run order. They are c
 if the pre-registration is frozen, harness-diagnose-freeze holds with its inputs unchanged
 (heldout.harness_diagnose_frozen), and every scored Diagnose id is in the held-out Diagnose set
 derived from those hashed inputs (`heldout_diagnose_ids`). DSO6 items (family "dso6") are
-accepted from the generated scenarios/heldout/dso6-items.yaml alongside the run order.
+accepted from the generated scenarios/heldout/dso6-items.yaml alongside the run order, and the
+held-out normal-traffic window under heldout.NORMAL_TRAFFIC_ID (family "normal").
 
 The input labels come from the inputs, not from a flag: synthetic when the fixture marker
 (report_demo) sits next to the truth database, development when a development bundle is given
@@ -147,6 +148,8 @@ def confirmatory_scope(specification: dict, truth_path: Path, root: Path = ROOT)
         return f"held-out seed check failed: {exc}"
     order = set(order_path.read_text(encoding="utf-8").split())
     order |= {i for i in dso6_ids(root) if families.get(i) == "dso6"}
+    if families.get(heldout.NORMAL_TRAFFIC_ID) == "normal":  # the held-out normal window (R5)
+        order.add(heldout.NORMAL_TRAFFIC_ID)
     ids = [i for i in scored_ids(truth_path) if i not in diagnose]
     if not ids:
         return "no scored scenario in the truth database"

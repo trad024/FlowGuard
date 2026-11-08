@@ -201,3 +201,13 @@ def test_diagnose_scenario_and_dso6_ids_together(repo, tmp_path):
     rows.append(("g-9999999999", "dso6"))  # not a generated item
     reason = report_scope.confirmatory_scope(FROZEN, diagnose_truth(tmp_path, rows, "x.db"), root)
     assert reason == "scored id not in the held-out run order (unknown): g-9999999999"
+
+
+def test_the_held_out_normal_window_is_accepted_beside_the_run_order(repo, tmp_path):
+    rows = [(HELD_OUT[0], "release"), (heldout.NORMAL_TRAFFIC_ID, "normal")]
+    assert report_scope.confirmatory_scope(FROZEN, diagnose_truth(tmp_path, rows), repo) is None
+    dev_window = [(HELD_OUT[0], "release"), ("normal-traffic", "normal")]
+    reason = report_scope.confirmatory_scope(
+        FROZEN, diagnose_truth(tmp_path, dev_window, "d.db"), repo
+    )
+    assert reason == "scored id not in the held-out run order (development): normal-traffic"

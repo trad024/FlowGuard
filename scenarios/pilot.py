@@ -197,8 +197,8 @@ def run_heldout(
     return out
 
 
-def run_normal(hours: float, env: str = "staging") -> Path:
-    """Load with no fault for `hours`, then record the window."""
+def run_normal(hours: float, env: str = "staging", spec_id: str = "normal-traffic") -> Path:
+    """Load with no fault for `hours`, then record the window (held out: heldout's id)."""
     run_id = runner.new_run_id()
     load = deployer.LoadGenerator(env)
     start = datetime.now(UTC)
@@ -210,7 +210,7 @@ def run_normal(hours: float, env: str = "staging") -> Path:
     end = datetime.now(UTC)
     truth = groundtruth.GroundTruthDB.open()
     gaps = runner.suspend_gaps([log])
-    spec = {"id": "normal-traffic", "family": "normal", "hours": hours, "environment": env}
+    spec = {"id": spec_id, "family": "normal", "hours": hours, "environment": env}
     return recorder.record(
         run_id,
         start,
@@ -236,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--agents", action="store_true", help="record under agents-mode (D54)")
     n = sub.add_parser("normal")
     n.add_argument("--hours", type=float, default=4)
+    n.add_argument("--heldout", action="store_true", help="Step 11: the held-out window")
+    n.add_argument("--confirm-step-11", action="store_true")
     h = sub.add_parser("heldout", help="Step 11: the held-out specs in run order")
     h.add_argument("--confirm-step-11", action="store_true")
     m = sub.add_parser("mode")
@@ -251,6 +253,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"mode": runner.canary_mode(deployer.Cluster(args.env).rollout())}))
     elif args.cmd == "scenarios":
         run_scenarios(sorted(args.dir.glob("*.yaml")), "agents" if args.agents else "l0")
+    elif args.heldout:
+        require_heldout(args.confirm_step_11)
+        import heldout
+
+        print(run_normal(args.hours, spec_id=heldout.NORMAL_TRAFFIC_ID))
     else:
         print(run_normal(args.hours))
     return 0

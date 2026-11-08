@@ -1,10 +1,11 @@
 # Step 11 runbook: the held-out evaluation
 
 The operator's procedure for Step 11. Sources:
-- [`preregistration.yaml`](preregistration.yaml), version 1.3 (frozen 2026-11-06; amendments of
+- [`preregistration.yaml`](preregistration.yaml), version 1.5 (frozen 2026-11-06; amendments of
   2026-11-07 and 2026-11-08: D66 request cap, D67 calibrated Diagnose confidence, 6 lanes, the
-  Step 11 environment, D69 staged harness freeze);
-- the decision log in [`blueprint-v2.md`](blueprint-v2.md) (D63 to D69 for this step);
+  Step 11 environment, D69 staged harness freeze, D70 stage A additions, Diagnose scope, H3 cut
+  rule and repeat subset, D71 DSO5 dependency pool);
+- the decision log in [`blueprint-v2.md`](blueprint-v2.md) (D63 to D71 for this step);
 - [`step-11-analysis.md`](step-11-analysis.md);
 - the code under `scenarios/`, `evaluation/` and `scripts/`.
 
@@ -32,8 +33,10 @@ them; the operator does not. Held-out Diagnose runs are blind (D69): they print 
   `py scenarios\eval_freeze.py check` runs it among its checks.
 - [ ] **Seed matches its hash:** `py scenarios\heldout.py verify-seed` prints
   `seed matches the committed hash`. It never prints the seed.
-- [ ] **LLM lanes (D41, amended 2026-11-07): 6 lanes**, `GROQ_KEY_1` to `GROQ_KEY_5` and
-  `LLM_API_KEY`. Without any call: `py scenarios\eval_freeze.py lanes --expect 6` (names and key
+- [ ] **LLM lanes (D41, amended 2026-11-07, confirmed 2026-11-08): 6 lanes, one per team
+  member, confirmed by the team lead**, `GROQ_KEY_1` to `GROQ_KEY_5` and `LLM_API_KEY`. A probe
+  round on 2026-11-08 (one call per lane, sequential, early in the UTC day) left every lane at
+  999 of 1,000 requests: no two keys share an organization's counter. Without any call: `py scenarios\eval_freeze.py lanes --expect 6` (names and key
   format only, never a value). Whether the 6 keys are 6 independent organizations needs one
   probe call per lane: the runners' lane check (`diagnose_dev.ready_lanes`, printed as
   `lane_check` and `independent_lanes` at the start of every LLM run). Record that count for the
@@ -58,15 +61,16 @@ them; the operator does not. Held-out Diagnose runs are blind (D69): they print 
 
 | Stage | What | Frozen by | Order |
 |---|---|---|---|
-| A | The held-out Diagnose harness: `diagnose_heldout.py`, `diagnose_repeats.py`, `llm_provenance.py`, the toolkit's H3 path (`report_metrics.py`, `observations.py`, `report_data.py`) and what they reuse (`diagnose_dev.py`, `heldout_guard.py`, `logchunks.py`); `HARNESS_DIAGNOSE_PATHS` in `scenarios/heldout.py` | `harness-diagnose-freeze`, right before the first held-out Diagnose call | 1. K1 and K2 merged and reviewed; 2. lanes confirmed (D41); 3. `harness-diagnose-freeze`; 4. blocks 1 and 10 (allowed before eval-freeze by D39) |
+| A | The held-out Diagnose harness: `diagnose_heldout.py`, `diagnose_repeats.py`, `llm_provenance.py`, the toolkit (`report.py`, `report_metrics.py`, `report_data.py`, `report_policy.py`, `report_scope.py`, `observations.py`, `stats.py`), what they reuse (`diagnose_dev.py`, `heldout_guard.py`, `logchunks.py`), the corpus split and the H3 sample, and the SHA-256 of every held-out Diagnose input (`scenarios/harness-diagnose-inputs.sha256`, D70); `HARNESS_DIAGNOSE_PATHS` in `scenarios/heldout.py` | `harness-diagnose-freeze`, right before the first held-out Diagnose call | 1. K1 and K2 merged and reviewed; 2. lanes confirmed (D41); 3. `harness-diagnose-freeze`; 4. blocks 1 and 10 (allowed before eval-freeze by D39) |
 | B | Everything else (agents, scenario runner and driver, replays, DSO5, DSO6, report) | `eval-freeze`, before `generate` and the first cluster run | 5. `eval-freeze`; 6. block 0 (generate); 7. blocks 2 to 9; 8. block 11 |
 
 Tagging (each refuses unless `dev` is clean and in step with `origin/dev`, its tag is absent,
 the Diagnose freeze holds and the full test suite passes; it tags locally and prints the push
-command, it never pushes):
+commands, it never pushes). The stage A script first writes and commits the input hashes:
 
 ```powershell
 .\scripts\harness-diagnose-freeze.ps1     # stage A
+git push origin dev
 git push origin refs/tags/harness-diagnose-freeze
 .\scripts\eval-freeze.ps1                 # stage B
 git push origin refs/tags/eval-freeze
@@ -118,9 +122,9 @@ py evaluation\diagnose_heldout.py run --confirm-step-11 --set logchunks --levels
   raw quotes and per-call records (lane, cache key, the D66 cut, retrieved example ids),
   `groundtruth.db` (labels only).
 - Then `py evaluation\llm_provenance.py`.
-- **TO CHECK (decision pending):** H3 under D66. The H3 sample was chosen by visibility under the
-  drain3 reduction; D66's token cut may remove every target line of a sampled log. Whether such
-  an item is a miss or excluded must be decided before any result.
+- H3 under D66 (D70): each LogChunks record carries `targets_shown`, the target lines left in the
+  request after the cut. An item with none left is a miss; the report also gives the share of
+  such items per level and H3 with them excluded, labelled "sensitivity".
 
 ### Block 10: L3 repeats (D61, stage A)
 
@@ -131,8 +135,7 @@ py evaluation\diagnose_repeats.py run --confirm-step-11
 The subset: 30 items sampled from the sorted ids of every held-out Diagnose item, with the
 held-out seed's HMAC stream labelled `llm-repeat-subset` (seed from `.env`, no `generate`).
 Repeat 1 is the item's main L3 call (block 1); this makes repeats 2 and 3 with the repeat index
-in the cache key (D28): 60 calls. **TO CHECK (decision pending):** the draw rule above is a
-proposal; no document fixed it before.
+in the cache key (D28): 60 calls. The rule is pre-registered (1.4, D70).
 
 ### Block 0: generate (stage B)
 
@@ -148,7 +151,7 @@ the seed matches and `scenarios/heldout/` is empty. **Generated once.** Writes t
 
 ```powershell
 py scenarios\pilot.py heldout --confirm-step-11
-py scenarios\pilot.py normal --hours 4          # block 4, overnight
+py scenarios\pilot.py normal --hours 4 --heldout --confirm-step-11   # block 4, overnight
 ```
 
 The driver follows `scenarios\heldout\run-order.txt` and sets staging's Rollout before each
@@ -188,9 +191,10 @@ py evaluation\dso5_run.py run --confirm-step-11
   (plan.py takes the mode from the branch), from `origin/dev`, in a separate worktree; each commit
   pushed and its app-ci run recorded (conclusion, duration, time to first failure, jobs) in
   `evaluation\runs\dso5-heldout\runs.jsonl`. Resumable.
-- **TO CHECK (decision pending):** `dependency_bump` commits. The generator records the module
-  but no target version; the live run refuses them until a rule is decided ("a version with no
-  HIGH or CRITICAL finding", `dso5_commit_sequence.change_types`).
+- `dependency_bump` commits (D71): the generator draws a module and its next patch version from
+  `dso5_commit_sequence.dependency_pool` (6 entries, each scanned clean with Trivy 0.75.0, DB
+  2026-11-07T18:32:58Z); `dso5_run.py` pins it with its go.sum lines (it runs
+  `golang:1.26.10-alpine` for `go mod download`).
 - D68: the Optimizer's skip list is applied by app-ci's plan step, not through the gate; DSO5
   measures it under P2 and the mandatory jobs.
 
@@ -200,21 +204,25 @@ py evaluation\dso5_run.py run --confirm-step-11
 py evaluation\monitor_replay.py score <held-out recordings> --heldout --confirm-step-11 --records evaluation\runs\dso1-records.jsonl
 py evaluation\release_replay.py score <held-out recordings> --heldout --confirm-step-11 --records evaluation\runs\dso3-records.jsonl
 py evaluation\ci_levels.py <ci recording> --confirm-step-11     # L0 to L4 on the L5 run's recording
-py evaluation\observations.py state\audit.db <out.jsonl>
-py evaluation\report.py --confirmatory --out results\final
+py evaluation\merge_heldout.py --confirm-step-11 --out evaluation\runs\report-inputs `
+    --source diagnose:evaluation\runs\diagnose-heldout --source dso6:evaluation\runs\dso6-heldout `
+    --source "scenarios:audit=state\audit.db,truth=evaluation\runs\groundtruth.db,replays=evaluation\runs\dso1-records.jsonl;evaluation\runs\dso3-records.jsonl"
+py evaluation\report.py --confirmatory --audit evaluation\runs\report-inputs\audit.db `
+    --truth evaluation\runs\report-inputs\groundtruth.db --replays evaluation\runs\report-inputs\replay.jsonl --out results\final
 ```
 
 The held-out replay modes are gated like generate, labelled "held-out", never fit or calibrate
 on held-out recordings, and write the replay records `report_data.load` reads. Dev mode still
 refuses held-out paths.
 
-**TO CHECK (decisions pending):**
-- `report_scope` calls a report confirmatory only if every scored id is in `run-order.txt`; the
-  held-out Diagnose items (corpus test variants, LogChunks) never are, so H3 cannot be reported
-  confirmatory as it stands. A held-out Diagnose scope is proposed, not built.
-- One report over several sources: the Diagnose records and truth rows, the DSO6 audit rows and
-  the scenario recordings live in separate files and databases; the merge into the report's one
-  audit log, truth database and replay file is not scripted yet.
+`merge_heldout.py` (R5) refuses on any id collision between sources and on any development,
+synthetic or dev-window id, before writing anything. `report_scope` (D70) accepts: scenario ids
+in `run-order.txt`; DSO6 ids from `dso6-items.yaml`; the held-out normal window
+`h-normal-traffic`; and held-out Diagnose ids from the inputs hashed at harness-diagnose-freeze,
+only while that freeze holds.
+
+**TO CHECK:** `ci_levels.py` (L0 to L4 offline on the live ci recordings) prints its decisions
+but writes no replay records yet, so those levels are not in the merged report.
 
 ## 3. Checkpoints
 
