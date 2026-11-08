@@ -34,10 +34,11 @@ def prereg():
 
 def test_the_committed_preregistration_is_frozen_and_every_family_has_a_count():
     p = yaml.safe_load(heldout.PREREG.read_text(encoding="utf-8"))
-    assert p["status"] == "frozen" and str(p["version"]) == "1.6"
-    assert [a["date"] for a in p["amendments"]] == ["2026-11-07"] + ["2026-11-08"] * 4
+    assert p["status"] == "frozen" and str(p["version"]) == "1.7"
+    assert [a["date"] for a in p["amendments"]] == ["2026-11-07"] + ["2026-11-08"] * 5
     assert "R4_dependency_pool" in p["amendments"][3]
     assert "D72" in p["amendments"][4]
+    assert {"D75_environment", "D75_execution"} <= set(p["amendments"][5])
     assert {"D70_stage_a", "D70_h3_cut", "D70_repeat_subset", "lanes"} <= set(p["amendments"][2])
     assert {"D66", "D67", "lanes"} <= set(p["amendments"][0])
     assert {"environment", "D69"} <= set(p["amendments"][1])

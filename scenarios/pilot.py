@@ -8,6 +8,8 @@ of normal traffic, resumably.
                                                   # release specs under agents-mode (D54)
     python scenarios/pilot.py heldout --confirm-step-11
                                                   # Step 11: the held-out set, in run order
+    python scenarios/pilot.py heldout --confirm-step-11 --share A
+                                                  # one laptop's share of it (D75)
 
 Held-out driver (Step 11, D65): the specs of scenarios/heldout/ run in the order of its
 run-order.txt, each family in its own mode:
@@ -137,6 +139,33 @@ def run_order(folder: Path = HELDOUT) -> list[Path]:
     return paths
 
 
+# D75: the run order is split across three laptops by a fixed rule, before any recording.
+# Share A (this laptop: GitHub and the deployer) takes every commit-delivered family; release
+# and runtime specs alternate between B (1st, 3rd, ...) and C (2nd, 4th, ...) in run order.
+SHARES = ("A", "B", "C")
+SHARE_A_FAMILIES = ("ci", "pipeline", "security")
+SHARE_BC_FAMILIES = ("release", "runtime")
+
+
+def share(paths: list[Path], name: str) -> list[Path]:
+    """The specs of one share, in run-order sequence."""
+    if name not in SHARES:
+        raise SystemExit(f"unknown share {name!r}: one of {', '.join(SHARES)}")
+    out, nth = [], 0
+    for path in paths:
+        family = runner.load_spec(path)["family"]
+        if family in SHARE_A_FAMILIES:
+            owner = "A"
+        elif family in SHARE_BC_FAMILIES:
+            owner = "B" if nth % 2 == 0 else "C"
+            nth += 1
+        else:
+            raise SystemExit(f"{path.name}: family {family!r} belongs to no share")
+        if owner == name:
+            out.append(path)
+    return out
+
+
 def recorded(truth: groundtruth.GroundTruthDB, spec_id: str, family: str) -> bool:
     """A valid run of the spec in its family's mode, with its recording folder present."""
     with truth._connect() as db:
@@ -240,13 +269,18 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--confirm-step-11", action="store_true")
     h = sub.add_parser("heldout", help="Step 11: the held-out specs in run order")
     h.add_argument("--confirm-step-11", action="store_true")
+    h.add_argument("--share", help="D75: run only share A, B or C of the run order")
     m = sub.add_parser("mode")
     m.add_argument("mode", choices=("agents", "l0"))
     m.add_argument("--env", default="staging")
     args = parser.parse_args(argv)
     if args.cmd == "heldout":
         require_heldout(args.confirm_step_11)
-        run_heldout(run_order())
+        paths = run_order()
+        if args.share is not None:
+            paths = share(paths, args.share)
+            print(json.dumps({"share": args.share, "specs": len(paths)}), flush=True)
+        run_heldout(paths)
         return 0
     if args.cmd == "mode":
         runner.set_canary_mode(args.env, args.mode)

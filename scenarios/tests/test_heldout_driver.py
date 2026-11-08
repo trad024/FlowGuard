@@ -168,3 +168,74 @@ def test_the_held_out_normal_window_needs_confirmation(monkeypatch):
     monkeypatch.setattr(pilot, "run_normal", lambda *a, **k: pytest.fail("ran"))
     with pytest.raises(SystemExit, match="--confirm-step-11"):
         pilot.main(["normal", "--heldout"])
+
+
+# ---------------------------------------------------------------- D75: shares per laptop
+
+
+@pytest.fixture
+def mixed(tmp_path, monkeypatch):
+    """A longer synthetic run order with every family, in a non-sorted order."""
+    families = ["runtime", "ci", "release", "release", "pipeline", "runtime", "security",
+                "runtime", "release", "pipeline", "ci", "runtime", "release"]  # fmt: skip
+    order = []
+    for n, family in enumerate(families):
+        sid = f"h-{(n * 7919) % 1000:03d}{family[:2]}"
+        spec = {"id": sid, "family": family, "fault": {"kind": "x", "delivery": "commit"},
+                "ground_truth": {"expected_l0": "detect"}}  # fmt: skip
+        (tmp_path / f"{sid}.yaml").write_text(yaml.safe_dump(spec), encoding="utf-8")
+        order.append(sid)
+    (tmp_path / "run-order.txt").write_text("".join(i + "\n" for i in order), encoding="utf-8")
+    monkeypatch.setattr(pilot.runner, "load_spec", lambda p: yaml.safe_load(p.read_text()))
+    return tmp_path, order, dict(zip(order, families, strict=True))
+
+
+def test_the_shares_are_disjoint_cover_the_run_order_and_keep_its_sequence(mixed):
+    folder, order, family = mixed
+    paths = pilot.run_order(folder)
+    shares = {name: [p.stem for p in pilot.share(paths, name)] for name in pilot.SHARES}
+    union = [sid for name in pilot.SHARES for sid in shares[name]]
+    assert sorted(union) == sorted(order) and len(union) == len(set(union))
+    for ids in shares.values():
+        assert ids == [sid for sid in order if sid in ids]  # run-order sequence kept
+    assert {family[s] for s in shares["A"]} == {"ci", "pipeline", "security"}
+    bc = [sid for sid in order if family[sid] in ("release", "runtime")]
+    assert shares["B"] == bc[0::2] and shares["C"] == bc[1::2]
+
+
+def test_an_unknown_share_or_family_is_refused(mixed, monkeypatch):
+    folder, _, _ = mixed
+    paths = pilot.run_order(folder)
+    for bad in ("D", "a", ""):
+        with pytest.raises(SystemExit, match="unknown share"):
+            pilot.share(paths, bad)
+    monkeypatch.setattr(pilot.runner, "load_spec", lambda p: {"family": "normal"})
+    with pytest.raises(SystemExit, match="belongs to no share"):
+        pilot.share(paths, "A")
+
+
+RUN_ORDER = pilot.run_order  # the real one, before any test patches it
+
+
+def cli(monkeypatch, folder, argv):
+    ran = []
+    monkeypatch.setattr(pilot, "require_heldout", lambda confirmed: None)
+    monkeypatch.setattr(pilot, "run_order", lambda: RUN_ORDER(folder))
+    monkeypatch.setattr(
+        pilot, "run_heldout", lambda paths, **k: ran.append([p.stem for p in paths])
+    )
+    pilot.main(argv)
+    return ran[0]
+
+
+def test_the_cli_default_is_the_full_run_order_and_a_share_prints_its_count(
+    mixed, monkeypatch, capsys
+):
+    folder, order, family = mixed
+    assert cli(monkeypatch, folder, ["heldout", "--confirm-step-11"]) == order
+    assert capsys.readouterr().out == ""  # no option: nothing new printed
+    a = cli(monkeypatch, folder, ["heldout", "--confirm-step-11", "--share", "A"])
+    assert a == [s for s in order if family[s] in ("ci", "pipeline", "security")]
+    assert capsys.readouterr().out.strip() == f'{{"share": "A", "specs": {len(a)}}}'
+    with pytest.raises(SystemExit, match="unknown share"):
+        cli(monkeypatch, folder, ["heldout", "--confirm-step-11", "--share", "Z"])

@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: frozen
-version: "1.6"
+version: "1.7"
 drafted: 2026-10-27
 frozen: 2026-11-06
 amendments:
@@ -49,6 +49,12 @@ amendments:
       The ci family is one live run per entry of families.ci.templates (12), in sorted order; its kind is the template's class.
       families.ci.kinds does not apply to ci (12 runs cannot be uniform over 5 kinds): the kind mix is the registered list's (code 2, dependency 3, environment 2, flaky_test 3, infrastructure 2).
       Made at the first generate, which wrote nothing, before any ci or other stage B result existed (D65).
+  - date: "2026-11-08"
+    D75_environment: >-
+      The held-out scenarios are recorded on three laptops of the same specification (8 CPUs, the same Docker memory limit and k3d cluster from infra/), each with the pinned Python 3.13.0 stack of the 2026-11-08 environment amendment and each passing the frozen checks (eval-freeze, diagnose-freeze, the committed seed) before its first recording.
+    D75_execution: >-
+      The run order is split by a fixed rule, before any held-out recording exists: laptop A runs every ci, pipeline and security spec (GitHub and the deployer); release and runtime specs alternate between laptop B (1st, 3rd, ...) and laptop C (2nd, 4th, ...) in run-order sequence. Each laptop keeps run-order sequence within its share, and a spec's re-runs stay on its laptop.
+      A per-machine breakdown of the release and runtime results is reported as exploratory.
 
 seed:
   hash_file: scenarios/heldout-seed.sha256   # SHA-256 of the secret seed; the seed is in .env
