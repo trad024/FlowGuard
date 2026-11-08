@@ -66,3 +66,54 @@ def test_each_offline_level_decides_once_on_the_same_run_and_nothing_acts(tmp_pa
     assert all(r["output"].startswith("dry run: ") for r in outputs)
     assert not any(r["level"] in ("L2", "L3", "L4") for r in outputs)
     assert audit.query("SELECT count(*) AS n FROM approvals")[0]["n"] == 0
+
+
+# ---------------------------------------------------------------- R7: replay records
+
+
+def test_each_level_writes_a_replay_record_the_report_reads(tmp_path):
+    import groundtruth
+    import merge_heldout
+    import report
+    import report_data
+    import report_scope
+
+    rec = recording(tmp_path / "r-0000abcd")
+    audit = tmp_path / "audit.db"
+    rows = []
+    ci_levels.decide(rec, audit, Diagnose(), records=rows)
+    assert [r["level"] for r in rows] == ["L0", "L1", "L2", "L3", "L4"]
+    assert {r["method"] for r in rows} == {"regex", "tfidf_lr", "llm_zero_shot", "llm_retrieval"}
+    l3 = next(r for r in rows if r["level"] == "L3")
+    assert l3["observed"] == {"selected_action": "pin_dependency", "evidence_lines": [1],
+                              "root_cause": "dependency"}  # fmt: skip
+    records = tmp_path / "ci-records.jsonl"
+    records.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    truth = tmp_path / "truth.db"
+    groundtruth.GroundTruthDB(truth).record_run(
+        "r-0000abcd", spec={"id": "h-0000000099", "family": "ci"},
+        ground_truth={"root_cause": "dependency", "expected_l0": "ci_failure"}, observed={},
+        l0_correct=None)  # fmt: skip
+    joined, summary = report_data.load(audit, truth, records)
+    assert summary["joined_records"] == 5
+    assert all(r["audit"]["proposals"] == 1 for r in joined)  # each joined to its own proposal
+    out = tmp_path / "merged"
+    source = merge_heldout.parse_source(f"scenarios:audit={audit},truth={truth},replays={records}")
+    assert merge_heldout.merge([source], out)["replay_records"] == 5
+    report.main(["--audit", str(out / "audit.db"), "--truth", str(out / "groundtruth.db"),
+                 "--replays", str(out / "replay.jsonl"), "--out", str(tmp_path / "report"),
+                 "--no-plots"])  # fmt: skip
+    results = json.loads((tmp_path / "report" / "results.json").read_text())
+    assert results["metadata"]["confirmatory"] is False
+    reason = report_scope.confirmatory_scope({"status": "frozen"}, out / "groundtruth.db")
+    assert isinstance(reason, str) and reason
+
+
+def test_the_cli_writes_the_records_file(tmp_path, monkeypatch):
+    rec = recording(tmp_path / "r-0000abcd")
+    monkeypatch.setattr(ci_levels, "full_diagnose", lambda audit: Diagnose())
+    monkeypatch.setattr(ci_levels.AuditLog, "open", classmethod(
+        lambda cls, **kw: AuditLog(tmp_path / "a.db")))  # fmt: skip
+    out = tmp_path / "records.jsonl"
+    assert ci_levels.main([str(rec), "--records", str(out)]) == 0
+    assert len(out.read_text().splitlines()) == 5

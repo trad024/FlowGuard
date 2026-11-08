@@ -171,8 +171,10 @@ family, only when it changes:
   a proposal the gate sends to a human waits on the printed approval page (127.0.0.1) for up to
   60 minutes. Keep a person available during the ci specs.
 - The commit families need a clean `dev` checkout; each run switches branches in it.
-- **TO CHECK:** the pre-registered "4 to 5 at a time" for ci and pipeline. The driver runs one
-  spec at a time (pipeline about 10 h sequentially); parallel runs need separate checkouts.
+- **Pipeline (and ci) specs run one at a time**, not the "4 to 5 at a time" the pre-registration
+  mentions (`families.pipeline.execution`): a pipeline anomaly is a slow step, measured as job
+  duration; parallel runs share the runner pool and the laptop and would distort the very
+  timings they measure. Pipeline takes about 10 h this way.
 
 ### Blocks 8 and 9: DSO5 and DSO6 (stage B)
 
@@ -203,10 +205,10 @@ py evaluation\dso5_run.py run --confirm-step-11
 ```powershell
 py evaluation\monitor_replay.py score <held-out recordings> --heldout --confirm-step-11 --records evaluation\runs\dso1-records.jsonl
 py evaluation\release_replay.py score <held-out recordings> --heldout --confirm-step-11 --records evaluation\runs\dso3-records.jsonl
-py evaluation\ci_levels.py <ci recording> --confirm-step-11     # L0 to L4 on the L5 run's recording
+py evaluation\ci_levels.py <ci recordings> --confirm-step-11 --records evaluation\runs\ci-records.jsonl   # L0 to L4 on the L5 runs' recordings
 py evaluation\merge_heldout.py --confirm-step-11 --out evaluation\runs\report-inputs `
     --source diagnose:evaluation\runs\diagnose-heldout --source dso6:evaluation\runs\dso6-heldout `
-    --source "scenarios:audit=state\audit.db,truth=evaluation\runs\groundtruth.db,replays=evaluation\runs\dso1-records.jsonl;evaluation\runs\dso3-records.jsonl"
+    --source "scenarios:audit=state\audit.db,truth=evaluation\runs\groundtruth.db,replays=evaluation\runs\dso1-records.jsonl;evaluation\runs\dso3-records.jsonl;evaluation\runs\ci-records.jsonl"
 py evaluation\report.py --confirmatory --audit evaluation\runs\report-inputs\audit.db `
     --truth evaluation\runs\report-inputs\groundtruth.db --replays evaluation\runs\report-inputs\replay.jsonl --out results\final
 ```
@@ -220,9 +222,6 @@ synthetic or dev-window id, before writing anything. `report_scope` (D70) accept
 in `run-order.txt`; DSO6 ids from `dso6-items.yaml`; the held-out normal window
 `h-normal-traffic`; and held-out Diagnose ids from the inputs hashed at harness-diagnose-freeze,
 only while that freeze holds.
-
-**TO CHECK:** `ci_levels.py` (L0 to L4 offline on the live ci recordings) prints its decisions
-but writes no replay records yet, so those levels are not in the merged report.
 
 ## 3. Checkpoints
 
