@@ -1,9 +1,14 @@
 """K3: the held-out DSO6 and DSO5 runners on synthetic items made by the generator's own
 functions (heldout.dso6_set, heldout.dso5_sequence) with a public dev seed, never the held-out
-one. Gating, resumption, toolkit-format outputs; DSO5's dry run, worktree and push targets with
-a fake git and a fake CI. No network, no cluster, nothing from scenarios/heldout/."""
+one. Gating, resumption, toolkit-format outputs; DSO5's dry run, and its live run (D76: each
+commit on the base tree, then a [skip ci] restore) against local git repositories (a bare origin
+in a temporary folder) and a fake CI. No network, no cluster, nothing from scenarios/heldout/."""
 
+import copy
 import json
+import subprocess
+import tarfile
+from pathlib import Path
 
 import pytest
 import yaml
@@ -164,40 +169,220 @@ def test_dso5_failing_commits_use_the_drawn_template(tmp_path, monkeypatch):
     assert picked == [("flaky_test", "flaky_test-02.v2")]
 
 
-class FakeGit:
-    def __init__(self):
-        self.calls, self.n = [], 0
-
-    def __call__(self, cwd, *args):
-        self.calls.append(args)
-        if args[0] == "rev-parse":
-            self.n += 1
-            return f"{self.n:040x}"
-        return ""
+RUN = {"id": 9, "conclusion": "success", "run_started_at": "2026-11-08T10:00:00Z",
+       "updated_at": "2026-11-08T10:05:00Z"}  # fmt: skip
+JOBS = [{"name": "unit", "conclusion": "success", "completed_at": "2026-11-08T10:03:00Z"}]
 
 
-def test_dso5_live_commits_push_to_the_mode_branch_and_resume(tmp_path, monkeypatch):
+def sh(cwd, *args):
+    return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
+                          text=True).stdout.strip()  # fmt: skip
+
+
+@pytest.fixture
+def isolated_git(tmp_path, monkeypatch):
+    """Local repositories only: no user or system git config, a test identity."""
+    empty = tmp_path / "gitconfig"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    # environment config wins over every file (Git for Windows also reads ProgramData's)
+    settings = {"core.autocrlf": "false", "commit.gpgsign": "false"}
+    monkeypatch.setenv("GIT_CONFIG_COUNT", str(len(settings)))
+    for i, (key, value) in enumerate(settings.items()):
+        monkeypatch.setenv(f"GIT_CONFIG_KEY_{i}", key)
+        monkeypatch.setenv(f"GIT_CONFIG_VALUE_{i}", value)
+    for who in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{who}_NAME", "test")
+        monkeypatch.setenv(f"GIT_{who}_EMAIL", "test@example.invalid")
+
+
+def make_remote(tmp_path, fill) -> Path:
+    """A bare origin with `dev` holding the tree `fill(dir)` writes, and a clone of it."""
+    seed, origin, root = tmp_path / "seed", tmp_path / "origin.git", tmp_path / "root"
+    seed.mkdir()
+    fill(seed)
+    sh(tmp_path, "init", "-q", "-b", "dev", str(seed))
+    sh(seed, "add", "-A")
+    sh(seed, "commit", "-q", "-m", "base")
+    sh(tmp_path, "init", "-q", "--bare", str(origin))
+    sh(seed, "push", "-q", str(origin), "dev")
+    sh(tmp_path, "clone", "-q", "-b", "dev", str(origin), str(root))
+    return root
+
+
+def head_tree(dest: Path) -> None:
+    """The repository's committed tree (git archive: works in a shallow checkout too)."""
+    tar = dest.parent / "head.tar"
+    sh(dso5_run.ROOT, "archive", "--format=tar", "-o", str(tar), "HEAD")
+    with tarfile.open(tar) as t:
+        t.extractall(dest, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
+
+
+def history(root, name):
+    """(subject, tree, parent tree) per commit on origin's branch after the base, oldest first."""
+    sh(root, "fetch", "-q", "origin")
+    shas = sh(root, "rev-list", "--reverse", f"origin/dev..origin/{name}").split()
+    return [(sh(root, "log", "-1", "--format=%s", s), sh(root, "rev-parse", f"{s}^{{tree}}"),
+             sh(root, "rev-parse", f"{s}~1^{{tree}}")) for s in shas]  # fmt: skip
+
+
+def test_dso5_each_commit_is_applied_to_the_base_and_restored(tmp_path, isolated_git):
+    """D76: commit, CI, a [skip ci] restore to the base tree; every measured commit's parent
+    is the base tree, so no change carries over to the next commit."""
+
+    def fill(d):
+        (d / "app").mkdir()
+        (d / "app" / "a.go").write_bytes(b"package a\n")  # LF, as the repository's files
+
+    root = make_remote(tmp_path, fill)
+    base, base_tree = (
+        sh(root, "rev-parse", "origin/dev"),
+        sh(root, "rev-parse", "origin/dev^{tree}"),
+    )
     seq = [{"index": i, "change_type": "app_code", "file": "app/a.go"} for i in range(3)]
-    monkeypatch.setattr(dso5_run, "apply_change", lambda root, item: (["app/a.go"], "Update"))
-    run = {"id": 9, "conclusion": "success", "run_started_at": "2026-11-08T10:00:00Z",
-           "updated_at": "2026-11-08T10:05:00Z"}  # fmt: skip
-    jobs = [{"name": "unit", "conclusion": "success", "completed_at": "2026-11-08T10:03:00Z"}]
-    fake = FakeGit()
-    assert dso5_run.run_live(seq[:2], "t", tmp_path, lambda sha: (run, jobs), fake) == 4
-    pushes = [a for a in fake.calls if a[0] == "push"]
-    assert [p[-1] for p in pushes] == ["HEAD:refs/heads/scenario/baseline/dso5-t"] * 2 + [
-        "HEAD:refs/heads/scenario/optimizer/dso5-t"] * 2  # fmt: skip
-    assert not any("dev" in p[-1] or "main" in p[-1] for p in pushes)
-    assert sum(a[0] == "worktree" and a[1] == "add" for a in fake.calls) == 2
-    assert sum(a[0] == "worktree" and a[1] == "remove" for a in fake.calls) == 2
-    rows = [json.loads(x) for x in (tmp_path / "runs.jsonl").read_text().splitlines()]
+    out = tmp_path / "out"
+    assert dso5_run.run_live(seq[:2], "t", out, lambda sha: (RUN, JOBS), root=root) == 4
+    for mode in dso5_run.MODES:
+        name = dso5_run.branch(mode, "t")
+        commits = history(root, name)
+        assert [c[0] for c in commits] == [
+            dso5_run.START,
+            "Update a.go", dso5_run.RESTORE.format(index=0),
+            "Update a.go", dso5_run.RESTORE.format(index=1)]  # fmt: skip
+        assert all("[skip ci]" in s for s, _, _ in commits[0::2])  # start and restores
+        assert all(parent == base_tree for _, _, parent in commits[1::2])  # applied to the base
+        assert commits[0][1] == base_tree and commits[-1][1] == base_tree
+        # the first measured commit's parent is the start commit, a child of the base, and its
+        # diff (what app-ci's before..sha sees) is its own change only
+        first = sh(root, "rev-list", "--reverse", f"origin/dev..origin/{name}").split()[1]
+        start = sh(root, "rev-parse", f"{first}~1")
+        assert sh(root, "log", "-1", "--format=%s", start) == dso5_run.START
+        assert sh(root, "rev-parse", f"{start}~1") == base
+        assert sh(root, "diff", "--name-only", start, first) == "app/a.go"
+        assert sh(root, "diff", "--numstat", start, first) == "1\t0\tapp/a.go"
+        second = sh(root, "show", f"origin/{name}~1:app/a.go")
+        assert second == "package a\n// note 1"  # note 0 did not carry over
+    rows = [json.loads(x) for x in (out / "runs.jsonl").read_text().splitlines()]
+    assert len(rows) == 4 and {r["base"] for r in rows} == {base}
     assert rows[0]["pipeline_s"] == 300.0 and rows[0]["ci"] == "success"
-    fake2 = FakeGit()
-    assert dso5_run.run_live(seq, "t", tmp_path, lambda sha: (run, jobs), fake2) == 2  # resumes
-    assert [a[-1] for a in fake2.calls if a[0] == "push"] == [
-        "HEAD:refs/heads/scenario/baseline/dso5-t",
-        "HEAD:refs/heads/scenario/optimizer/dso5-t",
-    ]
+    assert sh(root, "rev-parse", "origin/dev") == base  # dev never pushed
+
+    # a stop between a commit's CI and its restore: the tip is not the base tree
+    stray = tmp_path / "stray"
+    sh(tmp_path, "clone", "-q", "-b", "scenario/baseline/dso5-t", str(tmp_path / "origin.git"),
+       str(stray))  # fmt: skip
+    (stray / "app" / "a.go").write_bytes(b"package a\n// left over\n")
+    sh(stray, "commit", "-q", "-am", "Update a.go")
+    sh(stray, "push", "-q", "origin", "HEAD:refs/heads/scenario/baseline/dso5-t")
+    assert dso5_run.run_live(seq, "t", out, lambda sha: (RUN, JOBS), root=root) == 2  # resumes
+    subjects = [c[0] for c in history(root, "scenario/baseline/dso5-t")]
+    assert subjects[-3:] == [dso5_run.RESTORE.format(index="pending (resume)"), "Update a.go",
+                             dso5_run.RESTORE.format(index=2)]  # fmt: skip
+    assert [c[0] for c in history(root, "scenario/optimizer/dso5-t")][-2:] == [
+        "Update a.go", dso5_run.RESTORE.format(index=2)]  # fmt: skip
+
+
+def write_rows(out, rows):
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "runs.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("rows", "match"),
+    [([{"mode": "baseline", "branch": "scenario/baseline/dso5-heldout", "base": "b", "index": 0}],
+      "not of tag"),
+     ([{"mode": "baseline", "branch": "scenario/baseline/dso5-heldout-d76", "index": 0}],
+      "without a base"),
+     ([{"mode": "baseline", "branch": "scenario/baseline/dso5-heldout-d76", "base": "b1",
+        "index": 0},
+       {"mode": "optimizer", "branch": "scenario/optimizer/dso5-heldout-d76", "base": "b2",
+        "index": 0}], "base commits")],
+)  # fmt: skip
+def test_dso5_refuses_rows_of_another_branch_or_base(tmp_path, rows, match):
+    write_rows(tmp_path, rows)
+    with pytest.raises(SystemExit, match=match):
+        dso5_run.recorded(tmp_path, "heldout-d76")
+
+
+def test_dso5_refuses_a_base_other_than_the_recorded_one(tmp_path):
+    write_rows(tmp_path, [{"mode": "baseline", "branch": "scenario/baseline/dso5-t",
+                           "base": "a" * 40, "index": 0}])  # fmt: skip
+
+    def fake(cwd, *args):
+        return "b" * 40 if args[0] == "rev-parse" else ""
+
+    with pytest.raises(SystemExit, match="recorded rows use"):
+        dso5_run.run_live([], "t", tmp_path, lambda sha: (RUN, JOBS), fake, base_ref="other")
+
+
+def test_the_d76_defaults_keep_the_pre_d76_run_apart():
+    assert dso5_run.TAG == "heldout-d76" and dso5_run.OUT.name == "dso5-heldout-d76"
+    assert dso5_run.branch("baseline", dso5_run.TAG) != "scenario/baseline/dso5-heldout"
+
+
+@pytest.fixture
+def no_go(monkeypatch):
+    """go_sum_lines runs a golang container; the tests write two fixed sum lines instead."""
+    import runner
+
+    monkeypatch.setattr(
+        runner, "go_sum_lines", lambda m, v: [f"{m} {v} h1:x=", f"{m} {v}/go.mod h1:y="]
+    )
+
+
+def redigo_templates():
+    import ci_failures
+
+    by_message = {t.commit_message: tid for tid, t in ci_failures.ALL_VARIANTS.items()}
+    return by_message["Bump redigo"], by_message["Move to redigo v2"]
+
+
+def test_failing_templates_on_one_go_mod_line_collide_only_when_stacked(tmp_path, no_go):
+    """The defect D76 fixes: two failing templates that edit the same go.mod line (and a bump of
+    that module before them) cannot both apply to one stacked tree; each applies to the base."""
+    bump, move = redigo_templates()
+    seq = [{"index": 0, "change_type": "dependency_bump", "module": "github.com/gomodule/redigo",
+            "version": "v1.9.3"},
+           {"index": 1, "change_type": "failing", "template": bump},
+           {"index": 2, "change_type": "failing", "template": move}]  # fmt: skip
+    stacked = tmp_path / "stacked"
+    head_tree(stacked)
+    dso5_run.apply_change(stacked, seq[0])
+    dso5_run.apply_change(stacked, seq[1])  # a bump leaves the require line: this still applies
+    with pytest.raises(ValueError, match="exactly one occurrence"):
+        dso5_run.apply_change(stacked, seq[2])
+    for item in seq:  # D76: every one applies to its own copy of the base tree
+        fresh = tmp_path / f"base-{item['index']}"
+        head_tree(fresh)
+        assert dso5_run.apply_change(fresh, item)[0]
+
+
+def test_failing_template_after_a_bump_of_its_module_applies_end_to_end(tmp_path, isolated_git,
+                                                                        no_go):  # fmt: skip
+    _, move = redigo_templates()
+    seq = [{"index": 0, "change_type": "dependency_bump", "module": "github.com/gomodule/redigo",
+            "version": "v1.9.3"},
+           {"index": 1, "change_type": "failing", "template": move}]  # fmt: skip
+    root = make_remote(tmp_path, head_tree)
+    assert dso5_run.run_live(seq, "t", tmp_path / "out", lambda sha: (RUN, JOBS), root=root) == 4
+
+
+def test_the_full_synthetic_sequence_applies_in_both_modes(sequence, tmp_path, isolated_git, no_go):
+    before = copy.deepcopy(sequence)
+    root = make_remote(tmp_path, head_tree)
+    base_tree = sh(root, "rev-parse", "origin/dev^{tree}")
+    n = dso5_run.run_live(sequence, "t", tmp_path / "out", lambda sha: (RUN, JOBS), root=root)
+    assert n == 2 * len(sequence) == 60
+    assert sequence == before  # the sequence is read, never changed
+    for mode in dso5_run.MODES:
+        commits = history(root, dso5_run.branch(mode, "t"))
+        assert len(commits) == 61 and commits[0][0] == dso5_run.START
+        assert commits[-1][1] == base_tree
+        assert all(parent == base_tree for _, _, parent in commits[1::2])
+        assert all("[skip ci]" in s for s, _, _ in commits[0::2])
+    rows = [json.loads(x) for x in (tmp_path / "out" / "runs.jsonl").read_text().splitlines()]
+    assert [r["index"] for r in rows] == [i["index"] for i in sequence] * 2
 
 
 def test_dso5_summary_times_the_first_failure_and_marks_no_run():

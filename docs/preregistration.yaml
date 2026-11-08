@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: frozen
-version: "1.7"
+version: "1.8"
 drafted: 2026-10-27
 frozen: 2026-11-06
 amendments:
@@ -55,6 +55,12 @@ amendments:
     D75_execution: >-
       The run order is split by a fixed rule, before any held-out recording exists: laptop A runs every ci, pipeline and security spec (GitHub and the deployer); release and runtime specs alternate between laptop B (1st, 3rd, ...) and laptop C (2nd, 4th, ...) in run-order sequence. Each laptop keeps run-order sequence within its share, and a spec's re-runs stay on its laptop.
       A per-machine breakdown of the release and runtime results is reported as exploratory.
+  - date: "2026-11-08"
+    D76: >-
+      Each DSO5 commit is applied to the sequence's base tree (origin/dev at the start, one base for both plan modes, recorded per run): after its app-ci run is recorded, a commit restoring the base tree, marked [skip ci] so no workflow runs, is pushed before the next commit, on the same branch; each branch is created by an empty [skip ci] commit on the base, so every measured commit's changed files are its own.
+      The sequence (same commits, same order) and the metrics are unchanged; each commit's CI result is now that of its own change, so failures missed vs the full pipeline and time to first failure are per commit.
+      Stated limitations: the Optimizer's previous scan status refers to the previous measured commit, whose tree was then restored; the first measured commit has no previous completed run, so its scan status is unknown and the Optimizer plans it as the baseline (as before).
+      The first DSO5 attempt (14 baseline commits, no optimizer commit, stacked commits) is set aside and reported; both modes run again on new branches (tag heldout-d76).
 
 seed:
   hash_file: scenarios/heldout-seed.sha256   # SHA-256 of the secret seed; the seed is in .env
