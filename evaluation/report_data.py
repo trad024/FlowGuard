@@ -149,7 +149,13 @@ def validate_observed(observed):
     ):
         if key in observed and not isinstance(observed[key], str):
             raise ValueError(f"{key} must be text")
-    for key in ("false_alerts", "tokens", "diagnose_quotes", "diagnose_ungrounded"):
+    for key in (
+        "false_alerts",
+        "tokens",
+        "diagnose_quotes",
+        "diagnose_ungrounded",
+        "targets_shown",
+    ):
         if key in observed and (type(observed[key]) is not int or observed[key] < 0):
             raise ValueError(f"{key} must be a nonnegative integer")
     if ("diagnose_quotes" in observed) != ("diagnose_ungrounded" in observed):

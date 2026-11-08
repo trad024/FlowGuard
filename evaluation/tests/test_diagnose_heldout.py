@@ -354,3 +354,68 @@ def test_lanes_run_in_parallel_threads(data, monkeypatch):
 def test_diagnose_dev_keeps_its_dev_only_items():
     split = {"templates": {"t": "test"}, "variants": {"v": {"template": "t", "root_cause": "code"}}}
     assert diagnose_dev.items(split) == []  # test templates stay out of the dev runner
+
+
+# ---------------------------------------------------------------- R3: the D66 cut rule for H3
+
+import report_metrics  # noqa: E402
+
+
+class CuttingClient(FakeClient):
+    """A lane whose budget nothing fits: the D66 cut keeps only the log's last line."""
+
+    def fits(self, messages):
+        return False
+
+
+def test_targets_shown_counts_the_target_lines_the_request_kept(data):
+    chunks = [i for i in data["items"] if i["set"] == "logchunks"]
+    cut = {**chunks[0], "id": "lc-cut", "truth": {"localizable": True, "relevant_lines": [1, 2]}}
+    kept = chunks[1]  # targets 2 and 3
+    dh.run_llm("L2", [cut, kept], data["out"], LANES, CuttingClient, set(), None,
+               dh.Progress(lambda s: None))  # fmt: skip
+    rows = {r["scenario_id"]: r["observed"] for r in lines(data["out"] / "L2.jsonl")}
+    assert rows["lc-cut"]["targets_shown"] == 0  # only line 3 survived the cut
+    assert rows[kept["id"]]["targets_shown"] == 1  # line 3 of [2, 3]
+    corpus = [i for i in data["items"] if i["set"] == "corpus"][:1]
+    dh.run_llm("L3", corpus, data["out"], LANES, FakeClient, set(), Retriever(),
+               dh.Progress(lambda s: None))  # fmt: skip
+    (row,) = lines(data["out"] / "L3.jsonl")
+    assert "targets_shown" not in row["observed"]  # no target lines: nothing to count
+
+
+def h3_record(level, shown, evidence, sid):
+    truth = {"family": "diagnose", "spec": {}, "valid": True,
+             "ground_truth": {"localizable": True, "relevant_lines": [2, 3]}}  # fmt: skip
+    observed = {"evidence_lines": evidence, "targets_shown": shown}
+    return {"scenario_id": sid, "level": level, "observed": observed, "truth": truth}
+
+
+def test_a_cut_item_is_a_miss_and_the_sensitivity_excludes_it():
+    cut = h3_record("L3", 0, [2], "a")  # would hit, but its targets were never shown
+    hit = h3_record("L3", 2, [3], "b")
+    miss = h3_record("L3", 1, [9], "c")
+    assert report_metrics.localization(cut) is False
+    assert report_metrics.localization(hit) is True and report_metrics.localization(miss) is False
+    assert [report_metrics.targets_cut(r) for r in (cut, hit, miss)] == [True, False, False]
+    assert report_metrics.localization_sensitivity(cut) is None
+    assert report_metrics.localization_sensitivity(hit) is True
+
+
+def test_the_report_gives_the_cut_share_and_the_sensitivity_per_level(data, tmp_path):
+    chunks = [i for i in data["items"] if i["set"] == "logchunks"]
+    cut = {**chunks[0], "id": "lc-cut", "truth": {"localizable": True, "relevant_lines": [1, 2]}}
+    items = [cut, chunks[1]]
+    dh.run_llm("L2", items, data["out"], LANES, CuttingClient, set(), None,
+               dh.Progress(lambda s: None))  # fmt: skip
+    truth = groundtruth.GroundTruthDB(data["out"] / "groundtruth.db")
+    dh.record_truth(truth, items)
+    AuditLog(tmp_path / "audit.db")
+    joined, _ = report_data.load(tmp_path / "audit.db", data["out"] / "groundtruth.db",
+                                 data["out"] / "L2.jsonl")  # fmt: skip
+    m = report_metrics.measurements([r for r in joined if r["level"] == "L2"], 1)
+    secondary = m.get("secondary", m)
+    assert secondary["H3_targets_cut"]["k"] == 1 and secondary["H3_targets_cut"]["n"] == 2
+    sens = secondary["H3_localization_hit_sensitivity"]
+    assert sens["n"] == 1 and sens["label"].startswith("sensitivity")
+    assert m["primary"]["H3_localization_hit"]["n"] == 2  # the cut item counts, as a miss

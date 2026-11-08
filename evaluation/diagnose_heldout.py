@@ -154,6 +154,18 @@ def llm_observed(d, res: dict, in_subset: bool, level: str) -> dict:
     return observed
 
 
+def targets_shown(item: dict, msgs: list[dict]) -> int | None:
+    """R3: how many of a LogChunks item's target lines the request sent shows (after the D66
+    cut). An input property from the labels and the request, never from an answer."""
+    relevant = item["truth"].get("relevant_lines")
+    if not relevant:
+        return None
+    shown = msgs[1]["content"].split("Failed job log:\n", 1)[-1].splitlines()
+    numbers = {int(line[1:].split(":", 1)[0]) for line in shown if line[:1] == "L"
+               and line[1:].split(":", 1)[0].isdigit()}  # fmt: skip
+    return sum(n in numbers for n in relevant)
+
+
 def raw_line(item, level, res, d, req, msgs, key, repeat=None) -> dict:
     line = {"scenario_id": item["id"], "level": level, "repeat": repeat,
             "diagnose_quotes": list(d.quotes), "lane": res.get("lane"),
@@ -252,6 +264,8 @@ def run_llm(
             tokens = int((res.get("usage") or {}).get("total_tokens") or 0)
             progress.add(lane.name, bool(res.get("cached")), failed, tokens)
             observed = llm_observed(d, res, item["id"] in subset or bool(repeat), level)
+            if (targets := targets_shown(item, msgs)) is not None:
+                observed["targets_shown"] = targets  # R3: the D66 cut rule for H3
             row = record(item, level, observed, repeat or 1)
             raw = raw_line(item, level, res, d, req, msgs, client.key(msgs, repeat), repeat)
             with lock:

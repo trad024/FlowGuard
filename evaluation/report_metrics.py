@@ -86,6 +86,8 @@ def macro_f1(pairs):
 
 
 def localization(record):
+    """H3 hit. R3: an item whose target lines the D66 cut removed from the request is a miss,
+    as the real system would have cut them too."""
     gt, observed = record["truth"]["ground_truth"], record["observed"]
     if (
         gt.get("localizable") is not True
@@ -93,7 +95,22 @@ def localization(record):
         or "evidence_lines" not in observed
     ):
         return None
+    if observed.get("targets_shown") == 0:
+        return False
     return bool(set(gt["relevant_lines"]) & set(observed["evidence_lines"]))
+
+
+def targets_cut(record):
+    """R3: whether the D66 cut removed every target line of a localizable item."""
+    gt, observed = record["truth"]["ground_truth"], record["observed"]
+    if gt.get("localizable") is not True or "targets_shown" not in observed:
+        return None
+    return observed["targets_shown"] == 0
+
+
+def localization_sensitivity(record):
+    """R3 sensitivity: H3 with the items whose target lines were all cut left out."""
+    return None if targets_cut(record) else localization(record)
 
 
 def diagnosis(record):
@@ -237,6 +254,13 @@ def measurements(records, seed):
             "ci95": [v / hours for v in stats.poisson_exact(alerts)] if hours else None,
             "interval": "exact Poisson (Garwood) / exposure hours",
         },
+    }
+    # R3: the share of H3 items whose target lines the D66 cut removed (counted as misses), and
+    # H3 with them excluded, labelled as a sensitivity analysis
+    secondary["H3_targets_cut"] = proportion(eligible(targets_cut))
+    secondary["H3_localization_hit_sensitivity"] = {
+        **proportion(eligible(localization_sensitivity)),
+        "label": "sensitivity: items whose target lines the D66 cut removed are excluded",
     }
     # D57: H5's denominator; an assisted incident is never in H5's numerator
     secondary["assisted"] = proportion(eligible(assisted))
