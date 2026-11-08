@@ -524,7 +524,12 @@ def dso5_sequence(prereg: dict, seed: str, files: list[str], modules: list[str])
         if kind in targets:
             item["file"] = rng.choice(targets[kind])
         elif kind == "dependency_bump":
-            item["module"] = rng.choice(modules)
+            pool = (cfg.get("dependency_pool") or {}).get("modules")
+            if pool:  # R4: a pre-registered version scanned clean
+                pick = rng.choice(sorted(pool, key=lambda p: p["module"]))
+                item.update(module=pick["module"], version=pick["version"])
+            else:
+                item["module"] = rng.choice(modules)
         elif kind == "failing":
             if not templates:
                 raise SystemExit("dso5 failing commits need the ci test-split templates")

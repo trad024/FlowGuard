@@ -13,10 +13,11 @@ runner never hands it). Both branches start from origin/dev and get the sequence
 order, one push per commit, in a separate git worktree (the main checkout is never switched).
 
 Per commit: docs_only, app_code, app_test and ci_config append one comment line to the drawn
-file; failing applies the drawn test-split template (scenarios/ci_failures.py); dependency_bump
-needs a target version the generator does not record, so the live run refuses it until a rule
-is decided (the dry run shows it). After each push the app-ci run of the commit is awaited and
-recorded: conclusion, run duration, time to the first failed job, the jobs and the plan's
+file; failing applies the drawn test-split template (scenarios/ci_failures.py);
+dependency_bump pins the drawn module to its pre-registered version (R4,
+dso5_commit_sequence.dependency_pool) with its go.sum lines (runner.pin_module,
+runner.go_sum_lines). After each push the app-ci run of the commit is awaited and recorded:
+conclusion, run duration, time to the first failed job, the jobs and the plan's
 skipped jobs. A docs-only commit starts no run (app-ci's paths filters), recorded as such.
 
 Refuses unless --confirm-step-11, eval-freeze, the Diagnose freeze and the committed seed hold.
@@ -64,6 +65,8 @@ def describe(item: dict) -> dict:
     """What a commit changes, for the dry run and the record."""
     kind = item["change_type"]
     target = item.get("file") or item.get("module") or item.get("template")
+    if item.get("version"):
+        target = f"{target}@{item['version']}"
     return {"index": item["index"], "change_type": kind, "target": target}
 
 
@@ -89,10 +92,16 @@ def apply_change(root: Path, item: dict, rng=None) -> tuple[list[str], str]:
                                     item["template"])  # fmt: skip
         return template.apply(root), template.commit_message
     if kind == "dependency_bump":
-        raise Unresolved(
-            f"commit {item['index']}: dependency_bump of {item['module']} needs a target version "
-            "the generator does not record; decide the rule before the live run"
-        )
+        if not item.get("version"):
+            raise Unresolved(
+                f"commit {item['index']}: dependency_bump of {item['module']} has no target "
+                "version (the pre-registered pool, R4)"
+            )
+        import runner
+
+        module, version = item["module"], item["version"]
+        files = runner.pin_module(root, module, version, runner.go_sum_lines(module, version))
+        return files, f"Bump {module.rsplit('/', 1)[-1]} to {version}"
     raise ValueError(f"unknown change type {kind!r}")
 
 
@@ -228,9 +237,13 @@ def main(argv: list[str] | None = None) -> int:
         for step in plan(sequence, args.tag):
             print(json.dumps(step))
         return 0
-    unresolved = [i["index"] for i in sequence if i["change_type"] == "dependency_bump"]
+    unresolved = [
+        i["index"]
+        for i in sequence
+        if i["change_type"] == "dependency_bump" and not i.get("version")
+    ]
     if unresolved:
-        raise SystemExit(f"dependency_bump commits {unresolved} have no target version rule yet")
+        raise SystemExit(f"dependency_bump commits {unresolved} have no target version")
     print(json.dumps({"commits_run": run_live(sequence, args.tag, args.out, github_wait())}))
     return 0
 

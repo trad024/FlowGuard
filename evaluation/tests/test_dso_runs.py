@@ -218,3 +218,49 @@ def test_the_dso5_branches_are_ones_the_deployer_never_releases():
     for mode in dso5_run.MODES:
         name = dso5_run.branch(mode, "t")
         assert name.startswith(f"scenario/{mode}/") and name not in ("dev", "main")
+
+
+# ---------------------------------------------------------------- R4: dependency_bump targets
+
+
+def test_dependency_bumps_draw_a_pre_registered_clean_version(prereg):
+    pool = prereg["dso5_commit_sequence"]["dependency_pool"]
+    assert pool["trivy"]["version"] == "0.75.0" and pool["trivy"]["db_date"]
+    allowed = {(m["module"], m["version"]) for m in pool["modules"]}
+    assert len(allowed) == 6
+    prereg["dso5_commit_sequence"]["count"] = 200
+    prereg["dso5_commit_sequence"]["change_types"] = {"dependency_bump": 1}
+    seq = heldout.dso5_sequence(prereg, SEED, heldout.tracked_files(), heldout.go_modules())
+    drawn = {(i["module"], i["version"]) for i in seq}
+    assert drawn <= allowed and len(drawn) > 1  # seeded draws over the pool
+    again = heldout.dso5_sequence(prereg, SEED, heldout.tracked_files(), heldout.go_modules())
+    assert seq == again
+    assert all(m in heldout.go_modules() for m, _ in allowed)  # direct requirements
+
+
+def test_a_dependency_bump_pins_the_drawn_version_with_its_sums(tmp_path, monkeypatch):
+    import runner
+
+    calls = []
+    monkeypatch.setattr(runner, "go_sum_lines", lambda m, v: calls.append((m, v)) or ["s1", "s2"])
+    monkeypatch.setattr(runner, "pin_module",
+                        lambda root, m, v, sums: calls.append(("pin", m, v, sums)) or
+                        ["app/podinfo/go.mod", "app/podinfo/go.sum"])  # fmt: skip
+    item = {"index": 4, "change_type": "dependency_bump", "module": "go.uber.org/zap",
+            "version": "v1.27.1"}  # fmt: skip
+    files, message = dso5_run.apply_change(tmp_path, item)
+    assert files == ["app/podinfo/go.mod", "app/podinfo/go.sum"]
+    assert message == "Bump zap to v1.27.1"
+    assert calls == [("go.uber.org/zap", "v1.27.1"),
+                     ("pin", "go.uber.org/zap", "v1.27.1", ["s1", "s2"])]  # fmt: skip
+    assert dso5_run.describe(item)["target"] == "go.uber.org/zap@v1.27.1"
+
+
+def test_the_live_run_accepts_versioned_bumps(tmp_path, gate, monkeypatch):
+    seq = [{"index": 0, "change_type": "dependency_bump", "module": "go.uber.org/zap",
+            "version": "v1.27.1"}]  # fmt: skip
+    path = tmp_path / "seq.yaml"
+    path.write_text(yaml.safe_dump(seq), encoding="utf-8")
+    monkeypatch.setattr(dso5_run, "github_wait", lambda: lambda sha: (None, []))
+    monkeypatch.setattr(dso5_run, "run_live", lambda *a, **k: 2)
+    assert dso5_run.main(["run", "--confirm-step-11", "--sequence", str(path)]) == 0

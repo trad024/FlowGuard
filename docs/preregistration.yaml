@@ -11,7 +11,7 @@
 # is tagged eval-freeze (see freeze_rule).
 
 status: frozen
-version: "1.4"
+version: "1.5"
 drafted: 2026-10-27
 frozen: 2026-11-06
 amendments:
@@ -41,6 +41,9 @@ amendments:
       The D61 repeat subset: 30 items sampled from the sorted ids of every held-out Diagnose item (corpus test-template variants and LogChunks sample items) with the held-out seed's HMAC stream labelled "llm-repeat-subset"; repeat 1 is each item's main L3 call, repeats 2 and 3 carry their index in the cache key.
     lanes: >-
       6 lanes, one per team member, confirmed by the team lead (D41).
+  - date: "2026-11-08"
+    R4_dependency_pool: >-
+      DSO5's dependency_bump commits draw a (module, version) from dso5_commit_sequence.dependency_pool with the held-out seed: the next released patch of 6 direct requirements of app/podinfo/go.mod, each scanned clean (no HIGH or CRITICAL) with the pinned Trivy 0.75.0, DB of 2026-11-07T18:32:58Z.
 
 seed:
   hash_file: scenarios/heldout-seed.sha256   # SHA-256 of the secret seed; the seed is in .env
@@ -304,6 +307,16 @@ dso5_commit_sequence:
     ci_config: 1                 # .github/workflows change
     failing: 1                   # a CI failure template from the test split (ci family)
   metrics: [pipeline duration, failures missed vs the full pipeline, time to first failure]
+  dependency_pool:               # R4 (amendment 1.5): dependency_bump draws module and version here
+    query: next released patch of each direct requirement of app/podinfo/go.mod (29 queried on proxy.golang.org, 2026-11-08); 6 have one
+    trivy: {version: 0.75.0, db_date: "2026-11-07T18:32:58Z", db_version: 2, scan: "one-line go.mod per module, HIGH and CRITICAL only", control: "golang.org/x/text v0.19.0 flagged (2 HIGH)"}
+    modules:                     # every one scanned clean (0 HIGH, 0 CRITICAL)
+      - {module: github.com/gomodule/redigo, from: v1.9.2, version: v1.9.3}
+      - {module: github.com/prometheus/client_golang, from: v1.20.4, version: v1.20.5}
+      - {module: github.com/spf13/pflag, from: v1.0.5, version: v1.0.6}
+      - {module: github.com/swaggo/swag, from: v1.16.3, version: v1.16.4}
+      - {module: go.uber.org/zap, from: v1.27.0, version: v1.27.1}
+      - {module: google.golang.org/protobuf, from: v1.36.11, version: v1.36.12}
 
 dso6_adversarial_set:
   # D20 and the D5 conflict cases. Each item is a proposal or an input the gate must hold
