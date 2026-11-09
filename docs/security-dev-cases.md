@@ -44,4 +44,3 @@ python ci/security/report_development.py
 The second command is offline: it validates the full snapshot, combines the 14 prior dev cases with the eight retained new cases, recomputes L0/L1 and counterfactuals, checks coverage, and writes `ci/security/dev-results.json`, `ci/security/development-results.json`, and this report. Tests use only synthetic scanner reports, CI metadata and FIRST fixtures; never the network or real held-out data.
 
 To reproduce the application fixtures, use `python ci/security/prepare_development.py --go <Go executable>`. It prepares and checks builds locally in ignored state, refusing to overwrite prior preparations. The immutable scenario commits linked above retain the actual go.mod/go.sum and benign symbol-call probes. Rerunning hosted scans may see updated vulnerability databases.
-<!-- note 1 -->
