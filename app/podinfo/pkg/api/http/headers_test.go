@@ -34,4 +34,3 @@ func TestEchoHeadersHandler(t *testing.T) {
 			rr.Body.String(), expected)
 	}
 }
-// note 5
