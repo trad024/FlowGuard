@@ -170,3 +170,4 @@ p99 reached 5 s (load-generator timeouts) while L0's server-side p99 stayed with
 evidence for H4. The host then slept for an hour during the restore canary, which L0 aborted
 for lack of data and left staging Degraded; it was recovered by retrying the canary with load.
 That run predates the suspend detection, and the restore retry was added because of it.
+<!-- note 11 -->
