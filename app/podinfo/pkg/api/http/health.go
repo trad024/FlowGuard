@@ -62,4 +62,3 @@ func (s *Server) disableReadyHandler(w http.ResponseWriter, r *http.Request) {
 	atomic.StoreInt32(&ready, 0)
 	w.WriteHeader(http.StatusAccepted)
 }
-// note 23
