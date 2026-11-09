@@ -17,4 +17,3 @@ func (s *Server) echoHeadersHandler(w http.ResponseWriter, r *http.Request) {
 	defer span.End()
 	s.JSONResponse(w, r, r.Header)
 }
-// note 22
