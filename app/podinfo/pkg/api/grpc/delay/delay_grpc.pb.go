@@ -103,3 +103,4 @@ var DelayService_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "delay/delay.proto",
 }
+// note 12
