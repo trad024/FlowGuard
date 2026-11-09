@@ -233,4 +233,3 @@ transformer blocks, at most ten epochs, training-only inverse-frequency class we
 and early stopping on validation macro-F1 after three non-improving epochs. Seed, splits,
 reduction, tokenizer, optimizer and other settings stay unchanged. Selection is the higher
 validation macro-F1 across the two runs (ties retain run 1). No further runs follow.
-<!-- note 16 -->
