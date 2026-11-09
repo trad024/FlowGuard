@@ -67,4 +67,3 @@ func TestGrpcHeader(t *testing.T) {
 			res, expected)
 	}
 }
-// note 25
