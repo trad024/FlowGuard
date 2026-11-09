@@ -63,3 +63,4 @@ func TestGrpcEcho(t *testing.T) {
 			res, expected)
 	}
 }
+// note 0
