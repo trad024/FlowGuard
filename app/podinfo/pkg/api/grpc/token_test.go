@@ -64,4 +64,3 @@ func TestGrpcToken(t *testing.T) {
 		t.Fatalf("Handler returned no token")
 	}
 }
-// note 18
