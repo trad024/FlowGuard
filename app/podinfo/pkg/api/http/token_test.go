@@ -34,3 +34,4 @@ func TestTokenHandler(t *testing.T) {
 		t.Error("handler returned no token")
 	}
 }
+// note 7
