@@ -90,5 +90,3 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace go.uber.org/zap => go.uber.org/zap v1.27.1
