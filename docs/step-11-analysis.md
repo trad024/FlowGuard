@@ -219,4 +219,3 @@ The updated base had one boundary test requiring an uncommitted corpus on CI. Th
 constructs three small synthetic variant folders, including an excluded one, and checks the
 exact selected set. It does not create fake files at the production corpus path. All new
 analysis tests likewise use fake audit and truth databases; no real held-out input is used.
-<!-- note 29 -->
