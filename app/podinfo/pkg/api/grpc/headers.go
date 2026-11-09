@@ -32,4 +32,3 @@ func (s *HeaderServer) Header(ctx context.Context, in *pb.HeaderRequest) (*pb.He
 	return &pb.HeaderResponse{Headers: res}, nil
 
 }
-// note 9
