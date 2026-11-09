@@ -11,7 +11,7 @@ WORKDIR /podinfo
 
 COPY . .
 
-RUN go mod download
+RUN GOPROXY=off go mod download
 
 RUN CGO_ENABLED=0 go build -ldflags "-s -w \
     -X github.com/stefanprodan/podinfo/pkg/version.REVISION=${REVISION}" \
