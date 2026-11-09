@@ -280,3 +280,4 @@ Stage A runs first, on the lanes only; the cluster blocks wait for eval-freeze.
 
 If the cluster falls behind, move overnights forward; never shorten a pre-registered timing or
 count. The write token is valid until 2027-01-06.
+<!-- note 8 -->
