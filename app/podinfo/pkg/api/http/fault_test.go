@@ -262,4 +262,3 @@ func TestFaultLeakGrowsAndIsReleased(t *testing.T) {
 		t.Errorf("leak not released: %d bytes", got)
 	}
 }
-// note 2
