@@ -189,10 +189,12 @@ py evaluation\dso5_run.py run --confirm-step-11
   model call). Outputs in `evaluation\runs\dso6-heldout\`: the audit rows report.py counts,
   replay records, truth rows, and per item the gate outcomes, executions, refusals (D58) and
   unapproved risky executions (expected 0).
-- DSO5: both plan modes on `scenario/baseline/dso5-heldout` and `scenario/optimizer/dso5-heldout`
-  (plan.py takes the mode from the branch), from `origin/dev`, in a separate worktree; each commit
-  pushed and its app-ci run recorded (conclusion, duration, time to first failure, jobs) in
-  `evaluation\runs\dso5-heldout\runs.jsonl`. Resumable.
+- DSO5: both plan modes on `scenario/baseline/dso5-heldout-d76` and
+  `scenario/optimizer/dso5-heldout-d76` (plan.py takes the mode from the branch), from
+  `origin/dev`, in a separate worktree; each commit pushed and its app-ci run recorded
+  (conclusion, duration, time to first failure, jobs) in
+  `evaluation\runs\dso5-heldout-d76\runs.jsonl` (D76). Resumable. The pre-D76 run
+  (`evaluation\runs\dso5-heldout`, 14 baseline rows) is set aside and reported, never scored.
 - `dependency_bump` commits (D71): the generator draws a module and its next patch version from
   `dso5_commit_sequence.dependency_pool` (6 entries, each scanned clean with Trivy 0.75.0, DB
   2026-11-07T18:32:58Z); `dso5_run.py` pins it with its go.sum lines (it runs
@@ -202,15 +204,27 @@ py evaluation\dso5_run.py run --confirm-step-11
 
 ### Block 11: offline levels, scoring and the report
 
+The scored inputs are held-out only (D77). `state\heldout-recordings-A.txt`, `-B.txt` and
+`-C.txt` list the valid held-out recording folders of each laptop (A in the repo, B and C under
+`C:\fg-results`). Laptop A's truth DB and audit log also hold development rows, so they are
+filtered first; B's and C's hold none (checked with `--check`) and are used as they are.
+
 ```powershell
-py evaluation\monitor_replay.py score <held-out recordings> --heldout --confirm-step-11 --records evaluation\runs\dso1-records.jsonl
-py evaluation\release_replay.py score <held-out recordings> --heldout --confirm-step-11 --records evaluation\runs\dso3-records.jsonl
-py evaluation\ci_levels.py <ci recordings> --confirm-step-11 --records evaluation\runs\ci-records.jsonl   # L0 to L4 on the L5 runs' recordings
+py evaluation\heldout_inputs.py --confirm-step-11 --truth evaluation\runs\groundtruth.db --audit state\audit.db `
+    --list state\heldout-recordings-A.txt --out evaluation\runs\heldout-A   # D77: filtered copies, counts only
+$rec = Get-Content state\heldout-recordings-A.txt, state\heldout-recordings-B.txt, state\heldout-recordings-C.txt
+py evaluation\monitor_replay.py score @rec --heldout --confirm-step-11 --records evaluation\runs\dso1-records.jsonl
+py evaluation\release_replay.py score @rec --heldout --confirm-step-11 --records evaluation\runs\dso3-records.jsonl
+py evaluation\ci_levels.py @(Get-Content evaluation\runs\heldout-A\recordings-ci.txt) --confirm-step-11 --records evaluation\runs\ci-records.jsonl   # L0 to L4 on the L5 runs' recordings
 py evaluation\merge_heldout.py --confirm-step-11 --out evaluation\runs\report-inputs `
     --source diagnose:evaluation\runs\diagnose-heldout --source dso6:evaluation\runs\dso6-heldout `
-    --source "scenarios:audit=state\audit.db,truth=evaluation\runs\groundtruth.db,replays=evaluation\runs\dso1-records.jsonl;evaluation\runs\dso3-records.jsonl;evaluation\runs\ci-records.jsonl"
+    --source "scenarios-A:audit=evaluation\runs\heldout-A\audit.db,truth=evaluation\runs\heldout-A\groundtruth.db,replays=evaluation\runs\dso1-records.jsonl;evaluation\runs\dso3-records.jsonl;evaluation\runs\ci-records.jsonl" `
+    --source "scenarios-B:audit=C:\fg-results\B\state\audit.db,truth=C:\fg-results\B\evaluation\runs\groundtruth.db" `
+    --source "scenarios-C:audit=C:\fg-results\C\state\audit.db,truth=C:\fg-results\C\evaluation\runs\groundtruth.db"
 py evaluation\report.py --confirmatory --audit evaluation\runs\report-inputs\audit.db `
     --truth evaluation\runs\report-inputs\groundtruth.db --replays evaluation\runs\report-inputs\replay.jsonl --out results\final
+py evaluation\dso5_metrics.py fetch --confirm-step-11   # D78: read-only GitHub, jobs and plans
+py evaluation\dso5_metrics.py score --confirm-step-11   # D78: DSO5, descriptive, outside report.py
 ```
 
 The held-out replay modes are gated like generate, labelled "held-out", never fit or calibrate
