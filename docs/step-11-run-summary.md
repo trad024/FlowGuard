@@ -16,9 +16,9 @@ nothing changes, why.
 | 4 | 11-08 | three-laptop split (D75) | per-laptop variation possible; reported as exploratory | log 6, 11, 12, 14, 23; D75 |
 | 5 | 11-08 | first DSO5 run stopped by a harness bug (D76) | first run set aside; DSO5 re-run under D76 | log 8, 9, 10; D76; pre-registration 1.8 |
 | 6 | 11-09 | operator saw one spec's fault details at share A start-up | blinding breach of one spec's inputs, no outcome seen | log 16 |
-| 7 | 11-09 | HP SystemOptimizer crash loop on laptop A | no effect found; its tasks disabled during Step 11 | log 21, 22 |
+| 7 | 11-09 | HP SystemOptimizer crash loop on laptop A | no effect found; its tasks disabled during Step 11, re-enabled after | log 21, 22, 54, 55 |
 | 8 | 11-09 | laptop C launch done through a helper | none; launch command and guard confirmed from C's transcript (reported by the laptop's operator, not verified from A) | log 23, 53 |
-| 9 | 11-09 | laptop B: Modern Standby 03:00–03:15 on battery, driver ran on without Prometheus, Docker engine failure | one spec recorded across the freeze (invalid, re-run); later specs failed before recording and ran after recovery (reported by the laptop's operator, not verified from A) | log 33, 38, 52 |
+| 9 | 11-09 | laptop B: Modern Standby 03:00–03:15 on battery, driver ran on without Prometheus, Docker engine failure | one spec recorded across the freeze (invalid, re-run); later specs failed before recording and ran after recovery (reported by the laptop's operator, not verified from A; B's 2 invalid manifests: Prometheus timeouts, and no listed reason) | log 33, 38, 52, 56 |
 | 10 | 11-09 | Diagnose lanes hit errors near the daily budget; L3 split over two days | 3 items retried next day; no item lost | log 26, 28, 34, 35 |
 | 11 | 11-09 | DSO5 re-run stopped on a failed git push, resumed | the Optimizer mode ran in two time windows | log 29, 30, 31 |
 | 12 | 11-09 | laptop C's results sent through WeTransfer unencrypted | confidentiality not guaranteed; integrity checked by hash | log 32 |
@@ -85,7 +85,7 @@ nothing changes, why.
 ### 7. HP SystemOptimizer crash loop on laptop A (2026-11-09)
 
 - **What happened.** HP SystemOptimizer crashed every 1–4 minutes during share A, leaving 26 crashed processes. The team lead disabled its three scheduled tasks at 02:24. The 22 leftover processes could not be killed and held about 1 MB in all. An hourly check watched for new ones and for free RAM under 1 GB.
-- **Effect.** No effect on a run was found. Share A finished 100/100 valid with empty stderr. A phone-alert helper died once near a crash, but the link was not established and no alert was pending. **The tasks must be re-enabled after Step 11** (still to do).
+- **Effect.** No effect on a run was found. Share A finished 100/100 valid with empty stderr. A phone-alert helper died once near a crash, but the link was not established and no alert was pending. The three tasks were re-enabled after Step 11 by the team lead in an administrator shell and verified Ready on 2026-11-10 (log 54, 55).
 - **Recorded.** Log 21 and 22.
 
 ### 8. Laptop C launch (2026-11-09)
@@ -133,9 +133,15 @@ All of this is reported by the laptop's operator, not verified from A (B's opera
   - B's WSL is 2.7.10.0 (A 2.6.1.0, C 2.5.10.0).
 - **Effect.**
   - No invalid run is scored. B holds 112 runs, 2 invalid and both re-run valid (log 38); the
-    report's coverage counts 2 invalid truth runs. Log 38 gives Prometheus timeouts as the
-    invalid reason for both, while B's operator expects `host_suspended` for the frozen spec.
-    A did not open B's manifests to check which run is which.
+    report's coverage counts 2 invalid truth runs. Only the `invalid_reasons` field of B's 2
+    invalid manifests was read on A (log 56):
+    - one lists Prometheus timeouts: the first metric query timed out, and the other 12 were
+      not queried because Prometheus was unreachable;
+    - the other has an empty `invalid_reasons` list.
+
+    Neither says `host_suspended`. Which of the two is the run recorded across the freeze, and
+    why one is invalid with no listed reason, cannot be told from that field alone. Both runs are
+    excluded from scoring either way.
   - The specs that failed before recording left no data and ran later, in a different time
     window and after a Docker and WSL restart.
   - Runs that spanned the two short standbys are kept under the pre-registered rule.
@@ -143,7 +149,7 @@ All of this is reported by the laptop's operator, not verified from A (B's opera
     on instead of stopping. That is why it ran through the rest of its list in about 45 minutes.
   - Laptop B ran with background load (Edge, Oracle XE) until the operator stopped it. Its memory
     commit was high; the cluster stayed within its Docker limit.
-- **Recorded.** Log 33, 38 and 52.
+- **Recorded.** Log 33, 38, 52 and 56.
 
 ### 10. Diagnose lanes near the daily budget; L3 over two days (2026-11-09/10)
 
@@ -228,4 +234,4 @@ All of this is reported by the laptop's operator, not verified from A (B's opera
 
 1. Laptop B's standby (item 9): closed from B's operator report (log 52).
 2. Laptop C's launch (item 8): closed from C's transcript (log 53).
-3. HP SystemOptimizer scheduled tasks on laptop A (item 7): to be re-enabled after Step 11; needs an administrator shell (log 54).
+3. HP SystemOptimizer scheduled tasks on laptop A (item 7): closed, re-enabled and verified Ready (log 55).
