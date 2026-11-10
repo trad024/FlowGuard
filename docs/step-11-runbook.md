@@ -209,22 +209,40 @@ The scored inputs are held-out only (D77). `state\heldout-recordings-A.txt`, `-B
 `C:\fg-results`). Laptop A's truth DB and audit log also hold development rows, so they are
 filtered first; B's and C's hold none (checked with `--check`) and are used as they are.
 
+Corrected order (D79, as run on 2026-11-10). `ci_levels.py` writes its L0 to L4 proposals to
+`state\audit.db`, and its records carry the proposal ids report_data joins on, so A's held-out
+audit copy is built after it. The first `heldout_inputs` build only supplies the list of ci
+recordings; the scored copy is the second build. `ci_levels.py` reads `LLM_API_KEY` from its
+process environment, so the key is loaded from `.env` into that one process, never printed, and
+removed afterwards (D80: for Step 11 it held GROQ_KEY_1's value; its tokens were added by hand to
+`state\llm-usage-GROQ_KEY_1.json`, as the tool books them to the default ledger).
+
 ```powershell
 py evaluation\heldout_inputs.py --confirm-step-11 --truth evaluation\runs\groundtruth.db --audit state\audit.db `
-    --list state\heldout-recordings-A.txt --out evaluation\runs\heldout-A   # D77: filtered copies, counts only
+    --list state\heldout-recordings-A.txt --out evaluation\runs\heldout-A   # D77: lists, incl. recordings-ci.txt
 $rec = Get-Content state\heldout-recordings-A.txt, state\heldout-recordings-B.txt, state\heldout-recordings-C.txt
 py evaluation\monitor_replay.py score @rec --heldout --confirm-step-11 --records evaluation\runs\dso1-records.jsonl
 py evaluation\release_replay.py score @rec --heldout --confirm-step-11 --records evaluation\runs\dso3-records.jsonl
+# D79/D80: the key in this process only, never echoed
+$env:LLM_API_KEY = ((Select-String -Path .env -Pattern '^GROQ_KEY_1=' | Select-Object -First 1).Line -replace '^GROQ_KEY_1=', '').Trim()
 py evaluation\ci_levels.py @(Get-Content evaluation\runs\heldout-A\recordings-ci.txt) --confirm-step-11 --records evaluation\runs\ci-records.jsonl   # L0 to L4 on the L5 runs' recordings
+Remove-Item Env:LLM_API_KEY
+py evaluation\heldout_inputs.py --confirm-step-11 --truth evaluation\runs\groundtruth.db --audit state\audit.db `
+    --list state\heldout-recordings-A.txt --out evaluation\runs\heldout-A-v2   # D79: now holds the ci_levels proposals
 py evaluation\merge_heldout.py --confirm-step-11 --out evaluation\runs\report-inputs `
     --source diagnose:evaluation\runs\diagnose-heldout --source dso6:evaluation\runs\dso6-heldout `
-    --source "scenarios-A:audit=evaluation\runs\heldout-A\audit.db,truth=evaluation\runs\heldout-A\groundtruth.db,replays=evaluation\runs\dso1-records.jsonl;evaluation\runs\dso3-records.jsonl;evaluation\runs\ci-records.jsonl" `
+    --source "scenarios-A:audit=evaluation\runs\heldout-A-v2\audit.db,truth=evaluation\runs\heldout-A-v2\groundtruth.db,replays=evaluation\runs\dso1-records.jsonl;evaluation\runs\dso3-records.jsonl;evaluation\runs\ci-records.jsonl" `
     --source "scenarios-B:audit=C:\fg-results\B\state\audit.db,truth=C:\fg-results\B\evaluation\runs\groundtruth.db" `
     --source "scenarios-C:audit=C:\fg-results\C\state\audit.db,truth=C:\fg-results\C\evaluation\runs\groundtruth.db"
-py evaluation\report.py --confirmatory --audit evaluation\runs\report-inputs\audit.db `
-    --truth evaluation\runs\report-inputs\groundtruth.db --replays evaluation\runs\report-inputs\replay.jsonl --out results\final
+# D81: evaluation\runs\report-inputs-v2 = report-inputs with "proposal_ids": [] on the 90 Diagnose L3 repeat records
+py evaluation\report.py --confirmatory --audit evaluation\runs\report-inputs-v2\audit.db `
+    --truth evaluation\runs\report-inputs-v2\groundtruth.db --replays evaluation\runs\report-inputs-v2\replay.jsonl --out results\final
 py evaluation\dso5_metrics.py fetch --confirm-step-11   # D78: read-only GitHub, jobs and plans
-py evaluation\dso5_metrics.py score --confirm-step-11   # D78: DSO5, descriptive, outside report.py
+py evaluation\dso5_metrics.py score --confirm-step-11 > results\final\dso5\dso5-metrics.json   # D78: DSO5, descriptive, outside report.py
+# the redirect writes a BOM and CRLF: rewrite as UTF-8 without BOM, LF (the JSON is unchanged)
+py -c "import pathlib; p = pathlib.Path(r'results\final\dso5\dso5-metrics.json'); b = p.read_bytes(); t = b.decode('utf-16') if b[:2] in (b'\xff\xfe', b'\xfe\xff') else b.decode('utf-8-sig'); p.write_bytes(t.replace('\r\n', '\n').encode('utf-8'))"
+py evaluation\exploratory_heldout.py --confirm-step-11 --inputs evaluation\runs\report-inputs-v2 `
+    --monitor-log state\unblind-logs\monitor_replay.log --laptop B=hakim --laptop C=moataz --out results\exploratory   # D82, exploratory
 ```
 
 The held-out replay modes are gated like generate, labelled "held-out", never fit or calibrate
