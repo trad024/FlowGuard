@@ -82,9 +82,14 @@ From R1, unedited in substance. Where a number is an R1 recomputation, [X] repro
   replay. Counted as misses: L0 145/221, L1 209/221.
 - **B3 21 truth runs have no replay record.** Of these, 14 are security (scored through events, not
   replays), 3 ci (recordings captured while the run was queued), 2 pipeline (B2) and 2 invalid.
-- **B4 Loop-limit cases contaminate the ci_levels gate decisions.** The DSO6 loop_limit category
-  executed 58 of 95 proposals. The loop-limit counter is shared within an hour, so gate decisions
-  depend on what ran before them.
+- **B4 The DSO6 loop-limit counter is per item.** The DSO6 loop_limit category executed 58 of 95
+  proposals, all dry runs, and all 16 items stayed within their limit
+  (`docs/step-11-checks.md` section 1). `evaluation/dso6_run.py:75` builds a new `RiskGate()` for
+  each item, without an audit log, so each item's hourly count starts at 0. The run therefore does
+  not test the window across incidents: summed over items, the same action on the same target
+  exceeds one hour's limit (rollout_promote on podinfo: 20 executions, limit 10). The DSO6
+  executions are in the DSO6 run's own audit file, not in the audit file ci_levels wrote to, so
+  they do not affect the ci_levels gate decisions.
 - **B5 DSO3 is descriptive.** Caught L0 23/36, L3 22/36, L4 22/36 (18 automatic); false rollbacks
   0/36; median time to rollback 60 s; below-band bad releases caught 0/7. The toolkit reports no
   change failure rate ([X] i defines one after unblinding).
@@ -111,6 +116,11 @@ Each was decided by the team lead and recorded in the run log before the affecte
 3. **D81 (input fix).** `report-inputs-v2` adds `"proposal_ids": []` to the 90 Diagnose L3 repeat records, so the frozen report.py can run. No value changes.
 4. **D82 (exploratory script).** `evaluation/exploratory_heldout.py` computes the tables in section 6 from the same inputs. It was decided after the confirmatory results were read, so everything it produces is exploratory. It changes neither `results/final` nor any frozen file or scored block.
 5. **Labels only.** `results/exploratory-d74` now says exploratory. `dso5-metrics.json` was rewritten as UTF-8 without BOM, LF. No number changed.
+
+Found on 2026-11-11, after the results were read, and not decided in advance (D83):
+
+6. **Approver sensitivity run not done.** D17 (`docs/blueprint-v2.md`) planned a run with a 10% simulated-approver error rate. It is not in the pre-registration and was never run. `SimulatedApprover` supports the rate (`agents/flowguard/approval.py:37`), but no evaluation script sets it. It is not run after unblinding.
+7. **DSO6 used a deny-all approver.** D17 describes a ground-truth policy that approves a proposal when the action is correct. The DSO6 run used `SimulatedApprover(policy=lambda p: False)` (`evaluation/dso6_run.py:76`, `:101`), so every approval request was denied (B8: 111 requests, none granted). "0 unapproved high-risk actions" still catches a high-risk action the gate executes without asking. It cannot show the effect of a wrong approval.
 
 ## 4. Not run on held-out: the frozen encoder
 
@@ -152,6 +162,8 @@ Definitional points R2 raised, and what was done:
 
 R2 also noted that the 58 executed loop_limit proposals were not checked against their
 per-hour limits (B4). The 0 unapproved high-risk actions says nothing about loop-limit violations.
+They have since been checked (`docs/step-11-checks.md` section 1): 16/16 items within their
+limits, every later proposal rejected under rule 3, no violation.
 
 ## 6. Exploratory tables (D82)
 

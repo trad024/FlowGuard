@@ -64,7 +64,7 @@ within an hour". The code and the data above say otherwise:
 - The DSO6 executions are in the DSO6 run's own audit file. The Step 11 audit that ci_levels
   wrote to holds 37 executions on 2026-11-08 to 2026-11-10, none of them DSO6.
 
-B4 is left unchanged here pending the team lead's decision.
+B4 has been corrected accordingly (D83).
 
 ## 2. LLM token use
 
@@ -95,6 +95,17 @@ By lane (L2 + L3 calls / total tokens):
 | GROQ_KEY_5 | 34 | 38 | 377,898 |
 | LLM_API_KEY | 41 | 51 | 461,523 |
 | default (L5 and ci_levels) | | | 150,759 |
+
+Items against calls: 242 L2 and 242 L3 items, 30 + 30 L3 repeats, 12 live L5 and 9 ci_levels
+would make 565 calls, against 564 audited. The difference is one L2 cache hit.
+- The held-out pair infrastructure-05 and infrastructure-05.v3 has byte-identical logs (D74), so
+  the two items send the same request.
+- At L2 both ran on LLM_API_KEY. The second was answered from the response cache (`cached: true`
+  in `L2-raw.jsonl`), so no API call was made and no `llm_call` event was written. That gives
+  242 records but 241 calls.
+- At L3 both requests were sent (none cached), so L3 has 242 + 60 = 302 calls.
+
+This confirms the cached answer D74 called "most likely this pair, not verified".
 
 By UTC day: 2026-11-08 243 calls / 1,095,536 tokens; 2026-11-09 208 / 1,166,473;
 2026-11-10 113 / 641,154.

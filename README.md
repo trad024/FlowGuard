@@ -10,7 +10,7 @@ than a strong rule-based pipeline, and at what cost in autonomy risk. The AI com
 statistical detectors, learned models, an LLM, retrieval and grounding, and agent collaboration.
 
 Every approved design decision is in [`docs/blueprint-v2.md`](docs/blueprint-v2.md). Decisions
-are cited as D1 to D82 from its decision log (D52 was not approved). The evaluation plan is
+are cited as D1 to D83 from its decision log (D52 was not approved). The evaluation plan is
 [`docs/preregistration.yaml`](docs/preregistration.yaml), version 1.8, frozen.
 
 ## Prerequisites
@@ -230,7 +230,7 @@ Workflows A to D and the gate rules: [blueprint section 5](docs/blueprint-v2.md#
 
   Version 1.0 was frozen on 2026-11-06. Every later change is a dated amendment made before any
   held-out result existed. The last is version 1.8 (D76, 2026-11-08). Changes after unblinding
-  (D79 to D82) are procedure and reporting only, listed in `docs/step-11-results.md`.
+  (D79 to D83) are procedure and reporting only, listed in `docs/step-11-results.md`.
 - **Staged freezes (D39, D69):** `diagnose-freeze` and `harness-diagnose-freeze` freeze Diagnose
   and its held-out harness. `eval-freeze` (then `eval-freeze-d72`, `-d75` and `-d76`) freezes the
   agent code and the harness. The held-out generator and drivers refuse to run unless the freezes
